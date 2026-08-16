@@ -1,0 +1,877 @@
+<?php
+
+namespace ServerSuite\Services;
+
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use ServerSuite\Support\RepositoryManager;
+use ServerSuite\Support\Data\ModResult;
+use ServerSuite\Support\Data\ModVersion;
+use ServerSuite\Models\ServerMod;
+use ServerSuite\Models\ModManagerSetting;
+use ServerSuite\Exceptions\RepositoryException;
+
+/**
+ * Central orchestrator for all mod management operations.
+ *
+ * Phase 2: search() fans out across the enabled repositories for a server,
+ * merges, de-duplicates, and ranks the results.
+ *
+ * install/update/remove are implemented in Phase 3.
+ */
+class ModManagerService
+{
+    public function __construct(
+        protected RepositoryManager $repositories,
+        protected LoaderDetectionService $loaderDetection,
+        protected FileDeliveryService $fileDelivery,
+        protected ManifestService $manifest,
+        protected InstallPlanner $planner,
+    ) {}
+
+    /**
+     * Build an install plan (read-only) for a mod version on a server.
+     */
+    public function planInstall(string $source, string $modId, string $versionId, object $server): \ServerSuite\Support\Data\InstallPlan
+    {
+        return $this->planner->plan($source, $modId, $versionId, $server);
+    }
+
+    // -------------------------------------------------------------------------
+    // Search
+    // -------------------------------------------------------------------------
+
+    /**
+     * Search every repository enabled for this server, using the server's
+     * detected/overridden loader and game version as filters.
+     *
+     * Each driver is queried independently; a failure in one driver is logged
+     * and skipped rather than failing the whole search.
+     *
+     * @return ModResult[] Ranked, de-duplicated results.
+     */
+    public function search(string $query, object $server, int $limit = 20, ?string $loaderOverride = null, ?string $versionOverride = null, ?string $sourceOnly = null, ?string $sort = null, int $offset = 0, bool $compatibleOnly = false): array
+    {
+        return $this->searchWithContext($query, $server, $limit, $loaderOverride, $versionOverride, $sourceOnly, $sort, $offset, $compatibleOnly)['data'];
+    }
+
+    /**
+     * Search and also return detection context so the UI can warn when the
+     * loader filter is uncertain (e.g. "showing results for all loaders").
+     *
+     * $loaderOverride / $versionOverride let the UI's filter bar override the
+     * server's detected/stored loader and game version for a single search,
+     * without persisting the change. When null, the stored/detected values are
+     * used as before.
+     *
+     * @return array{data: ModResult[], loader: ?string, loader_confident: bool, game_version: ?string}
+     */
+    public function searchWithContext(string $query, object $server, int $limit = 20, ?string $loaderOverride = null, ?string $versionOverride = null, ?string $sourceOnly = null, ?string $sort = null, int $offset = 0, bool $compatibleOnly = false): array
+    {
+        $settings = ModManagerSetting::forServer($server->uuid);
+        $detection = null;
+
+        // An explicit override from the UI filter bar always wins and is treated
+        // as confident (the user chose it deliberately).
+        if ($loaderOverride !== null && $loaderOverride !== '') {
+            $loader          = $loaderOverride;
+            $loaderConfident = true;
+        } else {
+            // Resolve loader: stored value wins; otherwise run detailed detection.
+            $loader           = $settings->loader;
+            $loaderConfident  = (bool) $settings->loader; // a stored value is treated as trusted
+
+            if (! $loader) {
+                $detection = $this->loaderDetection->detectDetailed($server);
+                $loader          = $detection->loader;            // may be null
+                $loaderConfident = $detection->isConfident();
+
+                // Persist only confident detections (mirrors detect()).
+                if ($detection->isConfident()) {
+                    $settings->update([
+                        'loader'       => $detection->loader,
+                        'game_version' => $detection->gameVersion ?? $settings->game_version,
+                    ]);
+                }
+            }
+        }
+
+        // Version override wins; then a live detection (fresh after a version
+        // switch); the stored setting is only the last-resort fallback.
+        $gameVersion = ($versionOverride !== null && $versionOverride !== '')
+            ? $versionOverride
+            : ($detection?->gameVersion ?? $settings->game_version);
+
+        $enabled     = $settings->enabledRepositories();
+
+        // When the UI picks a specific provider, search ONLY that repo rather
+        // than fanning out and post-filtering — more correct and avoids showing
+        // results from other repos when the chosen one returns nothing.
+        if ($sourceOnly !== null && $sourceOnly !== '') {
+            $enabled = array_values(array_filter($enabled, fn ($r) => $r === $sourceOnly));
+        }
+
+        $drivers     = $this->repositories->enabledDrivers($enabled);
+
+        if ($compatibleOnly && $gameVersion) {
+            [$data, $nextOffset, $hasMore] = $this->searchCompatible(
+                $drivers, $query, $loader, $gameVersion, $limit, $sort, $offset
+            );
+        } else {
+            $batch      = $this->fanOut($drivers, $query, $loader, $gameVersion, $limit, $sort, $offset);
+            $data       = $this->rankAndDedupe($batch, $query, $limit, $sort);
+            $nextOffset = $offset + $limit;
+            $hasMore    = count($data) >= $limit;
+        }
+
+        return [
+            'data'             => $data,
+            'next_offset'      => $nextOffset,
+            'has_more'         => $hasMore,
+            'loader'           => $loader,
+            'loader_confident' => $loaderConfident,
+            'game_version'     => $gameVersion,
+        ];
+    }
+
+    /**
+     * One round of fetching across all enabled drivers at a given offset.
+     * A failure in one driver is logged and skipped, never fails the search.
+     */
+    private function fanOut(array $drivers, string $query, ?string $loader, ?string $gameVersion, int $limit, ?string $sort, int $offset): Collection
+    {
+        $out = collect();
+
+        foreach ($drivers as $driver) {
+            try {
+                $out = $out->concat($driver->search($query, $loader, $gameVersion, $limit, $sort, $offset));
+            } catch (RepositoryException $e) {
+                Log::warning("[Server Suite] search failed on {$driver->key()}: {$e->getMessage()}");
+            } catch (\Throwable $e) {
+                Log::error("[Server Suite] unexpected search error on {$driver->key()}: {$e->getMessage()}");
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Over-fetch and keep only results compatible with $gameVersion, scanning
+     * forward through provider pages until a page's worth of compatible results
+     * is gathered or a scan cap is hit. This is what lets "compatible only"
+     * return a full page instead of the survivors of a single provider page
+     * (e.g. Hangar, which doesn't filter by version server-side).
+     *
+     * Nothing is truncated — everything gathered in the window is returned and
+     * the next page resumes at the provider offset where scanning stopped, so
+     * no compatible result is ever skipped between pages.
+     *
+     * @return array{0: ModResult[], 1: int, 2: bool} [data, nextOffset, hasMore]
+     */
+    private function searchCompatible(array $drivers, string $query, ?string $loader, string $gameVersion, int $limit, ?string $sort, int $offset): array
+    {
+        $scanCap        = max($limit * 6, 240); // bound upstream calls per UI page
+        $providerOffset = $offset;
+        $scanned        = 0;
+        $collected      = collect();
+        $exhausted      = false;
+
+        while ($scanned < $scanCap) {
+            $batch = $this->fanOut($drivers, $query, $loader, $gameVersion, $limit, $sort, $providerOffset);
+            $providerOffset += $limit;
+            $scanned        += $limit;
+
+            if ($batch->isEmpty()) {
+                $exhausted = true;
+                break;
+            }
+
+            $collected = $collected->concat(
+                $batch->filter(fn ($r) => $this->isCompatible($r, $gameVersion))
+            );
+
+            if ($batch->count() < $limit) { // provider ran out
+                $exhausted = true;
+                break;
+            }
+            if ($collected->count() >= $limit) { // page filled
+                break;
+            }
+        }
+
+        $data = $this->rankAndDedupe($collected, $query, max($collected->count(), 1), $sort);
+
+        return [$data, $providerOffset, ! $exhausted];
+    }
+
+    /**
+     * Whether a result supports the given server version. Mirrors the
+     * frontend's compatibility predicate so the backend filter and the UI
+     * badges always agree.
+     */
+    private function isCompatible(object $result, string $version): bool
+    {
+        $versions = $result->gameVersions ?? [];
+        if (empty($versions)) {
+            return false;
+        }
+
+        foreach ($versions as $entry) {
+            if ($this->versionCovers((string) $entry, $version)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Mirror of the frontend versionCovers(): exact match, "1.20.x" wildcard,
+     * and "1.20-1.21" ranges (the latter two appear on Hangar). A bare major
+     * like "1.21" does NOT cover "1.21.4" — intentional, matching the badges.
+     */
+    private function versionCovers(string $entry, string $v): bool
+    {
+        if ($entry === $v) {
+            return true;
+        }
+
+        if (str_ends_with($entry, '.x')) {
+            $base = substr($entry, 0, -2);
+            return $v === $base || str_starts_with($v, $base . '.');
+        }
+
+        if (str_contains($entry, '-')) {
+            [$lo, $hi] = array_pad(explode('-', $entry, 2), 2, '');
+            return $this->cmpVersion($v, $lo) >= 0 && $this->cmpVersion($v, $hi) <= 0;
+        }
+
+        return false;
+    }
+
+    private function cmpVersion(string $a, string $b): int
+    {
+        $pa = array_map('intval', explode('.', $a));
+        $pb = array_map('intval', explode('.', $b));
+
+        for ($i = 0; $i < 3; $i++) {
+            $d = ($pa[$i] ?? 0) - ($pb[$i] ?? 0);
+            if ($d !== 0) {
+                return $d <=> 0;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Merge results from multiple repositories.
+     *
+     * De-duplication: the same mod often exists on both Modrinth and CurseForge.
+     * We collapse by normalised name, keeping the variant with more downloads
+     * but recording that it is available from multiple sources.
+     *
+     * Ranking: a blend of search relevance (name match) and popularity.
+     *
+     * @param  Collection<int, ModResult> $results
+     * @return ModResult[]
+     */
+    protected function rankAndDedupe(Collection $results, string $query, int $limit, ?string $sort = null): array
+    {
+        $queryLower = mb_strtolower(trim($query));
+
+        $deduped = $results
+            // Group by a normalised mod name to catch cross-repo duplicates.
+            // groupBy/map preserve first-seen order, so the driver's sort order
+            // survives deduplication.
+            ->groupBy(fn (ModResult $r) => $this->normaliseName($r->name))
+            ->map(function (Collection $group) {
+                // Keep the most-downloaded variant as the canonical result
+                return $group->sortByDesc(fn (ModResult $r) => $r->downloads)->first();
+            });
+
+        // Our blended relevance ranking exists for merging multi-repo results.
+        // When the user picked an explicit sort (downloads/newest/...), the
+        // repository API already returned that order — re-ranking here would
+        // clobber it, so preserve the API order instead.
+        if ($sort !== null && $sort !== '' && $sort !== 'relevance') {
+            return $deduped->take($limit)->values()->all();
+        }
+
+        return $deduped
+            ->sortByDesc(function (ModResult $r) use ($queryLower) {
+                return $this->relevanceScore($r, $queryLower);
+            })
+            ->take($limit)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Blended relevance score: exact/prefix name matches rank highest,
+     * then a log-scaled popularity boost so a hugely popular near-match
+     * can still outrank an obscure exact match.
+     */
+    protected function relevanceScore(ModResult $r, string $queryLower): float
+    {
+        $name = mb_strtolower($r->name);
+
+        $nameScore = match (true) {
+            $name === $queryLower            => 1000.0,
+            str_starts_with($name, $queryLower) => 500.0,
+            str_contains($name, $queryLower)    => 250.0,
+            default                             => 0.0,
+        };
+
+        // log10(downloads+1) keeps popularity influence bounded (0–~8 range)
+        $popularityScore = log10(max(1, $r->downloads) + 1);
+
+        return $nameScore + $popularityScore;
+    }
+
+    protected function normaliseName(string $name): string
+    {
+        // Lowercase, strip non-alphanumerics so "JEI" / "jei" / "Just Enough Items"
+        // variants at least collapse on punctuation/spacing differences.
+        return preg_replace('/[^a-z0-9]/', '', mb_strtolower($name)) ?: $name;
+    }
+
+    // -------------------------------------------------------------------------
+    // Get available versions for a specific mod (used by the install UI)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return ModVersion[]
+     */
+    public function versionsFor(string $source, string $modId, object $server, ?string $loaderOverride = null, ?string $versionOverride = null): array
+    {
+        $settings = ModManagerSetting::forServer($server->uuid);
+
+        // Filter-bar selection wins; otherwise fall back to the server's stored
+        // loader/version (or detection). This keeps the Versions tab consistent
+        // with what the user is actually browsing for.
+        $loader = ($loaderOverride !== null && $loaderOverride !== '')
+            ? $loaderOverride
+            : ($settings->loader ?: $this->loaderDetection->detect($server));
+
+        $gameVersion = ($versionOverride !== null && $versionOverride !== '')
+            ? $versionOverride
+            : $settings->game_version;
+
+        return $this->repositories
+            ->driver($source)
+            ->versions($modId, $loader, $gameVersion);
+    }
+
+    /**
+     * Minecraft game versions for the UI's version dropdown, newest-first,
+     * plus the version we'd default-select for this server.
+     *
+     * Sourced live from Modrinth's version tags (cached, with a static
+     * fallback) so new Minecraft releases appear automatically. The "detected"
+     * value is the server's stored game version (or detection result) so the
+     * dropdown can pre-select it.
+     *
+     * @return array{versions: string[], detected: ?string, loader: ?string}
+     */
+    public function gameVersions(object $server): array
+    {
+        // Sourced live from Modrinth's version tag list so new Minecraft
+        // releases appear in the filter automatically; falls back to a static
+        // range if the fetch is unavailable (see liveGameVersions below).
+        $versions = $this->liveGameVersions();
+
+        $settings = ModManagerSetting::forServer($server->uuid);
+        $detected = $settings->game_version;
+        $loader   = $settings->loader;
+
+        if (! $detected || ! $loader) {
+            $detection = $this->loaderDetection->detectDetailed($server);
+            $detected  = $detected ?: $detection->gameVersion;
+            $loader    = $loader ?: ($detection->isConfident() ? $detection->loader : null);
+        }
+
+        // A sourced version may be newer than the static list (e.g. 26.1.2);
+        // prepend it so the dropdown can display and auto-select it.
+        if ($detected && ! in_array($detected, $versions, true)) {
+            array_unshift($versions, $detected);
+        }
+
+        return ['versions' => $versions, 'detected' => $detected, 'loader' => $loader];
+    }
+
+    /**
+     * The version list for the UI filter, sourced live from Modrinth's tag
+     * endpoint (cached). Falls back to a static range if Modrinth is
+     * unreachable, so the filter never ends up empty.
+     *
+     * @return string[]
+     */
+    private function liveGameVersions(): array
+    {
+        try {
+            $modrinth = $this->repositories->driver('modrinth');
+            if ($modrinth instanceof \ServerSuite\Drivers\ModrinthDriver) {
+                $live = $modrinth->gameVersionTags();
+                if (! empty($live)) {
+                    return $live;
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('[Server Suite] live game-version list unavailable, using fallback: ' . $e->getMessage());
+        }
+
+        return $this->fallbackGameVersions();
+    }
+
+    /**
+     * Static Minecraft version range, used only when the live list can't be
+     * fetched. Concrete patch strings, newest-first. Modrinth indexes mods
+     * under specific patches (e.g. "1.16.5"), so bare majors aren't offered.
+     *
+     * @return string[]
+     */
+    private function fallbackGameVersions(): array
+    {
+        $minorRange = range(21, 16);
+        $patchMax = [16 => 5, 17 => 1, 18 => 2, 19 => 4, 20 => 6, 21 => 11];
+
+        $versions = [];
+        foreach ($minorRange as $minor) {
+            for ($patch = ($patchMax[$minor] ?? 0); $patch >= 1; $patch--) {
+                $versions[] = "1.{$minor}.{$patch}";
+            }
+        }
+
+        return $versions;
+    }
+
+    /**
+     * Run detailed loader detection for a server (loader + confidence + signal).
+     */
+    public function detectLoader(object $server): \ServerSuite\Support\Data\LoaderDetectionResult
+    {
+        return $this->loaderDetection->detectDetailed($server);
+    }
+
+    // -------------------------------------------------------------------------
+    // Install / update / remove
+    // -------------------------------------------------------------------------
+
+    /**
+     * Install a single mod version synchronously (no dependency resolution).
+     * Used for the simple single-mod path where the UI has already confirmed
+     * there are no dependencies/conflicts. Returns the manifest entry.
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function install(string $modId, string $source, string $versionId, object $server, int $installedBy): ServerMod
+    {
+        $driver  = $this->repositories->driver($source);
+        $settings = ModManagerSetting::forServer($server->uuid);
+        $loader   = $settings->loader ?: $this->loaderDetection->detect($server);
+
+        $version = $this->resolveVersion($driver, $modId, $versionId, $loader, $settings->game_version);
+        $mod     = $driver->get($modId);
+        $modName = $mod?->name ?? $modId;
+
+        // If this mod is already in the manifest with a different filename,
+        // remember the old file so we can remove it after the new one lands.
+        $existing = ServerMod::forServer($server->uuid)
+            ->where('source', $source)
+            ->where('source_id', $modId)
+            ->first();
+
+        $result = $this->fileDelivery->deliver($server->uuid, $version, $modName);
+
+        if ($existing
+            && $existing->target_filename
+            && $existing->target_filename !== $result['filename']) {
+            try {
+                $this->fileDelivery->remove(
+                    $server->uuid,
+                    $existing->install_path ?? $result['directory'],
+                    $existing->target_filename,
+                );
+            } catch (\Throwable $e) {
+                Log::warning("[Server Suite] could not remove superseded file {$existing->target_filename}: {$e->getMessage()}");
+            }
+        }
+
+        return $this->manifest->record(
+            serverUuid: $server->uuid,
+            mod: $mod ?? $this->syntheticModResult($source, $modId, $modName),
+            version: $version,
+            targetFilename: $result['filename'],
+            installPath: $result['directory'],
+            installedBy: $installedBy,
+        );
+    }
+
+    /**
+     * Execute a confirmed install plan.
+     *
+     * Decides sync vs queued:
+     *   - a single 'install' item with no dependencies  -> run synchronously
+     *   - anything with dependencies or multiple items   -> queue one job per item
+     *
+     * Returns a batch id (queued) or null (ran synchronously and completed).
+     *
+     * @param \ServerSuite\Support\Data\InstallPlan $plan
+     * @return array{mode: string, batch_id: ?string, installed: int}
+     */
+    public function executePlan(\ServerSuite\Support\Data\InstallPlan $plan, object $server, int $installedBy, bool $forceQueue = false): array
+    {
+        $toInstall = $plan->toInstall();
+
+        if (count($toInstall) === 0) {
+            return ['mode' => 'noop', 'batch_id' => null, 'installed' => 0];
+        }
+
+        // Synchronous fast-path: exactly one mod, no dependencies.
+        if (! $forceQueue && count($toInstall) === 1 && $toInstall[0]->kind === 'primary') {
+            $item = $toInstall[0];
+            $this->install($item->modId, $item->source, $item->versionId, $server, $installedBy);
+
+            return ['mode' => 'sync', 'batch_id' => null, 'installed' => 1];
+        }
+
+        // Queued path: create a task per item, dispatch a job each.
+        $batchId = (string) \Illuminate\Support\Str::uuid();
+
+        foreach ($toInstall as $item) {
+            $task = \ServerSuite\Models\ModInstallTask::create([
+                'batch_id'       => $batchId,
+                'server_uuid'    => $server->uuid,
+                'source'         => $item->source,
+                'source_id'      => $item->modId,
+                'mod_name'       => $item->modName,
+                'version_id'     => $item->versionId,
+                'version_number' => $item->versionNumber,
+                'kind'           => $item->kind,
+                'status'         => \ServerSuite\Models\ModInstallTask::STATUS_PENDING,
+                'requested_by'   => $installedBy,
+            ]);
+
+            \ServerSuite\Jobs\InstallModJob::dispatch($task->id);
+        }
+
+        return ['mode' => 'queued', 'batch_id' => $batchId, 'installed' => count($toInstall)];
+    }
+
+    /**
+     * Execute one queued task (called by InstallModJob). Resolves the server
+     * by UUID, delivers the file, and records the manifest entry.
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function executeTask(\ServerSuite\Models\ModInstallTask $task): void
+    {
+        $server = $this->resolveServer($task->server_uuid);
+
+        $this->install(
+            modId: $task->source_id,
+            source: $task->source,
+            versionId: $task->version_id,
+            server: $server,
+            installedBy: (int) ($task->requested_by ?? 0),
+        );
+    }
+
+    /**
+     * Update an installed mod to the latest compatible version.
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function update(ServerMod $serverMod, object $server): ServerMod
+    {
+        $driver   = $this->repositories->driver($serverMod->source);
+        $settings = ModManagerSetting::forServer($server->uuid);
+        $loader   = $serverMod->loader ?: ($settings->loader ?: $this->loaderDetection->detect($server));
+
+        $latest = $driver->latestVersion($serverMod->source_id, $loader, $settings->game_version);
+
+        if (! $latest) {
+            throw \ServerSuite\Exceptions\DeliveryException::daemonError('No compatible version available to update to.');
+        }
+
+        // Deliver the new file first.
+        $mod    = $driver->get($serverMod->source_id);
+        $result = $this->fileDelivery->deliver($server->uuid, $latest, $serverMod->mod_name);
+
+        // Remove the old file if its filename differs from the new one.
+        if ($serverMod->target_filename && $serverMod->target_filename !== $result['filename']) {
+            try {
+                $this->fileDelivery->remove($server->uuid, $serverMod->install_path ?? $result['directory'], $serverMod->target_filename);
+            } catch (\Throwable $e) {
+                Log::warning("[Server Suite] could not remove old file {$serverMod->target_filename}: {$e->getMessage()}");
+            }
+        }
+
+        // Update the manifest entry and clear any pending-update flag.
+        $serverMod->update([
+            'installed_version' => $latest->versionNumber,
+            'target_filename'   => $result['filename'],
+            'install_path'      => $result['directory'],
+            'game_version'      => $latest->gameVersions[0] ?? $serverMod->game_version,
+        ]);
+
+        $this->manifest->clearPendingUpdate($serverMod);
+
+        return $serverMod->fresh();
+    }
+
+    /**
+     * Remove an installed mod from a server and the manifest.
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    /**
+     * Compute which installed mods would become ORPHANED if the given mod were
+     * removed — i.e. dependencies that nothing else (still installed) requires.
+     *
+     * Recursive / fixpoint: removing X may orphan its dependency Y; if Y was the
+     * only thing needing Z, then Z is now orphaned too. We iterate until no new
+     * orphans appear. Shared dependencies (still needed by something outside the
+     * removal set) are never included.
+     *
+     * The target mod itself is NOT included in the result — only the orphans.
+     *
+     * @return ServerMod[] orphaned dependencies, safe to offer for removal
+     */
+    public function orphanedBy(ServerMod $serverMod): array
+    {
+        $all = ServerMod::forServer($serverMod->server_uuid)->get();
+
+        // Index by "source:source_id" for dependency lookups.
+        $byKey = [];
+        foreach ($all as $m) {
+            $byKey["{$m->source}:{$m->source_id}"] = $m;
+        }
+
+        $depsOf = function (ServerMod $m): array {
+            return is_array($m->dependencies) ? $m->dependencies : [];
+        };
+
+        // The set being removed; seed with the target, grow with orphans.
+        $removing = [$serverMod->id => $serverMod];
+
+        do {
+            $added = false;
+
+            // Candidate orphans: direct dependencies of everything in the
+            // removal set that are themselves installed and not already queued.
+            $candidates = [];
+            foreach ($removing as $m) {
+                foreach ($depsOf($m) as $depId) {
+                    $depMod = $byKey["{$m->source}:{$depId}"] ?? null;
+                    if ($depMod && ! isset($removing[$depMod->id])) {
+                        $candidates[$depMod->id] = $depMod;
+                    }
+                }
+            }
+
+            // A candidate is orphaned only if NOTHING still-installed (i.e. not
+            // in the removal set) depends on it.
+            foreach ($candidates as $cand) {
+                $stillNeeded = false;
+                foreach ($all as $other) {
+                    if (isset($removing[$other->id]) || $other->id === $cand->id) {
+                        continue; // skip mods being removed and itself
+                    }
+                    if ($other->source === $cand->source
+                        && in_array($cand->source_id, $depsOf($other), true)) {
+                        $stillNeeded = true;
+                        break;
+                    }
+                }
+
+                if (! $stillNeeded) {
+                    $removing[$cand->id] = $cand;
+                    $added = true;
+                }
+            }
+        } while ($added);
+
+        // Return the orphans only (exclude the original target).
+        unset($removing[$serverMod->id]);
+
+        return array_values($removing);
+    }
+
+    /**
+     * Installed mods on this server that declare the given mod as a required
+     * dependency. Used to warn before removing something others rely on.
+     *
+     * @return ServerMod[]
+     */
+    public function dependentsOf(ServerMod $serverMod): array
+    {
+        return ServerMod::forServer($serverMod->server_uuid)
+            ->where('id', '!=', $serverMod->id)
+            ->get()
+            ->filter(function (ServerMod $other) use ($serverMod) {
+                $deps = is_array($other->dependencies) ? $other->dependencies : [];
+                // dependencies are stored as source-ids in the same source namespace
+                return $other->source === $serverMod->source
+                    && in_array($serverMod->source_id, $deps, true);
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Remove an installed mod from a server and the manifest.
+     *
+     * If other installed mods depend on this one, removal is refused unless
+     * $force is true — the UI surfaces the dependents and asks the user to
+     * confirm before passing force.
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     * @throws \RuntimeException when dependents exist and $force is false
+     */
+    public function remove(ServerMod $serverMod, object $server, bool $force = false): void
+    {
+        if (! $force) {
+            $dependents = $this->dependentsOf($serverMod);
+            if (count($dependents) > 0) {
+                $names = implode(', ', array_map(fn (ServerMod $m) => $m->mod_name, $dependents));
+                throw new \RuntimeException(
+                    "{$serverMod->mod_name} is required by: {$names}. Removing it may break them."
+                );
+            }
+        }
+
+        $this->fileDelivery->remove(
+            $server->uuid,
+            $serverMod->install_path ?? $this->fileDelivery->targetDirectory($server->uuid),
+            $serverMod->target_filename,
+        );
+
+        // Best-effort: also remove the plugin/mod's leftover config folders so
+        // removal is clean. Never allowed to break the removal itself.
+        try {
+            $this->fileDelivery->sweepConfigs($server->uuid, $serverMod->mod_name);
+        } catch (\Throwable $e) {
+            // swallow — cleanup is a nicety, not a requirement
+        }
+
+        $this->manifest->remove($serverMod);
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Resolve a ModVersion by id, falling back to latest compatible.
+     */
+    protected function resolveVersion($driver, string $modId, string $versionId, ?string $loader, ?string $gameVersion): ModVersion
+    {
+        foreach ($driver->versions($modId, $loader, $gameVersion) as $v) {
+            if ($v->versionId === $versionId) {
+                return $v;
+            }
+        }
+
+        $latest = $driver->latestVersion($modId, $loader, $gameVersion);
+
+        if (! $latest) {
+            throw \ServerSuite\Exceptions\DeliveryException::daemonError(
+                "No compatible version found for mod {$modId}."
+            );
+        }
+
+        return $latest;
+    }
+
+    /**
+     * Resolve the panel's Server model by UUID without coupling to its class
+     * at the type level. Tries common panel model classes.
+     */
+    protected function resolveServer(string $serverUuid): object
+    {
+        foreach (['\Pterodactyl\Models\Server', '\App\Models\Server'] as $class) {
+            if (class_exists($class)) {
+                $server = $class::query()->where('uuid', $serverUuid)->first();
+                if ($server) {
+                    return $server;
+                }
+            }
+        }
+
+        // Fallback object carrying just the uuid (enough for delivery).
+        return (object) ['uuid' => $serverUuid];
+    }
+
+    /**
+     * Build a minimal ModResult when the repository lookup failed but we still
+     * need to record a manifest entry.
+     */
+    protected function syntheticModResult(string $source, string $modId, string $modName): ModResult
+    {
+        return new ModResult(
+            source: $source,
+            id: $modId,
+            slug: $modId,
+            name: $modName,
+            description: '',
+            author: '',
+            downloads: 0,
+            iconUrl: null,
+            pageUrl: null,
+            loaders: [],
+            gameVersions: [],
+            dependencies: [],
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Manifest read helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Apply all pending updates for a server in one pass. Reuses the validated
+     * single-mod update() for each, collecting per-mod results so a failure in
+     * one doesn't abort the rest.
+     *
+     * @return array{updated: array, failed: array}
+     */
+    public function updateAll(object $server): array
+    {
+        $mods = ServerMod::forServer($server->uuid)
+            ->with('pendingUpdate')
+            ->get()
+            ->filter(fn (ServerMod $m) => $m->pendingUpdate !== null);
+
+        $updated = [];
+        $failed  = [];
+
+        foreach ($mods as $mod) {
+            try {
+                $result = $this->update($mod, $server);
+                $updated[] = [
+                    'mod_name'          => $result->mod_name,
+                    'installed_version' => $result->installed_version,
+                ];
+            } catch (\Throwable $e) {
+                $failed[] = [
+                    'mod_name' => $mod->mod_name,
+                    'error'    => $e->getMessage(),
+                ];
+            }
+        }
+
+        return ['updated' => $updated, 'failed' => $failed];
+    }
+
+    public function installed(string $serverUuid): \Illuminate\Database\Eloquent\Collection
+    {
+        return ServerMod::forServer($serverUuid)->with('pendingUpdate')->get();
+    }
+
+    public function settings(string $serverUuid): ModManagerSetting
+    {
+        return ModManagerSetting::forServer($serverUuid);
+    }
+}

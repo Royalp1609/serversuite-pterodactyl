@@ -1,0 +1,289 @@
+<?php
+
+namespace ServerSuite\Services;
+
+use ServerSuite\Contracts\PanelServerOps;
+
+/**
+ * Phase 3 — loader switching (Paper ↔ Fabric ↔ Forge ↔ Vanilla).
+ *
+ * Unlike a version switch (same egg, two variables changed), a loader switch
+ * SWAPS THE EGG. Each egg names things differently, so we can't copy variables
+ * by name: we seed the target egg's variables from their defaults and carry the
+ * one value that maps semantically — the Minecraft version — into whatever
+ * variable the target egg uses for it (MINECRAFT_VERSION, MC_VERSION, …). The
+ * runtime image is chosen from the TARGET egg's own image list (registries and
+ * available Java bands differ between eggs).
+ */
+class LoaderSwitchService
+{
+    /** Env-var names, across eggs, that hold the Minecraft version itself
+     *  (deliberately excludes loader/build vars like FABRIC_VERSION, BUILD_NUMBER). */
+    private const VERSION_VARS = ['MINECRAFT_VERSION', 'MC_VERSION', 'VERSION', 'GAME_VERSION'];
+
+    private const EGG_MODEL = \Pterodactyl\Models\Egg::class;
+
+    public function __construct(
+        private ServerVersionService $versions,
+        private PanelServerOps $ops,
+        private FileDeliveryService $files,
+        private ManifestService $manifest,
+    ) {
+    }
+
+    /**
+     * Seed the target egg's environment: every variable at its default, with the
+     * Minecraft version carried into whichever variable holds it.
+     *
+     * @return array<string,string>
+     */
+    public function buildEnvironment(object $targetEgg, string $mcVersion): array
+    {
+        $env = [];
+        $versionVar = null;
+
+        foreach ($targetEgg->variables as $v) {
+            $env[$v->env_variable] = (string) ($v->default_value ?? '');
+            if ($versionVar === null && in_array(strtoupper($v->env_variable), self::VERSION_VARS, true)) {
+                $versionVar = $v->env_variable;
+            }
+        }
+
+        if ($versionVar !== null && $mcVersion !== '') {
+            $env[$versionVar] = $mcVersion;
+        }
+
+        return $env;
+    }
+
+    /**
+     * Pick an image from the target egg's list for the version's Java band.
+     * Highest in-band Java wins (newest JVM that still satisfies the version's
+     * ceiling); falls back to the first listed image if nothing parses.
+     */
+    public function resolveEggImage(object $targetEgg, string $mcVersion): ?string
+    {
+        [$min, $max] = $this->versions->requiredJavaBand($mcVersion);
+
+        $best = null;
+        $bestJava = -1;
+        foreach ((array) $targetEgg->docker_images as $label => $ref) {
+            if (preg_match('/java[_ ]?(\d+)/i', $ref . ' ' . $label, $m)) {
+                $j = (int) $m[1];
+                if ($j >= $min && $j <= $max && $j > $bestJava) {
+                    $bestJava = $j;
+                    $best = $ref;
+                }
+            }
+        }
+
+        if ($best !== null) {
+            return $best;
+        }
+
+        $vals = array_values((array) $targetEgg->docker_images);
+
+        return $vals[0] ?? null;
+    }
+
+    /**
+     * Switch a server to a different loader egg. A loader change is ALWAYS a
+     * clean-slate reset: the old loader's plugins/mods/configs are incompatible
+     * with the new one and will stop it booting, so every switch wipes all files
+     * (except eula.txt) before reinstalling. This is intended for a single-server
+     * operator changing loader/version — start fresh, no half-migrated state.
+     *
+     * Files can only be wiped while stopped, so this is a small state machine:
+     * if the server is still running it fires a stop and returns {status:
+     * stopping}; the caller polls status and calls again once offline, at which
+     * point wipe + egg-swap + reinstall runs.
+     *
+     * @param string|null $mcVersion  target MC version, or null = keep current
+     */
+    public function switchLoader(object $server, int $targetEggId, ?string $mcVersion = null, bool $requireBackup = true): array
+    {
+        $uuid = $server->uuid;
+
+        if (! class_exists(self::EGG_MODEL)) {
+            throw new \RuntimeException('Egg model unavailable on this panel.');
+        }
+        $eggModel = self::EGG_MODEL;
+        $egg = $eggModel::with('variables')->find($targetEggId);
+        if (! $egg) {
+            throw new \RuntimeException("Target egg {$targetEggId} not found.");
+        }
+
+        if ($requireBackup && ! $this->hasRecentCompletedBackup($uuid)) {
+            throw new \RuntimeException('A completed backup is required before switching loader. Take one first.');
+        }
+
+        // Must be offline before we wipe files. Stop and let the caller poll.
+        $state = $this->ops->runtimeState($uuid);
+        if (($state['power'] ?? null) !== 'offline') {
+            try {
+                $this->ops->power($uuid, 'stop');
+            } catch (\Throwable $e) {
+                throw new \RuntimeException('Could not stop the server before the loader reset: ' . $e->getMessage());
+            }
+
+            return ['status' => 'stopping'];
+        }
+
+        // Determine the Minecraft version to carry over.
+        $mc = $mcVersion;
+        if ($mc === null || $mc === '') {
+            $current = $this->versions->current($server);
+            $mc = (string) ($current['game_version'] ?? '');
+        }
+
+        $env = $this->buildEnvironment($egg, $mc);
+        $image = $this->resolveEggImage($egg, $mc);
+
+        // Mandatory clean slate — wipe everything but eula.txt.
+        $wiped = $this->files->wipeForNuclear($uuid, 'clean_slate');
+
+        // Every file is gone, so the mod manifest must be emptied to match
+        // (auto-reconcile) — otherwise the Mods tab lists mods that no longer exist.
+        try {
+            $this->manifest->clearAll($uuid);
+        } catch (\Throwable $e) {
+            // non-fatal
+        }
+
+        // Swap egg + variables + startup, set the target-egg image, reinstall.
+        $this->ops->changeEgg($uuid, $targetEggId, $env);
+        if ($image) {
+            $this->ops->setDockerImage($uuid, $image);
+        }
+        $this->ops->reinstall($uuid);
+
+        // Tell the Mod Manager the loader/version changed, or it keeps operating
+        // as the old loader — looking in the wrong install dir (plugins vs mods),
+        // querying repositories with the wrong loader, and never re-detecting.
+        $loaderSlug = $this->deriveLoaderSlug((string) $egg->name);
+        try {
+            $update = ['game_version' => $mc];
+            if ($loaderSlug !== null) {
+                $update['loader'] = $loaderSlug;
+                $path = config("serversuite.mod_directories.{$loaderSlug}");
+                if ($path) {
+                    $update['install_path'] = $path;
+                }
+            }
+            \ServerSuite\Models\ModManagerSetting::forServer($uuid)->update($update);
+        } catch (\Throwable $e) {
+            // non-fatal — detection will still recover it from the egg name
+        }
+
+        return [
+            'status'      => 'reinstalling',
+            'egg'         => ['id' => $egg->id, 'name' => $egg->name],
+            'loader'      => $loaderSlug,
+            'mc_version'  => $mc,
+            'image'       => $image,
+            'wiped'       => $wiped,
+            'environment' => $env,
+        ];
+    }
+
+    /**
+     * Realign a server's egg to a restored backup's loader — WITHOUT wiping or
+     * reinstalling. A cross-loader restore brings back the other loader's files
+     * but leaves the server configured for the old loader (wrong egg/startup/
+     * variables), so nothing detects the restored loader. This swaps only the
+     * config (egg_id, startup, variables, image, stored settings) so it matches
+     * the files the restore already placed.
+     *
+     * Returns null (caller falls back to version-only alignment) when there's no
+     * installed egg for that loader, or the server is already on the right egg.
+     *
+     * @return array|null
+     */
+    public function alignLoaderForRestore(object $server, string $loaderSlug, string $mcVersion): ?array
+    {
+        if (! class_exists(self::EGG_MODEL)) {
+            return null;
+        }
+        $eggModel = self::EGG_MODEL;
+
+        // Find an installed egg whose loader matches (exact slug, so "forge" does
+        // not accidentally pick a NeoForge egg).
+        $egg = null;
+        foreach ($eggModel::with('variables')->get() as $e) {
+            if ($this->deriveLoaderSlug((string) $e->name) === $loaderSlug) {
+                $egg = $e;
+                break;
+            }
+        }
+        if ($egg === null) {
+            return null;
+        }
+
+        // Already on the right egg -> same-loader restore, nothing to switch.
+        if ((int) ($server->egg_id ?? 0) === (int) $egg->id) {
+            return null;
+        }
+
+        $env = $this->buildEnvironment($egg, $mcVersion);
+        $this->ops->changeEgg($server->uuid, (int) $egg->id, $env);
+
+        $image = $this->resolveEggImage($egg, $mcVersion);
+        if ($image) {
+            $this->ops->setDockerImage($server->uuid, $image);
+        }
+
+        try {
+            $update = ['game_version' => $mcVersion, 'loader' => $loaderSlug];
+            $path = config("serversuite.mod_directories.{$loaderSlug}");
+            if ($path) {
+                $update['install_path'] = $path;
+            }
+            \ServerSuite\Models\ModManagerSetting::forServer($server->uuid)->update($update);
+        } catch (\Throwable $e) {
+            // non-fatal
+        }
+
+        return [
+            'loader_switched' => true,
+            'loader'          => $loaderSlug,
+            'egg'             => ['id' => $egg->id, 'name' => $egg->name],
+            'version'         => $mcVersion,
+        ];
+    }
+
+    /**
+     * Map a target egg's name to a loader slug (neoforge before forge so the
+     * more specific name wins). Returns null if nothing recognisable matches.
+     */
+    private function deriveLoaderSlug(string $eggName): ?string
+    {
+        $name = strtolower($eggName);
+        foreach (['neoforge', 'fabric', 'quilt', 'forge', 'purpur', 'paper', 'spigot', 'waterfall', 'bungeecord', 'velocity', 'sponge', 'vanilla'] as $slug) {
+            if (str_contains($name, $slug)) {
+                return $slug;
+            }
+        }
+
+        return null;
+    }
+
+    private function hasRecentCompletedBackup(string $serverUuid, int $withinMinutes = 60): bool
+    {
+        $cutoff = now()->subMinutes($withinMinutes);
+
+        foreach ($this->ops->listBackups($serverUuid) as $b) {
+            if (! ($b->isSuccessful ?? false) || ($b->completedAt ?? null) === null) {
+                continue;
+            }
+            try {
+                if (\Illuminate\Support\Carbon::parse($b->completedAt)->greaterThanOrEqualTo($cutoff)) {
+                    return true;
+                }
+            } catch (\Throwable $e) {
+                // unparseable — ignore
+            }
+        }
+
+        return false;
+    }
+}
