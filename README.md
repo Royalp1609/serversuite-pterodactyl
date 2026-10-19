@@ -1,0 +1,128 @@
+# Server Suite for Pterodactyl
+
+Server management tools for Minecraft servers on **Pterodactyl Panel**: mod and
+plugin management, scheduled backups with rotation, one-click version and
+loader switching, Cloudflare subdomains, and an egg manager for admins. It all
+runs inside the panel, as new tabs on each server.
+
+It ships as two parts that are always deployed together:
+
+| Part | What it is | File in each release |
+|---|---|---|
+| **Backend** | Composer package `pterodactyl-serversuite/serversuite`: all the logic, models, migrations and scheduled commands | `serversuite-pterodactyl-backend-v<version>.zip` |
+| **Extension** | [Blueprint](https://blueprint.zip) extension `serversuite`: the React tabs, the admin page and the routes | `serversuite.blueprint` |
+
+The sister project `pelican-server-suite`
+is the same suite as a native Pelican plugin.
+
+---
+
+## Features
+
+### Mods (server tab)
+- **Browse and search** Modrinth, CurseForge (needs an API key) and Hangar, with
+  loader and Minecraft-version filters pre-filled from the server.
+- **Install with dependencies**: required libraries are resolved and installed
+  for you; larger plans run as queued jobs with live progress.
+- Files are downloaded **by Wings straight to the server**; nothing large passes
+  through the panel.
+- **Manage**: see installed mods with icons and update badges, update one or
+  all, and remove with warnings when something depends on a mod.
+- **Scheduled update checks** (admin-tunable, optional auto-apply).
+- **Reconcile**: find jars on disk the suite doesn't know about (identified by
+  hash on Modrinth) and records whose file has gone, then adopt or forget them.
+
+### Backups (server tab)
+- **Scheduled backups with rotation**: pick how often (6 hours to weekly) and
+  optionally a **fixed hour** to run at. The oldest *unlocked* backup is removed
+  once the server's backup limit is reached; locked backups are always kept.
+- Shows the last and next scheduled backup.
+- Back up now, lock/unlock, rename, download and restore.
+
+### Versions (server tab)
+- **Change Minecraft version** for the current loader (pinned to an exact build).
+- **Switch loader** (Paper, Purpur, Folia, Forge, NeoForge, Fabric and more),
+  choosing the version in the same step.
+- Every switch is **gated on a recent completed backup** and refuses up front if
+  the server can't be reinstalled (e.g. *Skip Egg Install Script* is on), so a
+  server is never left wiped.
+- **Reset** the server: world only, or a clean slate.
+
+### Subdomains (server tab)
+- Claim `name.domain` on a domain the panel admin offers, or on the server
+  owner's **own Cloudflare domain**. Players join with just the name: an A
+  record points at the server and a SRV record carries the port.
+- Each server has an **admin-set allowance** (default 0).
+- Records are removed when a server is deleted and re-pointed when its primary
+  allocation changes.
+
+### Admin (Admin → Extensions → Server Suite)
+- Repository toggles, CurseForge API key, update-check schedule, install
+  behaviour.
+- Backup rotation master switch, default cadence and retention, and the
+  **backup timezone** (used for backup names and the fixed run hour).
+- **Egg Manager**: import eggs from the community catalog (any game), keep
+  installed eggs up to date, or import from a URL. See [EGGS.md](EGGS.md).
+- **Subdomains**: domains offered to servers (Cloudflare tokens stored
+  encrypted, never shown again) and each server's allowance.
+
+---
+
+## Compatibility
+
+| Pterodactyl | Blueprint | Server Suite |
+|---|---|---|
+| 1.14.x (Laravel 11) | beta-2026-06 or newer | 0.16.0+ |
+| 1.15.x (Laravel 12) | **beta-2026-08** or newer | **0.17.0+** |
+
+PHP 8.2 or 8.3 · Node 22 for the Blueprint build. Every change is tested in CI
+against real Pterodactyl 1.14.0 and 1.15.1 checkouts.
+
+## Install and update
+
+Download both files from the latest release on the **Releases** page, then
+follow [INSTALL.md](INSTALL.md). It covers a fresh install, updating, the steps
+to repeat **after every Pterodactyl upgrade** (the upgrade removes the backend's
+Composer entry), subdomain setup, and common errors.
+
+## Permissions
+
+Server owners and root admins can use everything. **Subusers currently can't
+use Server Suite**: its permissions aren't in Pterodactyl's subuser list, so
+they can't be granted. Making them native subuser permissions is planned in
+#17.
+
+---
+
+## Development
+
+```
+src/          backend package (services, models, drivers, console commands)
+database/     migrations (run by the panel's `php artisan migrate`)
+config/       serversuite.php defaults (admin settings override them)
+extension/    Blueprint extension source: conf.yml, React tabs, controller, routes, admin view
+tests/        Pest tests (Orchestra Testbench, SQLite, fakes for the panel and Wings)
+tools/        build-blueprint.py (package + checks), release.py
+.gitea/       CI and release workflows
+```
+
+- **CI** (every PR and push to `main`): PHP lint, Pest on Laravel 11 and 12,
+  install into real Pterodactyl 1.14.0/1.15.1 checkouts with PHPStan, a
+  TypeScript check of the extension against both panel frontends, and a package
+  check (`serversuite.blueprint` in sync with `extension/`, versions match,
+  no Blueprint placeholder tokens such as `{name}` in source files).
+- After changing anything in `extension/`, run `python3 tools/build-blueprint.py`
+  and commit the rebuilt `serversuite.blueprint`.
+- **Releases**: bump the version in `composer.json` and `extension/conf.yml`,
+  then push a tag `v<version>`. The release workflow builds both files and
+  publishes the release, with notes listing the PRs merged since the last one.
+- Work is tracked as issues; each fix or feature is a branch and PR, and CI
+  must pass before it's merged.
+
+More detail: [PROVIDERS.md](PROVIDERS.md) (mod repositories),
+[RECONCILIATION.md](RECONCILIATION.md), [EGGS.md](EGGS.md),
+[PHASES.md](PHASES.md) (build history).
+
+## Licence
+
+MIT (see `composer.json`).
