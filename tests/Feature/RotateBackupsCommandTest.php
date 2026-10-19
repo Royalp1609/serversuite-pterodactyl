@@ -10,7 +10,7 @@ function bindRotationFake(): FakePanelServerOps
 {
     $fake = new FakePanelServerOps();
 
-    test()->app->instance(
+    app()->instance(
         BackupRotationService::class,
         new BackupRotationService($fake, new BackupRetentionResolver()),
     );
@@ -62,6 +62,6 @@ it('reports cleanly when no servers are enabled', function () {
     bindRotationFake();
 
     $this->artisan('serversuite:rotate-backups')
-        ->expectsOutputToContain('No servers have backup rotation enabled.')
+        ->expectsOutputToContain('No servers are due for a scheduled backup.')
         ->assertExitCode(0);
 });
