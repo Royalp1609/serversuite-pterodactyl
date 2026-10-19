@@ -48,6 +48,20 @@ Panel root below is `/opt/pterodactyl-panel`; adjust to yours.
 
 ---
 
+## Building the extension package
+
+The extension source lives in `extension/` (conf.yml at its root).
+`serversuite.blueprint` is a plain zip of that directory. After changing
+anything under `extension/`, rebuild it and commit both:
+
+```bash
+python3 tools/build-blueprint.py           # rebuild serversuite.blueprint
+python3 tools/build-blueprint.py --check   # what CI runs: package in sync, versions match
+```
+
+`conf.yml`'s `version` must match `composer.json`'s: the two ship together.
+CI also uploads the built package as an artifact on every run.
+
 ## Fresh install
 
 ```bash

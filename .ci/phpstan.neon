@@ -14,7 +14,7 @@ parameters:
     tmpDir: %currentWorkingDirectory%/storage/phpstan
     paths:
         - %currentWorkingDirectory%/vendor/pterodactyl-serversuite/serversuite/src
-        # PHP from serversuite.blueprint, extracted by the workflow
+        # extension/ PHP, copied in by the workflow
         - %currentWorkingDirectory%/serversuite-blueprint/app
         - %currentWorkingDirectory%/serversuite-blueprint/routes
     # Larastan infers model columns from migrations; include the package's.
