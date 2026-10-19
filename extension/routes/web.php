@@ -26,6 +26,29 @@ Route::post('/admin/import-catalog', [ModManagerController::class, 'adminImportC
 Route::post('/admin/update-eggs', [ModManagerController::class, 'adminUpdateAllEggs'])
     ->name('extension.serversuite.admin-update-eggs');
 
+// Subdomains (#14). Admin routes first so /admin isn't taken as a {server}.
+Route::post('/admin/domains', [ModManagerController::class, 'adminAddDomain'])
+    ->name('extension.serversuite.admin-add-domain');
+Route::post('/admin/domains/{id}/toggle', [ModManagerController::class, 'adminToggleDomain'])
+    ->whereNumber('id')->name('extension.serversuite.admin-toggle-domain');
+Route::post('/admin/domains/{id}/remove', [ModManagerController::class, 'adminRemoveDomain'])
+    ->whereNumber('id')->name('extension.serversuite.admin-remove-domain');
+Route::post('/admin/subdomain-allowances', [ModManagerController::class, 'adminSaveAllowances'])
+    ->name('extension.serversuite.admin-subdomain-allowances');
+
+Route::get('/{server}/subdomains', [ModManagerController::class, 'subdomains'])
+    ->name('extension.serversuite.subdomains');
+Route::post('/{server}/subdomains', [ModManagerController::class, 'subdomainsClaim'])
+    ->name('extension.serversuite.subdomains-claim');
+Route::post('/{server}/subdomains/own', [ModManagerController::class, 'subdomainsSaveOwn'])
+    ->name('extension.serversuite.subdomains-own');
+Route::post('/{server}/subdomains/own/remove', [ModManagerController::class, 'subdomainsRemoveOwn'])
+    ->name('extension.serversuite.subdomains-own-remove');
+Route::post('/{server}/subdomains/{id}/release', [ModManagerController::class, 'subdomainsRelease'])
+    ->whereNumber('id')->name('extension.serversuite.subdomains-release');
+Route::post('/{server}/subdomains/{id}/repoint', [ModManagerController::class, 'subdomainsRepoint'])
+    ->whereNumber('id')->name('extension.serversuite.subdomains-repoint');
+
 Route::get('/{server}/repositories', [ModManagerController::class, 'repositories'])
     ->name('extension.serversuite.repositories');
 

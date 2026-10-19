@@ -980,6 +980,144 @@ class ModManagerController extends Controller
         return response()->json(['data' => ['ok' => true, 'aligned' => $aligned]]);
     }
 
+    // -------------------------------------------------------------------------
+    // Subdomains (#14)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/subdomains */
+    public function subdomains(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeAbility($request, $srv, 'view');
+
+        return response()->json(['data' => app(\ServerSuite\Services\SubdomainService::class)->overview($srv)]);
+    }
+
+    /** POST /{server}/subdomains   { domain: id|"own", label } */
+    public function subdomainsClaim(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeAbility($request, $srv, 'update');
+        $data = $request->validate([
+            'domain' => ['required'],
+            'label'  => ['required', 'string', 'max:63'],
+        ]);
+        $domain = $data['domain'] === 'own' ? 'own' : (int) $data['domain'];
+
+        return $this->subdomainAction(fn ($svc) => $svc->claim($srv, $data['label'], $domain, $request->user()?->id)->fqdn);
+    }
+
+    /** POST /{server}/subdomains/{id}/release */
+    public function subdomainsRelease(Request $request, string $server, int $id): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeAbility($request, $srv, 'update');
+
+        return $this->subdomainAction(fn ($svc) => $svc->release($srv, $id));
+    }
+
+    /** POST /{server}/subdomains/{id}/repoint */
+    public function subdomainsRepoint(Request $request, string $server, int $id): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeAbility($request, $srv, 'update');
+
+        return $this->subdomainAction(fn ($svc) => $svc->repoint($srv, $id)->fqdn);
+    }
+
+    /** POST /{server}/subdomains/own   { zone, token? } (blank token keeps the stored one) */
+    public function subdomainsSaveOwn(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeAbility($request, $srv, 'update');
+        $data = $request->validate([
+            'zone'  => ['required', 'string', 'max:253'],
+            'token' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        return $this->subdomainAction(fn ($svc) => $svc->saveOwnDomain($srv, $data['zone'], $data['token'] ?? null));
+    }
+
+    /** POST /{server}/subdomains/own/remove */
+    public function subdomainsRemoveOwn(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeAbility($request, $srv, 'update');
+
+        return $this->subdomainAction(fn ($svc) => $svc->removeOwnDomain($srv));
+    }
+
+    /** POST /admin/domains   { zone, token } */
+    public function adminAddDomain(Request $request)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $data = $request->validate([
+            'zone'  => ['required', 'string', 'max:253'],
+            'token' => ['required', 'string', 'max:255'],
+        ]);
+
+        return $this->adminSubdomainRedirect(fn ($svc) => $svc->addDomain($data['zone'], $data['token']), 'Domain added.');
+    }
+
+    /** POST /admin/domains/{id}/toggle */
+    public function adminToggleDomain(Request $request, int $id)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $domain = \ServerSuite\Models\SubdomainDomain::query()->findOrFail($id);
+
+        return $this->adminSubdomainRedirect(fn ($svc) => $svc->setDomainEnabled($id, ! $domain->enabled), $domain->enabled ? 'Domain disabled.' : 'Domain enabled.');
+    }
+
+    /** POST /admin/domains/{id}/remove */
+    public function adminRemoveDomain(Request $request, int $id)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+
+        return $this->adminSubdomainRedirect(fn ($svc) => $svc->removeDomain($id), 'Domain removed.');
+    }
+
+    /** POST /admin/subdomain-allowances   { allowance: { <server uuid>: n } } */
+    public function adminSaveAllowances(Request $request)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $data = $request->validate([
+            'allowance'   => ['required', 'array'],
+            'allowance.*' => ['nullable', 'integer', 'between:0,100'],
+        ]);
+
+        return $this->adminSubdomainRedirect(function ($svc) use ($data) {
+            foreach ($data['allowance'] as $uuid => $n) {
+                if (Server::query()->where('uuid', $uuid)->exists()) {
+                    $svc->setAllowance((string) $uuid, (int) ($n ?? 0));
+                }
+            }
+        }, 'Allowances saved.');
+    }
+
+    /** Run a subdomain action; a refusal comes back as 422 with a message safe to show. */
+    private function subdomainAction(callable $fn): JsonResponse
+    {
+        try {
+            $result = $fn(app(\ServerSuite\Services\SubdomainService::class));
+        } catch (\ServerSuite\Exceptions\SubdomainException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => ['ok' => true, 'fqdn' => is_string($result) ? $result : null]]);
+    }
+
+    private function adminSubdomainRedirect(callable $fn, string $ok)
+    {
+        try {
+            $fn(app(\ServerSuite\Services\SubdomainService::class));
+            $q = ['subdomains_ok' => $ok];
+        } catch (\ServerSuite\Exceptions\SubdomainException $e) {
+            $q = ['subdomains_error' => $e->getMessage()];
+        }
+
+        return redirect()->to('/admin/extensions/serversuite?' . http_build_query($q) . '#subdomains');
+    }
+
     protected function resolveServer(string $serverUuid): Server
     {
         return Server::query()->where('uuid', $serverUuid)->firstOrFail();

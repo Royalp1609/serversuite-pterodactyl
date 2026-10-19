@@ -154,6 +154,24 @@ Backend compatibility: 0.17.0+ supports Pterodactyl 1.14 (Laravel 11) and
 1.15 (Laravel 12). 0.16.0 and older only install on Laravel 11, so on 1.15
 `composer require` fails with `requires illuminate/support ^11.0`.
 
+## Subdomains (Cloudflare)
+
+Servers can claim `name.yourdomain` from their **Subdomains** tab (an A record
+for the server's IP plus a `_minecraft._tcp` SRV record for the port).
+
+1. In Cloudflare, create an API token with **Zone → DNS → Edit** for the domain
+   only (My Profile → API Tokens → Create Token → "Edit zone DNS"). Never use
+   the Global API Key.
+2. Admin → Extensions → Server Suite → **Subdomains**: add the domain and token.
+   The token is checked with Cloudflare, stored encrypted (it needs the panel's
+   `APP_KEY`, so keep that safe), and never shown again.
+3. Set each server's **allowance** there (default 0). "Selling" a subdomain
+   happens outside the panel: take payment, then raise the allowance.
+
+Owners can also add their own Cloudflare domain and token on the tab; those
+subdomains count towards the same allowance. Records are deleted when a server
+is deleted and re-pointed when its primary allocation changes.
+
 ## Configuration
 
 All runtime settings live in **Admin → Extensions → Server Suite** (repo

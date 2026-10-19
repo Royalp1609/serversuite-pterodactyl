@@ -24,6 +24,8 @@ abstract class TestCase extends Orchestra
         ]);
 
         $app['config']->set('cache.default', 'array');
+        // Encrypted casts (DNS tokens) need an app key.
+        $app['config']->set('app.key', 'base64:' . base64_encode(str_repeat('k', 32)));
 
         // Enable all repos, give CurseForge a dummy key so isAvailable() passes
         $app['config']->set('serversuite.repositories.modrinth', true);

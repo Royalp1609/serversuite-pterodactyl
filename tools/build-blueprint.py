@@ -11,8 +11,9 @@ rebuilding unchanged source gives an identical file.
 
 --check also fails if conf.yml's version differs from composer.json's (the
 backend package and the extension ship together and share a version), if a
-field Blueprint requires is empty, or if conf.yml / Components.yml point at
-files that don't exist.
+field Blueprint requires is empty, if conf.yml / Components.yml point at
+files that don't exist, or if a source file contains a token Blueprint would
+replace at install time (e.g. {name} in JSX).
 """
 import argparse
 import json
@@ -60,6 +61,26 @@ def check(path: Path) -> list[str]:
     if conf.get("info.version") != composer_version:
         problems.append(f"version mismatch: conf.yml {conf.get('info.version')} vs composer.json {composer_version}")
     problems += check_conf(conf)
+    problems += check_placeholders()
+    return problems
+
+
+# Blueprint replaces these tokens in extension files at install time
+# (scripts/commands/extensions/install.sh). In JSX, {name} or {version} would
+# be an ordinary expression, so a collision silently changes the code.
+PLACEHOLDER = re.compile(r"\{(appcontext|author|engine|fs|identifier|is_target|mode|name|random|root|"
+                         r"target|timestamp|version|viewcontext|webroot)[}!^/]")
+
+
+def check_placeholders() -> list[str]:
+    problems = []
+    for f in sorted(SRC.rglob("*")):
+        if f.is_file() and f.suffix in (".php", ".tsx", ".ts", ".js", ".css", ".yml"):
+            for n, line in enumerate(f.read_text(errors="replace").splitlines(), 1):
+                m = PLACEHOLDER.search(line)
+                if m:
+                    problems.append(f"{f.relative_to(ROOT)}:{n}: '{m.group(0)}' is a Blueprint placeholder "
+                                    "and would be replaced at install time")
     return problems
 
 

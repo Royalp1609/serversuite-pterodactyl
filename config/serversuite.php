@@ -279,5 +279,21 @@ return [
         'cache_ttl' => (int) env('SERVER_SUITE_EGG_INDEX_TTL', 21600),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Subdomains (Cloudflare)
+    |--------------------------------------------------------------------------
+    | Domains and their API tokens are added by a panel admin under Admin ->
+    | Extensions -> Server Suite (stored encrypted), and each server's
+    | allowance is set there too (default 0). Owners can also add their own
+    | Cloudflare domain. Use scoped tokens: Zone > DNS > Edit on that zone only.
+    |
+    | reserved: labels nobody can claim on any domain.
+    */
+    'subdomains' => [
+        'reserved' => ['www', 'mail', 'smtp', 'imap', 'pop', 'ftp', 'admin', 'panel', 'api',
+                       'ns1', 'ns2', 'mc', 'root', 'node', 'wings', 'status', 'billing'],
+    ],
+
 ];
 
