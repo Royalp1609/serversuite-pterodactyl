@@ -1,0 +1,10 @@
+/*
+ * Server Suite — hide the native Pterodactyl server "Backups" sub-navigation
+ * link, since Server Suite provides its own Backups tab. Scoped to server
+ * sub-nav links ending in /backups; our tab lives at /backup-rotation so it is
+ * unaffected. This hides the nav option only (no core files patched, survives
+ * panel updates); the native route still resolves if a URL is typed directly.
+ */
+a[href*="/server/"][href$="/backups"] {
+    display: none !important;
+}

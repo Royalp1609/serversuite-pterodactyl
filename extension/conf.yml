@@ -1,0 +1,36 @@
+info:
+  name: "Server Suite"
+  identifier: "serversuite"
+  description: "A suite of server management modules for Pterodactyl: mod management (Modrinth, CurseForge, Hangar) and automated backup rotation, with more modules to come."
+  version: "0.16.0"
+  target: "beta-2026-05"
+  author: "You"
+  icon: 'resources/icon.png'
+  website: ''
+
+admin:
+  view: 'resources/views/view.blade.php'
+  controller: ''
+  css: ''
+  wrapper: ''
+
+dashboard:
+  css: 'resources/styles/serversuite.css'
+  wrapper: ''
+  components: 'resources/scripts/components'
+
+data:
+  directory: ''
+  public: ''
+  console: ''
+
+requests:
+  views: ''
+  app: 'app'
+  routers:
+    application: ''
+    client: ''
+    web: 'routes/web.php'
+
+database:
+  migrations: ''
