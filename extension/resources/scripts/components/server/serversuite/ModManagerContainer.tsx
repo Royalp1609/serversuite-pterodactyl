@@ -7,7 +7,7 @@ import {
     faTimes, faCube, faExternalLinkAlt, faExclamationTriangle, faPuzzlePiece,
     faSync, faTrash, faArrowUp, faInfoCircle, faUser, faHeart,
 } from '@fortawesome/free-solid-svg-icons';
-import debounce from 'lodash-es/debounce';
+import debounce from 'debounce';
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
 
@@ -55,10 +55,10 @@ const GhostButton = styled.button`
     &:hover { background: rgba(51,65,85,0.8); }
     &:disabled { ${tw`opacity-50 cursor-not-allowed`}; }
 `;
-const Tab = styled.button`
+const Tab = styled.button<{ active?: boolean }>`
     ${tw`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-all`};
-    color: ${(p: any) => (p.active ? 'white' : 'rgb(148,163,184)')};
-    border-bottom: 2px solid ${(p: any) => (p.active ? 'rgb(99,102,241)' : 'transparent')};
+    color: ${(p) => (p.active ? 'white' : 'rgb(148,163,184)')};
+    border-bottom: 2px solid ${(p) => (p.active ? 'rgb(99,102,241)' : 'transparent')};
     &:hover { color: white; }
 `;
 const Badge = styled.span`
