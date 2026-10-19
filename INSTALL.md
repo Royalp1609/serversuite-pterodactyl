@@ -107,6 +107,7 @@ grep '"version"' vendor/pterodactyl-serversuite/serversuite/composer.json  # VER
 sudo -u www-data php artisan migrate            # if the release notes a migration
 sudo -u www-data php artisan optimize:clear
 sudo -u www-data php artisan queue:restart
+sudo systemctl reload php8.4-fpm   # clear PHP's opcode cache so the new code is used
 
 blueprint -remove serversuite && blueprint -install serversuite   # if the UI changed
 ```
