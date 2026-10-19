@@ -142,7 +142,12 @@ jobs:
         working-directory: ${{ env.PANEL }}
         run: |
           corepack enable
-          yarn install --frozen-lockfile --non-interactive --silent
+          # retry: the registry occasionally 502s mid-install
+          for i in 1 2 3; do
+            yarn install --frozen-lockfile --non-interactive --silent --network-timeout 300000 && exit 0
+            echo "::warning::yarn install failed (attempt $i), retrying"; sleep 15
+          done
+          exit 1
       # The panel's tsconfig covers resources/scripts/**, so dropping the
       # components where Blueprint installs them typechecks them against the
       # real panel frontend (@/api/http, @/state/server, twin.macro, ...).
