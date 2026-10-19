@@ -1,0 +1,20 @@
+name: Release
+
+# Push a tag v<version> (matching composer.json) on a commit that passed CI;
+# this builds serversuite.blueprint + the backend zip and creates the Gitea
+# release with both attached. See tools/release.py.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # release notes list merges since the previous tag
+      - name: Build and publish
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: python3 tools/release.py "${{ github.ref_name }}" --publish

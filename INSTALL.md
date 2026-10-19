@@ -1,6 +1,8 @@
 # Server Suite (PterodactylModManager) — Installation & Deployment Guide
 
 Two artifacts, deployed in this order, always:
+(both are attached to every release on the repo's **Releases** page in Gitea,
+built by CI from the version tag):
 
 1. **Backend** — Composer package `pterodactyl-serversuite/serversuite` (all logic)
 2. **Extension** — Blueprint extension `serversuite.blueprint` (the React UI)
