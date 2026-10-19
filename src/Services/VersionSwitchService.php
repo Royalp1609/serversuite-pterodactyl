@@ -3,6 +3,7 @@
 namespace ServerSuite\Services;
 
 use ServerSuite\Contracts\PanelServerOps;
+use ServerSuite\Support\ReinstallGuard;
 
 /**
  * Orchestrates a backup-gated server version change (Phase 2, non-nuclear).
@@ -43,6 +44,11 @@ class VersionSwitchService
         $uuid = $server->uuid;
         $wipeMode = in_array($wipeMode, ['reset_world', 'clean_slate'], true) ? $wipeMode : 'none';
         $wipe = $wipeMode !== 'none';
+
+        // Preflight also reports this, but enforce it here, before the stop /
+        // wipe / variable changes below: they're only safe if the reinstall
+        // that finishes the switch can actually run (#3).
+        ReinstallGuard::assertCanReinstall($server, 'change version');
 
         $pf = $this->versions->preflight($server, $targetVersion, $targetBuild);
 
@@ -234,6 +240,9 @@ class VersionSwitchService
     {
         $uuid = $server->uuid;
         $mode = in_array($mode, ['keep_plugins', 'clean_slate'], true) ? $mode : 'keep_plugins';
+
+        // The wipe is only recoverable if the reinstall after it can run (#3).
+        ReinstallGuard::assertCanReinstall($server, 'reset the server');
 
         // Never touch files on a running server — stop first, let the caller poll.
         $state = $this->ops->runtimeState($uuid);

@@ -5,6 +5,7 @@ namespace ServerSuite\Services;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use ServerSuite\Support\ReinstallGuard;
 
 /**
  * Sources the SERVER (jar/loader) versions a server can run — distinct from the
@@ -292,6 +293,10 @@ class ServerVersionService
 
         $warnings = [];
         $blockers = [];
+
+        if (($reinstallBlocker = ReinstallGuard::blocker($server)) !== null) {
+            $blockers[] = $reinstallBlocker;
+        }
 
         if (! $versionValid) {
             $blockers[] = "Paper has no published builds for {$targetVersion}.";
