@@ -138,6 +138,13 @@ function humanBytes(bytes: number): string {
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+/** Local date/time for an ISO timestamp, e.g. "Mon 20 Oct, 04:00". */
+function formatWhen(iso: string): string {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
 function relativeAge(iso: string | null): string {
     if (!iso) return '—';
     const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -169,6 +176,9 @@ export default () => {
     const [defaultInterval, setDefaultInterval] = useState(12);
     const [presets, setPresets] = useState<number[]>([]);
     const [lastRunAt, setLastRunAt] = useState<string | null>(null);
+    const [scheduleHour, setScheduleHour] = useState('');
+    const [timezone, setTimezone] = useState('UTC');
+    const [nextRunAt, setNextRunAt] = useState<string | null>(null);
     const [busy, setBusy] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
     const [backupName, setBackupName] = useState('');
@@ -190,6 +200,9 @@ export default () => {
                 setDefaultInterval(d.schedule?.default_interval_hours ?? 12);
                 setPresets(d.schedule?.presets ?? []);
                 setLastRunAt(d.schedule?.last_run_at ?? null);
+                setScheduleHour(d.schedule?.hour == null ? '' : String(d.schedule.hour));
+                setTimezone(d.schedule?.timezone ?? 'UTC');
+                setNextRunAt(d.schedule?.next_run_at ?? null);
                 setError(null);
             })
             .catch((e) => setError(e?.response?.data?.error || 'Failed to load backups.'))
@@ -203,6 +216,7 @@ export default () => {
         http.post(`${base}/backups/settings`, {
             enabled,
             interval_hours: intervalHours === '' ? null : Number(intervalHours),
+            hour: scheduleHour === '' ? null : Number(scheduleHour),
         })
             .then(() => { setNotice('Settings saved.'); load(); })
             .catch((e) => setError(e?.response?.data?.error || 'Failed to save settings.'))
@@ -341,8 +355,27 @@ export default () => {
                                         <option key={p} value={String(p)}>{intervalLabel(p)}</option>
                                     ))}
                                 </Select>
+                                <FieldLabel>Run at</FieldLabel>
+                                <Select
+                                    value={scheduleHour}
+                                    onChange={(e) => setScheduleHour(e.target.value)}
+                                    disabled={busy !== null}
+                                >
+                                    <option value="">No fixed time</option>
+                                    {Array.from({ length: 24 }, (_, h) => (
+                                        <option key={h} value={String(h)}>
+                                            {String(h).padStart(2, '0')}:00 ({timezone})
+                                        </option>
+                                    ))}
+                                </Select>
+                                <LimitNote>
+                                    {scheduleHour === ''
+                                        ? 'Without a fixed time, the next backup runs once the interval has passed since the last one.'
+                                        : 'Daily and longer schedules run in this hour; shorter ones run on hours in step with it (e.g. every 6 hours from 02:00 = 02, 08, 14, 20).'}
+                                </LimitNote>
                                 <LimitNote>
                                     Last scheduled backup: {lastRunAt ? relativeAge(lastRunAt) : 'never'}
+                                    {nextRunAt && <>{' · '}Next: {formatWhen(nextRunAt)} (your local time)</>}
                                 </LimitNote>
                             </ScheduleRow>
                         )}

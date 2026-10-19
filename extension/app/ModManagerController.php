@@ -780,13 +780,24 @@ class ModManagerController extends Controller
                 'interval_hours'         => $setting?->backup_interval_hours,
                 'default_interval_hours' => (int) config('serversuite.backups.default_interval_hours', 12),
                 'presets'                => $presets,
+                // Fixed run hour (0-23) in the panel's timezone; null = no fixed time.
+                'hour'                   => $setting?->backup_schedule_hour,
+                'timezone'               => (string) config('app.timezone', 'UTC'),
                 'last_run_at'            => optional($setting?->backup_last_run_at)->toIso8601String(),
+                'next_run_at'            => ($setting?->backup_rotation_enabled)
+                    ? optional(\ServerSuite\Support\BackupSchedule::nextRun(
+                        (int) ($setting->backup_interval_hours ?: config('serversuite.backups.default_interval_hours', 12)),
+                        $setting->backup_schedule_hour,
+                        $setting->backup_last_run_at,
+                        now(),
+                    ))->toIso8601String()
+                    : null,
             ],
         ]]);
     }
 
     /**
-     * POST /{server}/backups/settings   { enabled }
+     * POST /{server}/backups/settings   { enabled, interval_hours, hour }
      * Per-server opt-in to scheduled rotation. Retention is fixed to the
      * server's backup limit and is not editable here.
      */
@@ -802,6 +813,8 @@ class ModManagerController extends Controller
             // null = use the global default; otherwise must be a bounded preset
             // so a server admin can never pick an unsafe (throttle-tripping) cadence.
             'interval_hours' => ['nullable', 'integer', \Illuminate\Validation\Rule::in($presets)],
+            // null = no fixed time (runs once the interval has passed)
+            'hour'           => ['nullable', 'integer', 'between:0,23'],
         ]);
 
         // Retention is governed by the server's backup limit (panel admins only).
@@ -809,6 +822,7 @@ class ModManagerController extends Controller
         $setting = ModManagerSetting::forServer($server);
         $setting->backup_rotation_enabled = (bool) ($data['enabled'] ?? false);
         $setting->backup_interval_hours = $data['interval_hours'] ?? null;
+        $setting->backup_schedule_hour = $data['hour'] ?? null;
         $setting->save();
 
         return response()->json(['data' => ['ok' => true]]);
