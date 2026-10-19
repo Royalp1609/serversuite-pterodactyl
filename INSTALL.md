@@ -120,7 +120,8 @@ guide), before bringing it back up:
 
 ```bash
 cd /opt/pterodactyl-panel
-# 1. Blueprint: reinstall/upgrade to a release that supports the new panel version
+# 1. Blueprint: reinstall/upgrade it to a release that supports the new panel
+#    version (table below), following Blueprint's own install guide
 # 2. Re-add the backend (use the directory your backend actually lives in)
 sudo -u www-data composer config repositories.serversuite '{"type": "path", "url": "packages/serversuite"}'
 sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*"
@@ -131,6 +132,17 @@ sudo -u www-data php artisan queue:restart
 # 3. Reinstall the extension
 blueprint -install serversuite
 ```
+
+Blueprint compatibility (Blueprint support for a panel version comes in a
+specific Blueprint release; older ones break on the new panel):
+
+| Pterodactyl | Blueprint needed | Server Suite |
+|---|---|---|
+| 1.14.x | beta-2026-06 or newer | any |
+| 1.15.1 | **beta-2026-08** or newer | 0.17.0+ |
+
+`conf.yml`'s `target` is `beta-2026-08`. On an older Blueprint the install
+only warns ("built for version ..."); it isn't a hard requirement.
 
 Backend compatibility: 0.17.0+ supports Pterodactyl 1.14 (Laravel 11) and
 1.15 (Laravel 12). 0.16.0 and older only install on Laravel 11, so on 1.15

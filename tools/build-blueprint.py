@@ -9,8 +9,10 @@ rebuilding unchanged source gives an identical file.
     python3 tools/build-blueprint.py --check    # fail if it differs from extension/
     python3 tools/build-blueprint.py -o out.blueprint
 
---check also fails if conf.yml's version differs from composer.json's: the
-backend package and the extension ship together and share a version.
+--check also fails if conf.yml's version differs from composer.json's (the
+backend package and the extension ship together and share a version), if a
+field Blueprint requires is empty, or if conf.yml / Components.yml point at
+files that don't exist.
 """
 import argparse
 import json
@@ -53,12 +55,56 @@ def check(path: Path) -> list[str]:
         if src[name] != packed[name]:
             problems.append(f"differs from extension/: {name}")
 
-    conf = (SRC / "conf.yml").read_text()
-    m = re.search(r'^\s+version:\s*["\']?([^"\'\s]+)', conf, re.M)
-    conf_version = m.group(1) if m else None
+    conf = parse_conf((SRC / "conf.yml").read_text())
     composer_version = json.loads((ROOT / "composer.json").read_text()).get("version")
-    if conf_version != composer_version:
-        problems.append(f"version mismatch: conf.yml {conf_version} vs composer.json {composer_version}")
+    if conf.get("info.version") != composer_version:
+        problems.append(f"version mismatch: conf.yml {conf.get('info.version')} vs composer.json {composer_version}")
+    problems += check_conf(conf)
+    return problems
+
+
+def parse_conf(text: str) -> dict[str, str]:
+    """Flatten Blueprint's two-level conf.yml into {'section.key': value}."""
+    out, section = {}, None
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = re.match(r"^(\w+):\s*$", line)
+        if m:
+            section = m.group(1)
+            continue
+        m = re.match(r"^\s+(\w+):\s*(.*?)\s*$", line)
+        if m and section:
+            out[f"{section}.{m.group(1)}"] = m.group(2).strip("'\"")
+    return out
+
+
+# conf.yml fields Blueprint's install.sh treats as fatal when empty.
+REQUIRED = ["info.name", "info.identifier", "info.description", "info.version", "info.target", "admin.view"]
+# conf.yml fields that name a file or directory inside the extension.
+PATHS = ["info.icon", "admin.view", "admin.controller", "admin.css", "admin.wrapper", "dashboard.css",
+         "dashboard.wrapper", "dashboard.components", "requests.app", "requests.views",
+         "requests.routers.web", "database.migrations"]
+
+
+def check_conf(conf: dict[str, str]) -> list[str]:
+    problems = [f"conf.yml: '{k}' is required by Blueprint" for k in REQUIRED if not conf.get(k)]
+    if not re.fullmatch(r"(beta|alpha)-\d{4}-\d{2}", conf.get("info.target", "")):
+        problems.append(f"conf.yml: info.target '{conf.get('info.target')}' isn't a Blueprint release tag")
+    # parse_conf only keeps two levels, so requests.routers.web is read from the raw file
+    raw = (SRC / "conf.yml").read_text()
+    m = re.search(r"^\s+web:\s*['\"]?([^'\"\s]*)", raw, re.M)
+    conf = {**conf, "requests.routers.web": m.group(1) if m else ""}
+    for k in PATHS:
+        if conf.get(k) and not (SRC / conf[k]).exists():
+            problems.append(f"conf.yml: {k} '{conf[k]}' doesn't exist in extension/")
+
+    components = conf.get("dashboard.components")
+    comp_file = SRC / components / "Components.yml" if components else None
+    if comp_file and comp_file.exists():
+        for c in re.findall(r"Component:\s*['\"]([^'\"]+)['\"]", comp_file.read_text()):
+            if not any((SRC / components / f"{c}{ext}").exists() for ext in (".tsx", ".ts", ".jsx", ".js")):
+                problems.append(f"Components.yml: component '{c}' has no source file")
     return problems
 
 
