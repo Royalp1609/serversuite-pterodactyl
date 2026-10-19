@@ -99,3 +99,20 @@ it('reports the next run for the Backups screen', function () {
     expect(BackupSchedule::nextRun(12, null, at('2026-10-20 09:10'), $now)?->format('Y-m-d H:i'))->toBe('2026-10-20 21:10');
     expect(BackupSchedule::nextRun(12, null, null, $now))->toBeNull();
 });
+
+it('uses the backup timezone for the fixed hour, falling back to the panel timezone', function () {
+    config(['app.timezone' => 'UTC', 'serversuite.backups.timezone' => 'Europe/London']);
+    expect(BackupSchedule::timezone())->toBe('Europe/London');
+
+    // 04:00 London (BST, UTC+1) is 03:00 UTC: due then, not at 04:00 UTC.
+    \Carbon\Carbon::setTestNow(CarbonImmutable::parse('2026-07-01 03:00', 'UTC'));
+    expect(BackupSchedule::isDue(24, 4, null, BackupSchedule::now()))->toBeTrue();
+    \Carbon\Carbon::setTestNow(CarbonImmutable::parse('2026-07-01 04:00', 'UTC'));
+    expect(BackupSchedule::isDue(24, 4, null, BackupSchedule::now()))->toBeFalse();
+    \Carbon\Carbon::setTestNow();
+
+    config(['serversuite.backups.timezone' => null]);
+    expect(BackupSchedule::timezone())->toBe('UTC');
+    config(['serversuite.backups.timezone' => 'Not/AZone']);
+    expect(BackupSchedule::timezone())->toBe('UTC');
+});

@@ -58,7 +58,8 @@ class RotateBackupsCommand extends Command
     private function rotateDue(BackupRotationService $rotation, ?int $keepOverride): int
     {
         $defaultInterval = max(1, (int) config('serversuite.backups.default_interval_hours', 12));
-        $now = Carbon::now();
+        // In the backup timezone, so a fixed hour matches what the owner picked.
+        $now = BackupSchedule::now();
 
         $settings = ModManagerSetting::query()
             ->where('backup_rotation_enabled', true)
