@@ -192,6 +192,101 @@
     </div>
 </div>
 
+{{-- Subdomains (#14): domains the admin offers + per-server allowances. --}}
+@php
+    $ssDomains = class_exists(\ServerSuite\Models\SubdomainDomain::class)
+        ? \ServerSuite\Models\SubdomainDomain::query()->orderBy('zone')->get() : collect();
+    $ssDomainUse = class_exists(\ServerSuite\Models\Subdomain::class)
+        ? \ServerSuite\Models\Subdomain::query()->selectRaw('domain_id, count(*) as n')->groupBy('domain_id')->pluck('n', 'domain_id') : collect();
+    $ssServers = \Pterodactyl\Models\Server::query()->orderBy('name')->get(['uuid', 'name']);
+    $ssAllow = \ServerSuite\Models\ModManagerSetting::query()->pluck('subdomain_limit', 'server_uuid');
+    $ssUsed = \ServerSuite\Models\Subdomain::query()->selectRaw('server_uuid, count(*) as n')->groupBy('server_uuid')->pluck('n', 'server_uuid');
+@endphp
+<div class="row" id="subdomains">
+    <div class="col-xs-12 col-md-8">
+        <div class="box">
+            <div class="box-header with-border"><h3 class="box-title">Subdomains (Cloudflare)</h3></div>
+            <div class="box-body">
+                @if (request()->query('subdomains_ok'))
+                    <div class="alert alert-success">{{ request()->query('subdomains_ok') }}</div>
+                @endif
+                @if (request()->query('subdomains_error'))
+                    <div class="alert alert-danger">{{ request()->query('subdomains_error') }}</div>
+                @endif
+
+                <h4>Domains offered to servers</h4>
+                <table class="table table-condensed">
+                    <thead><tr><th>Domain</th><th>Subdomains</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                    @forelse ($ssDomains as $d)
+                        <tr>
+                            <td><code>{{ $d->zone }}</code></td>
+                            <td>{{ $ssDomainUse[$d->id] ?? 0 }}</td>
+                            <td>{!! $d->enabled ? '<span class="label label-success">offered</span>' : '<span class="label label-default">disabled</span>' !!}</td>
+                            <td class="text-right">
+                                <form method="POST" action="/extensions/serversuite/admin/domains/{{ $d->id }}/toggle" style="display:inline-block;">
+                                    @csrf
+                                    <button class="btn btn-xs btn-default">{{ $d->enabled ? 'Disable' : 'Enable' }}</button>
+                                </form>
+                                <form method="POST" action="/extensions/serversuite/admin/domains/{{ $d->id }}/remove" style="display:inline-block;"
+                                      onsubmit="return confirm('Remove this domain and its stored token?');">
+                                    @csrf
+                                    <button class="btn btn-xs btn-danger">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="4" class="text-muted">No domains yet.</td></tr>
+                    @endforelse
+                    </tbody>
+                </table>
+
+                <form method="POST" action="/extensions/serversuite/admin/domains" class="form-inline" autocomplete="off">
+                    @csrf
+                    <input type="text" name="zone" class="form-control" placeholder="example.com" required>
+                    <input type="password" name="token" class="form-control" placeholder="Cloudflare API token" autocomplete="new-password" required>
+                    <button type="submit" class="btn btn-primary">Add domain</button>
+                </form>
+                <p class="text-muted small" style="margin-top:6px;">
+                    The token is checked with Cloudflare, stored encrypted, and never shown again. Use a token with
+                    <strong>Zone &rarr; DNS &rarr; Edit</strong> for that domain only, never the Global API Key.
+                    Disabling a domain stops new claims; existing subdomains keep working.
+                </p>
+
+                <hr>
+                <h4>Allowance per server</h4>
+                <p class="text-muted small">How many subdomains each server may hold, on your domains or its own (0 = none). Subdomains are "bought" outside the panel: take payment, then raise the allowance here.</p>
+                <form method="POST" action="/extensions/serversuite/admin/subdomain-allowances">
+                    @csrf
+                    <table class="table table-condensed">
+                        <thead><tr><th>Server</th><th>In use</th><th style="width:120px;">Allowance</th></tr></thead>
+                        <tbody>
+                        @foreach ($ssServers as $srv)
+                            <tr>
+                                <td>{{ $srv->name }} <span class="text-muted small"><code>{{ \Illuminate\Support\Str::limit($srv->uuid, 8, '') }}</code></span></td>
+                                <td>{{ $ssUsed[$srv->uuid] ?? 0 }}</td>
+                                <td><input type="number" min="0" max="100" class="form-control input-sm"
+                                           name="allowance[{{ $srv->uuid }}]" value="{{ (int) ($ssAllow[$srv->uuid] ?? 0) }}"></td>
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                    <button type="submit" class="btn btn-primary">Save allowances</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-xs-12 col-md-4">
+        <div class="box">
+            <div class="box-header with-border"><h3 class="box-title">About subdomains</h3></div>
+            <div class="box-body">
+                <p>Server owners claim <code>name.yourdomain</code> from their server's <strong>Subdomains</strong> tab, or use their own Cloudflare domain. Each claim creates an A record (the server's IP, not proxied) and a <code>_minecraft._tcp</code> SRV record carrying the port, so players connect with just the name.</p>
+                <p>Records are removed when a server is deleted and re-pointed when its primary allocation changes.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
 {{-- Egg Manager: populate the nest -> egg cascade from the live catalog.
      Plain DOM building (no template literals, no Blueprint reserved tokens). --}}
 <script>

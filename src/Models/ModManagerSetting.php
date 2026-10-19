@@ -35,7 +35,14 @@ class ModManagerSetting extends Model
         'backup_interval_hours',
         'backup_schedule_hour',
         'backup_last_run_at',
+        'subdomain_limit',
+        'own_dns_zone',
+        'own_dns_zone_id',
+        'own_dns_token',
     ];
+
+    /** The own-domain Cloudflare token is write-only: never serialised. */
+    protected $hidden = ['own_dns_token'];
 
     protected $casts = [
         'modrinth_enabled'   => 'boolean',
@@ -48,6 +55,8 @@ class ModManagerSetting extends Model
         'backup_interval_hours'   => 'integer',
         'backup_schedule_hour'    => 'integer',
         'backup_last_run_at'      => 'datetime',
+        'subdomain_limit'         => 'integer',
+        'own_dns_token'           => 'encrypted',
     ];
 
     // -------------------------------------------------------------------------
