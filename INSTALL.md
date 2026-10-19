@@ -75,14 +75,18 @@ CI also uploads the built package as an artifact on every run.
 ```bash
 cd /opt/pterodactyl-panel
 
-# 1. Backend
-mkdir -p packages/serversuite
-# unzip the backend so composer.json sits at packages/serversuite/composer.json
-# add to the panel's composer.json repositories array (one-time):
-#   { "type": "path", "url": "packages/serversuite" }
+# 1. Backend: serversuite-pterodactyl-backend-v<version>.zip from the release,
+#    unzipped so composer.json sits at packages/serversuite/composer.json
+sudo mkdir -p packages/serversuite
+sudo unzip -q serversuite-pterodactyl-backend-v<version>.zip -d packages/serversuite
+sudo chown -R www-data:www-data packages/serversuite
+# Point Composer at it. Required: without this, `composer require` fails with
+# "could not be found in any version". A panel upgrade removes it again,
+# see "After a Pterodactyl panel upgrade".
+sudo -u www-data composer config repositories.serversuite '{"type": "path", "url": "packages/serversuite"}'
 sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*"
 grep '"version"' vendor/pterodactyl-serversuite/serversuite/composer.json
-sudo -u www-data php artisan migrate
+sudo -u www-data php artisan migrate --force
 sudo -u www-data php artisan optimize:clear
 sudo -u www-data php artisan queue:restart
 
@@ -171,6 +175,11 @@ sudo -u www-data php artisan tinker --execute="..."     # single-line probes onl
 ```
 
 Known error signatures:
+- `pterodactyl-serversuite/serversuite, it could not be found in any version` →
+  the path repository is missing (always after a panel upgrade). Run the
+  `composer config repositories.serversuite ...` line, then require again.
+- `Cannot create cache directory /var/www/.cache/composer` → harmless (no cache);
+  `sudo mkdir -p /var/www/.cache && sudo chown www-data:www-data /var/www/.cache`.
 - `Permission denied ... storage/framework/cache` → golden rule 1.
 - `Unknown column` / missing table → golden rule 4 (run migrate).
 - `__PHP_Incomplete_Class` in queue → golden rule 5.
