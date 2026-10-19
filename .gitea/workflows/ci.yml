@@ -7,7 +7,7 @@ on:
 
 jobs:
   lint:
-    name: PHP lint (8.2)
+    name: PHP lint (8.2) + package check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,12 +16,12 @@ jobs:
           php-version: "8.2"   # lowest PHP the panels support
           tools: none
           coverage: none
-      - name: Extract serversuite.blueprint
-        run: mkdir -p "$RUNNER_TEMP/bp" && unzip -q serversuite.blueprint -d "$RUNNER_TEMP/bp"
       - name: php -l
         run: |
-          find src tests database config "$RUNNER_TEMP/bp" -name '*.php' -print0 \
+          find src tests database config extension -name '*.php' -print0 \
             | xargs -0 -n1 -P4 php -l -d display_errors=1 > /dev/null
+      - name: serversuite.blueprint matches extension/, versions match
+        run: python3 tools/build-blueprint.py --check
 
   tests:
     name: Pest (Laravel ${{ matrix.laravel }})
@@ -115,5 +115,53 @@ jobs:
       - name: PHPStan against the panel source
         working-directory: ${{ env.PANEL }}
         run: |
-          mkdir -p serversuite-blueprint && unzip -q "$GITHUB_WORKSPACE/serversuite.blueprint" -d serversuite-blueprint
+          cp -r "$GITHUB_WORKSPACE/extension" serversuite-blueprint
           php -d memory_limit=1G vendor/bin/phpstan analyse -c "$GITHUB_WORKSPACE/.ci/phpstan.neon" --no-progress
+
+  extension:
+    name: Extension typecheck (Pterodactyl ${{ matrix.panel }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        panel: [v1.14.0, v1.15.1]
+    env:
+      PANEL: ${{ github.workspace }}/../panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"   # panel package.json: engines.node >= 22
+      - name: Clone pterodactyl/panel ${{ matrix.panel }}
+        run: git clone --quiet --depth 1 --branch "${{ matrix.panel }}" https://github.com/pterodactyl/panel.git "$PANEL"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.PANEL }}/node_modules
+          key: panel-node-modules-${{ matrix.panel }}
+      - name: yarn install (panel frontend)
+        working-directory: ${{ env.PANEL }}
+        run: |
+          corepack enable
+          # retry: the registry occasionally 502s mid-install
+          for i in 1 2 3; do
+            yarn install --frozen-lockfile --non-interactive --silent --network-timeout 300000 && exit 0
+            echo "::warning::yarn install failed (attempt $i), retrying"; sleep 15
+          done
+          exit 1
+      # The panel's tsconfig covers resources/scripts/**, so dropping the
+      # components where Blueprint installs them typechecks them against the
+      # real panel frontend (@/api/http, @/state/server, twin.macro, ...).
+      - name: tsc
+        working-directory: ${{ env.PANEL }}
+        run: |
+          cp -r "$GITHUB_WORKSPACE/extension/resources/scripts/components/server/serversuite" \
+            resources/scripts/components/server/serversuite
+          yarn -s tsc
+      - name: Build serversuite.blueprint
+        if: matrix.panel == 'v1.14.0'
+        run: python3 tools/build-blueprint.py -o "$RUNNER_TEMP/serversuite.blueprint"
+      - uses: actions/upload-artifact@v3
+        if: matrix.panel == 'v1.14.0'
+        with:
+          name: serversuite.blueprint
+          path: ${{ runner.temp }}/serversuite.blueprint

@@ -1,0 +1,5 @@
+Navigation:
+  Routes:
+    - { Name: 'Mods', Path: '/mod-manager', Type: 'server', Component: 'server/serversuite/ModManagerContainer', AdminOnly: 'false' }
+    - { Name: 'Backups', Path: '/backup-rotation', Type: 'server', Component: 'server/serversuite/BackupsContainer', AdminOnly: 'false' }
+    - { Name: 'Versions', Path: '/versions', Type: 'server', Component: 'server/serversuite/VersionsContainer', AdminOnly: 'false' }
