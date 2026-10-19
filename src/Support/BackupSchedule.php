@@ -13,7 +13,7 @@ use Carbon\CarbonInterface;
  * Two modes:
  *  - No fixed hour (anchor null): due once $interval hours have passed since
  *    the last run. The run time drifts with when rotation was enabled.
- *  - Fixed hour (anchor 0-23, panel timezone): daily and longer intervals run
+ *  - Fixed hour (anchor 0-23, in timezone()): daily and longer intervals run
  *    in the anchor hour; sub-daily intervals run on hours in phase with it
  *    (6h at 02 -> 02, 08, 14, 20). A slot fires when nothing has run in it yet
  *    (so only the first tick of the hour) AND at least (interval - 23h) has
@@ -24,6 +24,26 @@ use Carbon\CarbonInterface;
  */
 class BackupSchedule
 {
+    /**
+     * Timezone the fixed hour is in: the admin's backup timezone (the same
+     * one backup names use), else the panel's. An invalid value falls back.
+     */
+    public static function timezone(): string
+    {
+        $tz = (string) config('serversuite.backups.timezone', '');
+        if ($tz !== '' && in_array($tz, timezone_identifiers_list(), true)) {
+            return $tz;
+        }
+
+        return (string) config('app.timezone', 'UTC') ?: 'UTC';
+    }
+
+    /** Now, in timezone(), so ->hour is the hour the owner picked from. */
+    public static function now(): CarbonImmutable
+    {
+        return CarbonImmutable::now(self::timezone());
+    }
+
     public static function isDue(int $intervalHours, ?int $anchorHour, ?CarbonInterface $lastRun, CarbonInterface $now): bool
     {
         $interval = max(1, $intervalHours);

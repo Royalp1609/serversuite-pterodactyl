@@ -780,16 +780,16 @@ class ModManagerController extends Controller
                 'interval_hours'         => $setting?->backup_interval_hours,
                 'default_interval_hours' => (int) config('serversuite.backups.default_interval_hours', 12),
                 'presets'                => $presets,
-                // Fixed run hour (0-23) in the panel's timezone; null = no fixed time.
+                // Fixed run hour (0-23) in the backup timezone; null = no fixed time.
                 'hour'                   => $setting?->backup_schedule_hour,
-                'timezone'               => (string) config('app.timezone', 'UTC'),
+                'timezone'               => \ServerSuite\Support\BackupSchedule::timezone(),
                 'last_run_at'            => optional($setting?->backup_last_run_at)->toIso8601String(),
                 'next_run_at'            => ($setting?->backup_rotation_enabled)
                     ? optional(\ServerSuite\Support\BackupSchedule::nextRun(
                         (int) ($setting->backup_interval_hours ?: config('serversuite.backups.default_interval_hours', 12)),
                         $setting->backup_schedule_hour,
                         $setting->backup_last_run_at,
-                        now(),
+                        \ServerSuite\Support\BackupSchedule::now(),
                     ))->toIso8601String()
                     : null,
             ],

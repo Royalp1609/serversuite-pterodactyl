@@ -90,14 +90,14 @@
                         <p class="text-muted small">How often opted-in servers are backed up when they haven't picked their own cadence on their Backups tab. The scheduler checks every 15 minutes and backs up each server when its interval is due.</p>
                     </div>
                     <div class="form-group">
-                        <label>Backup name timezone</label>
+                        <label>Backup timezone</label>
                         <select class="form-control" name="backup_timezone">
                             <option value="">Use panel timezone ({{ $appTz }})</option>
                             @foreach (timezone_identifiers_list() as $tzId)
                                 <option value="{{ $tzId }}" {{ $backupTz === $tzId ? 'selected' : '' }}>{{ $tzId }}</option>
                             @endforeach
                         </select>
-                        <p class="text-muted small">Only affects the timestamp shown in auto-backup names. Stored backup times stay in UTC.</p>
+                        <p class="text-muted small">Used for the timestamp in auto-backup names and for the "Run at" hour servers pick on their Backups tab. Stored backup times stay in UTC.</p>
                     </div>
                 </div>
                 <div class="box-footer">
