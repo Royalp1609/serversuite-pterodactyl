@@ -64,7 +64,7 @@ class ModManagerService
      * without persisting the change. When null, the stored/detected values are
      * used as before.
      *
-     * @return array{data: ModResult[], loader: ?string, loader_confident: bool, game_version: ?string}
+     * @return array{data: ModResult[], next_offset: int, has_more: bool, loader: ?string, loader_confident: bool, game_version: ?string}
      */
     public function searchWithContext(string $query, object $server, int $limit = 20, ?string $loaderOverride = null, ?string $versionOverride = null, ?string $sourceOnly = null, ?string $sort = null, int $offset = 0, bool $compatibleOnly = false): array
     {
