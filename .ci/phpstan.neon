@@ -1,0 +1,23 @@
+# PHPStan for CI. Run from the root of a Pterodactyl panel checkout that has
+# this package installed (see .gitea/workflows/ci.yml), so panel classes
+# (Pterodactyl\Models\Server, the Wings repositories, ...) resolve against
+# the real panel source, using the panel's own Larastan.
+#
+# Level 3 is clean as of 0.16.0. Levels 4-5 mostly flag defensive `??` /
+# `?->` on data from Wings and the mod APIs; raise the level once those are
+# reviewed.
+includes:
+    - %currentWorkingDirectory%/vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 3
+    tmpDir: %currentWorkingDirectory%/storage/phpstan
+    paths:
+        - %currentWorkingDirectory%/vendor/pterodactyl-serversuite/serversuite/src
+        # PHP from serversuite.blueprint, extracted by the workflow
+        - %currentWorkingDirectory%/serversuite-blueprint/app
+        - %currentWorkingDirectory%/serversuite-blueprint/routes
+    # Larastan infers model columns from migrations; include the package's.
+    databaseMigrationsPath:
+        - %currentWorkingDirectory%/database/migrations
+        - %currentWorkingDirectory%/vendor/pterodactyl-serversuite/serversuite/database/migrations
