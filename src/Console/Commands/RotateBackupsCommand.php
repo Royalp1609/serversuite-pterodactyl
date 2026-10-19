@@ -7,6 +7,7 @@ use Illuminate\Support\Carbon;
 use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Services\BackupRotationService;
 use ServerSuite\Support\Data\RotationResult;
+use ServerSuite\Support\BackupSchedule;
 
 class RotateBackupsCommand extends Command
 {
@@ -63,12 +64,13 @@ class RotateBackupsCommand extends Command
             ->where('backup_rotation_enabled', true)
             ->get();
 
-        $due = $settings->filter(function (ModManagerSetting $s) use ($defaultInterval, $now) {
-            $interval = $s->backup_interval_hours ?: $defaultInterval;
-            $last     = $s->backup_last_run_at;
-
-            return $last === null || $last->copy()->addHours($interval)->lte($now);
-        })->values();
+        // Fixed-hour vs. drifting schedules: see BackupSchedule.
+        $due = $settings->filter(fn (ModManagerSetting $s) => BackupSchedule::isDue(
+            (int) ($s->backup_interval_hours ?: $defaultInterval),
+            $s->backup_schedule_hour,
+            $s->backup_last_run_at,
+            $now,
+        ))->values();
 
         if ($due->isEmpty()) {
             $this->info('[Server Suite] No servers are due for a scheduled backup.');

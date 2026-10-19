@@ -65,3 +65,30 @@ it('reports cleanly when no servers are enabled', function () {
         ->expectsOutputToContain('No servers are due for a scheduled backup.')
         ->assertExitCode(0);
 });
+
+it('waits for the chosen hour when a schedule hour is set (#4)', function () {
+    $fake = bindRotationFake();
+    $fake->setLimit('anchored', 10);
+
+    $s = ModManagerSetting::forServer('anchored');
+    $s->backup_rotation_enabled = true;
+    $s->backup_interval_hours = 24;
+    $s->backup_schedule_hour = 4;
+    $s->backup_last_run_at = \Carbon\Carbon::parse('2026-10-19 04:00');
+    $s->save();
+
+    \Carbon\Carbon::setTestNow('2026-10-20 03:45');
+    $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
+    expect($fake->listBackups('anchored'))->toHaveCount(0);
+
+    \Carbon\Carbon::setTestNow('2026-10-20 04:00');
+    $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
+    expect($fake->listBackups('anchored'))->toHaveCount(1);
+    expect($s->refresh()->backup_last_run_at->format('Y-m-d H:i'))->toBe('2026-10-20 04:00');
+
+    \Carbon\Carbon::setTestNow('2026-10-20 04:15');
+    $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
+    expect($fake->listBackups('anchored'))->toHaveCount(1);
+
+    \Carbon\Carbon::setTestNow();
+});

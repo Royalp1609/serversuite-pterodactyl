@@ -33,6 +33,7 @@ class ModManagerSetting extends Model
         'backup_rotation_enabled',
         'backup_keep',
         'backup_interval_hours',
+        'backup_schedule_hour',
         'backup_last_run_at',
     ];
 
@@ -45,6 +46,7 @@ class ModManagerSetting extends Model
         'backup_rotation_enabled' => 'boolean',
         'backup_keep'             => 'integer',
         'backup_interval_hours'   => 'integer',
+        'backup_schedule_hour'    => 'integer',
         'backup_last_run_at'      => 'datetime',
     ];
 
