@@ -24,7 +24,7 @@ class FakePlannerDriver implements RepositoryContract
     public function label(): string { return 'Fake'; }
     public function isAvailable(): bool { return true; }
 
-    public function search(string $query, ?string $loader = null, ?string $gameVersion = null, int $limit = 20): array
+    public function search(string $query, ?string $loader = null, ?string $gameVersion = null, int $limit = 20, ?string $sort = null, int $offset = 0): array
     {
         return array_values($this->mods);
     }
@@ -32,6 +32,11 @@ class FakePlannerDriver implements RepositoryContract
     public function get(string $modId): ?ModResult
     {
         return $this->mods[$modId] ?? null;
+    }
+
+    public function lookupByHash(string $sha1): ?array
+    {
+        return null;
     }
 
     public function versions(string $modId, ?string $loader = null, ?string $gameVersion = null): array

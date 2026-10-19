@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: PHP lint (8.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"   # lowest PHP the panels support
+          tools: none
+          coverage: none
+      - name: Extract serversuite.blueprint
+        run: mkdir -p "$RUNNER_TEMP/bp" && unzip -q serversuite.blueprint -d "$RUNNER_TEMP/bp"
+      - name: php -l
+        run: |
+          find src tests database config "$RUNNER_TEMP/bp" -name '*.php' -print0 \
+            | xargs -0 -n1 -P4 php -l -d display_errors=1 > /dev/null
+
+  tests:
+    name: Pest (Laravel ${{ matrix.laravel }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pterodactyl 1.14 is on Laravel 11, 1.15 on Laravel 12.
+          - laravel: "11"
+            testbench: "^9.0"
+            pest: "^2.0"
+          - laravel: "12"
+            testbench: "^10.0"
+            pest: "^3.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer:v2
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-tests-l${{ matrix.laravel }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-tests-l${{ matrix.laravel }}-
+      - name: Pin Laravel ${{ matrix.laravel }}
+        run: |
+          composer require --no-update --no-interaction \
+            "illuminate/support:^${{ matrix.laravel }}.0" "illuminate/database:^${{ matrix.laravel }}.0" \
+            "illuminate/http:^${{ matrix.laravel }}.0" "illuminate/console:^${{ matrix.laravel }}.0" \
+            "illuminate/events:^${{ matrix.laravel }}.0"
+          composer require --dev --no-update --no-interaction \
+            "orchestra/testbench:${{ matrix.testbench }}" "pestphp/pest:${{ matrix.pest }}"
+      # Laravel 11 is out of security support and every 11.x release has open
+      # advisories, which Composer >= 2.10 refuses to install. Pterodactyl 1.14
+      # ships on it anyway, so allow it for this test-only leg.
+      - name: Allow advisory-affected laravel/framework (Laravel 11 only)
+        if: matrix.laravel == '11'
+        run: composer config policy.advisories.ignore --json '["laravel/framework"]'
+      - name: composer update
+        run: composer update --no-interaction --no-progress --prefer-dist
+      - name: Pest
+        run: vendor/bin/pest --colors=never
+
+  panel:
+    name: Pterodactyl ${{ matrix.panel }} (install + PHPStan)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # TODO(#1): add v1.15.1 in the PR that fixes #1. Until composer.json
+        # allows Laravel 12 it fails at "composer require" (Gitea counts a
+        # continue-on-error job as a failed status, so it can't just be
+        # marked as allowed to fail).
+        panel: [v1.14.0]
+    env:
+      PANEL: ${{ github.workspace }}/../panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          # the panel's composer.json ext-* requirements (+ bcmath for s1lentium/iptools)
+          extensions: bcmath, mbstring, pdo, pdo_mysql, posix, zip
+          tools: composer:v2
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-panel-${{ matrix.panel }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-panel-${{ matrix.panel }}-
+      - name: Clone pterodactyl/panel ${{ matrix.panel }}
+        run: git clone --quiet --depth 1 --branch "${{ matrix.panel }}" https://github.com/pterodactyl/panel.git "$PANEL"
+      - name: Install the package into the panel (as INSTALL.md does)
+        working-directory: ${{ env.PANEL }}
+        run: |
+          cp .env.example .env
+          composer config repositories.serversuite \
+            "{\"type\":\"path\",\"url\":\"$GITHUB_WORKSPACE\",\"options\":{\"symlink\":false}}"
+          composer require --no-interaction --no-progress --prefer-dist "pterodactyl-serversuite/serversuite:*"
+      - name: Service provider boots, commands register
+        working-directory: ${{ env.PANEL }}
+        run: |
+          php artisan package:discover
+          php artisan list --raw > "$RUNNER_TEMP/commands.txt"
+          for c in serversuite:check-updates serversuite:rotate-backups; do
+            grep -q "^$c " "$RUNNER_TEMP/commands.txt" || { echo "::error::$c not registered"; exit 1; }
+          done
+      - name: PHPStan against the panel source
+        working-directory: ${{ env.PANEL }}
+        run: |
+          mkdir -p serversuite-blueprint && unzip -q "$GITHUB_WORKSPACE/serversuite.blueprint" -d serversuite-blueprint
+          php -d memory_limit=1G vendor/bin/phpstan analyse -c "$GITHUB_WORKSPACE/.ci/phpstan.neon" --no-progress

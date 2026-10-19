@@ -47,6 +47,17 @@ class FakeDaemonFileClient implements DaemonFileClient
             unset($this->files[$serverUuid][$directory . '/' . $name]);
         }
     }
+
+    public function readFile(string $serverUuid, string $path, int $maxBytes = 131072): ?string
+    {
+        $meta = $this->files[$serverUuid][$path] ?? null;
+
+        if ($meta === null || $meta['size'] > $maxBytes) {
+            return null;
+        }
+
+        return str_repeat('x', $meta['size']);
+    }
 }
 
 function makeVersion(int $size, string $filename = 'sodium-fabric.jar', string $url = 'https://cdn/sodium.jar'): ModVersion

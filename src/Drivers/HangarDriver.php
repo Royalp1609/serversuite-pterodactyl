@@ -105,14 +105,14 @@ class HangarDriver extends AbstractDriver
 
     public function get(string $modId): ?ModResult
     {
-        [$author, $slug] = $this->splitId($modId);
+        [, $slug] = $this->splitId($modId);
         if (! $slug) {
             return null;
         }
 
         $cacheKey = 'serversuite.hangar.project.' . md5($modId);
 
-        return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($author, $slug) {
+        return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($slug) {
             // Hangar accepts /projects/{slug} and also /projects/{author}/{slug};
             // the slug-only form is the documented canonical lookup.
             $resp = $this->http()->get("/projects/{$slug}");
