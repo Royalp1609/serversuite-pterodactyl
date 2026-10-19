@@ -53,7 +53,11 @@ def zip_paths(out: Path, paths: list[str]) -> None:
 
 
 def notes(tag: str, version: str) -> str:
-    tags = [t for t in git("tag", "--list", "v*", "--sort=-v:refname").splitlines() if t != tag]
+    # Previous release = the highest version tag that is an ancestor of this
+    # one. Version order alone isn't enough: pelican-server-suite has old
+    # imported tags (e.g. v1.0.0-beta1.1.0) that aren't in main's history.
+    tags = [t for t in git("tag", "--list", "v*", "--sort=-v:refname").splitlines()
+            if t != tag and subprocess.run(["git", "merge-base", "--is-ancestor", t, tag], cwd=ROOT).returncode == 0]
     prev = tags[0] if tags else None
     rng = f"{prev}..{tag}" if prev else tag
     merges = "\n".join(
