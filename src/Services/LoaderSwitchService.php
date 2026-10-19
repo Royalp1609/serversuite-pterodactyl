@@ -3,6 +3,7 @@
 namespace ServerSuite\Services;
 
 use ServerSuite\Contracts\PanelServerOps;
+use ServerSuite\Support\ReinstallGuard;
 
 /**
  * Phase 3 — loader switching (Paper ↔ Fabric ↔ Forge ↔ Vanilla).
@@ -103,6 +104,10 @@ class LoaderSwitchService
     public function switchLoader(object $server, int $targetEggId, ?string $mcVersion = null, bool $requireBackup = true): array
     {
         $uuid = $server->uuid;
+
+        // Every loader switch wipes the server and relies on the reinstall to
+        // put a jar back; refuse before stopping/wiping if it can't run (#3).
+        ReinstallGuard::assertCanReinstall($server, 'switch loader');
 
         if (! class_exists(self::EGG_MODEL)) {
             throw new \RuntimeException('Egg model unavailable on this panel.');
