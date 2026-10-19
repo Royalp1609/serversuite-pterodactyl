@@ -84,7 +84,7 @@ sudo -u www-data php artisan migrate
 sudo -u www-data php artisan optimize:clear
 sudo -u www-data php artisan queue:restart
 
-# 2. Extension (requires Blueprint framework + Node 20 / yarn)
+# 2. Extension (requires Blueprint framework + Node 22 / yarn)
 # place serversuite.blueprint in the panel root
 blueprint -install serversuite
 ```
@@ -108,6 +108,33 @@ blueprint -remove serversuite && blueprint -install serversuite   # if the UI ch
 `sudo -u www-data php artisan cache:clear` additionally flushes the 5-minute
 search caches and the 10-minute per-server version-sourcing cache — use it when
 testing detection changes, otherwise results look stale.
+
+## After a Pterodactyl panel upgrade
+
+The panel upgrade extracts a new `composer.json` and `composer.lock` over the
+old ones. That **removes the path repository and the requirement for this
+package**, so after `composer install` the backend is gone from `vendor/`
+and every extension route returns a 500. It also overwrites the panel files
+Blueprint patched. After upgrading the panel (per Pterodactyl's own upgrade
+guide), before bringing it back up:
+
+```bash
+cd /opt/pterodactyl-panel
+# 1. Blueprint: reinstall/upgrade to a release that supports the new panel version
+# 2. Re-add the backend (use the directory your backend actually lives in)
+sudo -u www-data composer config repositories.serversuite '{"type": "path", "url": "packages/serversuite"}'
+sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*"
+grep '"version"' vendor/pterodactyl-serversuite/serversuite/composer.json   # VERIFY
+sudo -u www-data php artisan migrate --force
+sudo -u www-data php artisan optimize:clear
+sudo -u www-data php artisan queue:restart
+# 3. Reinstall the extension
+blueprint -install serversuite
+```
+
+Backend compatibility: 0.17.0+ supports Pterodactyl 1.14 (Laravel 11) and
+1.15 (Laravel 12). 0.16.0 and older only install on Laravel 11, so on 1.15
+`composer require` fails with `requires illuminate/support ^11.0`.
 
 ## Configuration
 

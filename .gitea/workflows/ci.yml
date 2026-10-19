@@ -74,11 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO(#1): add v1.15.1 in the PR that fixes #1. Until composer.json
-        # allows Laravel 12 it fails at "composer require" (Gitea counts a
-        # continue-on-error job as a failed status, so it can't just be
-        # marked as allowed to fail).
-        panel: [v1.14.0]
+        panel: [v1.14.0, v1.15.1]
     env:
       PANEL: ${{ github.workspace }}/../panel
     steps:
