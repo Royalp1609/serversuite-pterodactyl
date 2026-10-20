@@ -30,9 +30,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
-EPOCH = (1980, 1, 1, 0, 0, 0)
+# Zip entry timestamps = the release commit's time (see stamp()). Not a fixed
+# date: when an update is unzipped over the previous release, files that kept
+# the same fixed date as before made PHP's opcache treat changed code as
+# unchanged, and the panel kept running the old version (2026-10-20).
 # What the panel needs from this repo; tests, CI and the extension source stay out.
 BACKEND = ["composer.json", "src", "config", "database", "INSTALL.md", "PROVIDERS.md"]
+
+
+def stamp(tag: str) -> tuple:
+    """The tagged commit's UTC time as a zip timestamp: reproducible per release, new for every release."""
+    import time
+    ts = int(git("log", "-1", "--format=%ct", tag if tag else "HEAD"))
+    t = time.gmtime(ts)
+    return (max(1980, t.tm_year), t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec - t.tm_sec % 2)
 
 
 def git(*args: str) -> str:
@@ -46,7 +57,7 @@ def zip_paths(out: Path, paths: list[str]) -> None:
         files += [path] if path.is_file() else sorted(f for f in path.rglob("*") if f.is_file())
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for f in files:
-            info = zipfile.ZipInfo(f.relative_to(ROOT).as_posix(), EPOCH)
+            info = zipfile.ZipInfo(f.relative_to(ROOT).as_posix(), STAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             z.writestr(info, f.read_bytes())
@@ -105,6 +116,8 @@ def main() -> int:
         print(__doc__)
         return 2
     tag, do_publish, draft = sys.argv[1], "--publish" in sys.argv[2:], "--draft" in sys.argv[2:]
+    global STAMP
+    STAMP = stamp(tag if tag in git("tag", "--list", tag).splitlines() else "HEAD")
     version = json.loads((ROOT / "composer.json").read_text())["version"]
     if tag != f"v{version}":
         print(f"::error::tag {tag} doesn't match composer.json version {version} (expected v{version})")
