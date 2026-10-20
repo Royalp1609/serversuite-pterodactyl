@@ -107,8 +107,11 @@ class RotateBackupsCommand extends Command
 
             // Advance the schedule clock on a deliberate outcome (rotated or
             // skipped). Failures are left to retry on the next tick.
+            // Stored in the app timezone: Eloquent writes a Carbon's wall-clock
+            // time without converting it, so saving $now as-is would read back
+            // shifted by the backup timezone's offset.
             if (! $result->isFailed()) {
-                $setting->forceFill(['backup_last_run_at' => $now])->save();
+                $setting->forceFill(['backup_last_run_at' => $now->setTimezone(config('app.timezone'))])->save();
             }
 
             $this->line($this->formatLine($uuid, $result));
