@@ -196,6 +196,20 @@ sudo -u www-data php artisan tinker --execute="..."     # single-line probes onl
 ```
 
 Known error signatures:
+- `The provided backup link resolves to a blocked address` when restoring a
+  backup → your S3 endpoint is on a **private address** (self-hosted MinIO,
+  Garage, etc.). Wings 1.13+ refuses to download restores from private,
+  loopback or link-local addresses. On each Wings node, add the S3 hostname
+  under `system.backups` in `/etc/pterodactyl/config.yml`, then
+  `systemctl restart wings`:
+  ```yaml
+    backups:
+      restore_host_allowlist:
+      - s3.example.internal
+  ```
+  Keep it to that exact hostname so other internal addresses stay blocked.
+  Public S3 (AWS, Backblaze, …) doesn't need it. Creating backups isn't
+  affected, only restores.
 - `pterodactyl-serversuite/serversuite, it could not be found in any version` →
   the path repository is missing (always after a panel upgrade). Run the
   `composer config repositories.serversuite ...` line, then require again.
