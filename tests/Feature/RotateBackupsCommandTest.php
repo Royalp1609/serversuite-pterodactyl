@@ -92,3 +92,30 @@ it('waits for the chosen hour when a schedule hour is set (#4)', function () {
 
     \Carbon\Carbon::setTestNow();
 });
+
+it('stores the true last run when the backup timezone differs from the app timezone', function () {
+    // Eloquent writes a Carbon's wall-clock time without converting it, so
+    // saving the backup-timezone "now" stored London time as UTC: read back an
+    // hour late in BST, which made a weekly schedule skip a week.
+    config(['app.timezone' => 'UTC', 'serversuite.backups.timezone' => 'Europe/London']);
+    $fake = bindRotationFake();
+    $fake->setLimit('weekly', 10);
+
+    $s = ModManagerSetting::forServer('weekly');
+    $s->backup_rotation_enabled = true;
+    $s->backup_interval_hours = 168;
+    $s->backup_schedule_hour = 3;
+    $s->save();
+
+    // 03:00 London on Tue 7 Jul 2026 is 02:00 UTC.
+    \Carbon\Carbon::setTestNow(\Carbon\CarbonImmutable::parse('2026-07-07 02:00', 'UTC'));
+    $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
+    expect($s->refresh()->backup_last_run_at->equalTo(\Carbon\CarbonImmutable::parse('2026-07-07 02:00', 'UTC')))->toBeTrue();
+
+    // A week later, same hour: due again, not pushed to the week after.
+    \Carbon\Carbon::setTestNow(\Carbon\CarbonImmutable::parse('2026-07-14 02:00', 'UTC'));
+    $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
+    expect($s->refresh()->backup_last_run_at->equalTo(\Carbon\CarbonImmutable::parse('2026-07-14 02:00', 'UTC')))->toBeTrue();
+
+    \Carbon\Carbon::setTestNow();
+});
