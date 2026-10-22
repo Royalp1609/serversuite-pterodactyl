@@ -648,6 +648,36 @@ class ModManagerService
     }
 
     /**
+     * Installed mods outside $mods that need one of them (the bulk remove's
+     * warning). Each with the names of the mods in $mods it needs.
+     *
+     * @param ServerMod[] $mods  all on one server
+     * @return array<int, array{id: int, mod_name: string, needs: string[]}>
+     */
+    public function dependentsOfSet(array $mods): array
+    {
+        if ($mods === []) {
+            return [];
+        }
+        $ids = array_map(fn (ServerMod $m) => $m->id, $mods);
+        $out = [];
+        foreach (ServerMod::forServer($mods[0]->server_uuid)->whereNotIn('id', $ids)->get() as $other) {
+            $deps = is_array($other->dependencies) ? $other->dependencies : [];
+            $needs = [];
+            foreach ($mods as $m) {
+                if ($other->source === $m->source && in_array($m->source_id, $deps, true)) {
+                    $needs[] = $m->mod_name;
+                }
+            }
+            if ($needs !== []) {
+                $out[] = ['id' => $other->id, 'mod_name' => $other->mod_name, 'needs' => $needs];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Remove an installed mod from a server and the manifest.
      *
      * @throws \ServerSuite\Exceptions\DeliveryException
@@ -667,7 +697,23 @@ class ModManagerService
      */
     public function orphanedBy(ServerMod $serverMod): array
     {
-        $all = ServerMod::forServer($serverMod->server_uuid)->get();
+        return $this->orphanedBySet([$serverMod]);
+    }
+
+    /**
+     * Dependencies that nothing installed needs once every mod in $mods is
+     * removed (the bulk remove): a library two of them share counts, which
+     * removing either one alone wouldn't orphan. Excludes $mods themselves.
+     *
+     * @param ServerMod[] $mods  all on one server
+     * @return ServerMod[]
+     */
+    public function orphanedBySet(array $mods): array
+    {
+        if ($mods === []) {
+            return [];
+        }
+        $all = ServerMod::forServer($mods[0]->server_uuid)->get();
 
         // Index by "source:source_id" for dependency lookups.
         $byKey = [];
@@ -679,8 +725,11 @@ class ModManagerService
             return is_array($m->dependencies) ? $m->dependencies : [];
         };
 
-        // The set being removed; seed with the target, grow with orphans.
-        $removing = [$serverMod->id => $serverMod];
+        // The set being removed; seed with the targets, grow with orphans.
+        $removing = [];
+        foreach ($mods as $m) {
+            $removing[$m->id] = $m;
+        }
 
         do {
             $added = false;
@@ -719,8 +768,10 @@ class ModManagerService
             }
         } while ($added);
 
-        // Return the orphans only (exclude the original target).
-        unset($removing[$serverMod->id]);
+        // Return the orphans only (exclude the targets).
+        foreach ($mods as $m) {
+            unset($removing[$m->id]);
+        }
 
         return array_values($removing);
     }

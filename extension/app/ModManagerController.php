@@ -773,6 +773,77 @@ class ModManagerController extends Controller
     }
 
     /**
+     * POST /{server}/mods/remove-batch { ids, probe?, force?, orphans?, clearance }
+     * Remove several mods at once, behind one pre-change backup. A probe
+     * (never deletes) reports mods outside the selection that still need one
+     * of them, and dependencies nothing will need afterwards; `orphans` picks
+     * which of those go too. Dependents outside the selection need `force`.
+     */
+    public function removeBatch(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        $data = $request->validate([
+            'ids'       => ['required', 'array', 'min:1', 'max:200'],
+            'ids.*'     => ['integer'],
+            'orphans'   => ['nullable', 'array', 'max:200'],
+            'orphans.*' => ['integer'],
+            'probe'     => ['nullable', 'boolean'],
+            'force'     => ['nullable', 'boolean'],
+        ]);
+
+        $mods = ServerMod::forServer($srv->uuid)->whereIn('id', array_unique($data['ids']))->get()->all();
+        if (count($mods) !== count(array_unique($data['ids']))) {
+            return response()->json(['error' => 'Some of those mods are not installed on this server any more. Refresh and try again.'], 404);
+        }
+
+        $dependents = $this->mods->dependentsOfSet($mods);
+        $orphans = $this->mods->orphanedBySet($mods);
+
+        if (! empty($data['probe'])) {
+            return response()->json(['data' => [
+                'dependents' => $dependents,
+                'orphans'    => array_map(fn (ServerMod $m) => ['id' => $m->id, 'mod_name' => $m->mod_name, 'installed_version' => $m->installed_version], $orphans),
+            ]]);
+        }
+        if ($dependents !== [] && empty($data['force'])) {
+            return response()->json(['needs_confirmation' => true, 'dependents' => $dependents,
+                'message' => 'Other installed mods still need some of these.'], 409);
+        }
+
+        $clearance = $this->requireClearance($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
+
+        // Only orphans the probe would have offered.
+        $wanted = array_flip(array_map('intval', $data['orphans'] ?? []));
+        $targets = array_merge($mods, array_values(array_filter($orphans, fn (ServerMod $m) => isset($wanted[$m->id]))));
+
+        $removed = $failed = [];
+        foreach ($targets as $mod) {
+            try {
+                $this->mods->remove($mod, $srv, true);   // the set was checked above
+                $removed[] = $mod;
+            } catch (\Throwable $e) {
+                $failed[] = ['id' => $mod->id, 'mod_name' => $mod->mod_name, 'error' => $e->getMessage()];
+            }
+        }
+
+        if ($removed !== []) {
+            $names = array_map(fn (ServerMod $m) => $m->mod_name, $removed);
+            $this->audit($srv, 'mods-removed', ['count' => count($removed), 'mods' => implode(', ', $names), 'backup' => $clearance['backup']]);
+            $this->recordChange($srv, 'remove ' . count($removed) . ' mods', $clearance);
+        }
+
+        return response()->json(['data' => [
+            'removed' => array_map(fn (ServerMod $m) => $m->id, $removed),
+            'failed'  => $failed,
+        ]], $failed === [] ? 200 : 207);
+    }
+
+    /**
      * DELETE /{server}/mods/{serverMod}
      */
     public function destroy(Request $request, string $server, int $serverMod): JsonResponse

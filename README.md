@@ -29,8 +29,10 @@ is the same suite as a native Pelican plugin.
   two of them need is installed once.
 - Files are downloaded **by Wings straight to the server**; nothing large passes
   through the panel.
-- **Manage**: see installed mods with icons and update badges, update one or
-  all, and remove with warnings when something depends on a mod.
+- **Manage**: installed mods as a list with icons and update badges; update
+  one or all, and remove with warnings when something depends on a mod. Tick
+  several to **remove them together** (one backup; libraries nothing needs
+  afterwards are offered too, including ones the selected mods shared).
 - **Scheduled update checks** (admin-tunable, optional auto-apply).
 - **Reconcile**: find jars on disk the suite doesn't know about (identified by
   hash on Modrinth) and records whose file has gone, then adopt or forget them.
