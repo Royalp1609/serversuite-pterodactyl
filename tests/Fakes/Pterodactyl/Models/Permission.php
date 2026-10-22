@@ -8,6 +8,7 @@ use Illuminate\Support\Collection;
 class Permission
 {
     protected static array $permissions = [
+        'control' => ['description' => 'Control.', 'keys' => ['console' => '', 'start' => '', 'stop' => '', 'restart' => '']],
         'backup' => ['description' => 'Backups.', 'keys' => ['create' => '', 'read' => '', 'delete' => '', 'download' => '', 'restore' => '']],
         'startup' => ['description' => 'Startup.', 'keys' => ['read' => '', 'update' => '', 'docker-image' => '']],
         'settings' => ['description' => 'Settings.', 'keys' => ['rename' => '', 'reinstall' => '']],

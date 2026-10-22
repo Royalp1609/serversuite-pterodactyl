@@ -1081,6 +1081,62 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Properties (#20)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/properties */
+    public function properties(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => app(\ServerSuite\Services\PropertiesService::class)->open($srv->uuid)]);
+    }
+
+    /** POST /{server}/properties { hash, values, after: none|restart|reset_world } */
+    public function propertiesSave(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate([
+            'hash' => ['required', 'string', 'size:40'], 'values' => ['present', 'array'],
+            'after' => ['required', 'string', 'in:' . implode(',', array_keys(PanelPermissions::PROPERTIES_AFTER))],
+        ]);
+        if (! PanelPermissions::holds($request->user(), $srv, PanelPermissions::PROPERTIES_AFTER[$data['after']])) {
+            abort(403, 'You do not have permission to do this on this server (needs ' . implode(', ', PanelPermissions::PROPERTIES_AFTER[$data['after']]) . ').');
+        }
+
+        try {
+            $r = app(\ServerSuite\Services\PropertiesService::class)->save($srv->uuid, $data['hash'], $data['values'], $data['after']);
+        } catch (\InvalidArgumentException | \ServerSuite\Support\Config\ConfigEditException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        if ($r['changed'] !== []) {
+            $this->audit($srv, 'properties-saved', ['changed' => implode(', ', array_slice($r['changed'], 0, 20)), 'after' => $data['after']]);
+        }
+
+        return response()->json(['data' => $r]);
+    }
+
+    /** POST /{server}/properties/reset-world: called until it returns done */
+    public function propertiesResetWorld(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        try {
+            $r = app(\ServerSuite\Services\PropertiesService::class)->resetWorldStep($srv->uuid);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'World reset failed: ' . $e->getMessage()], 422);
+        }
+        if ($r['status'] === 'done') {
+            $this->audit($srv, 'world-reset', []);
+        }
+
+        return response()->json(['data' => $r]);
+    }
+
+    // -------------------------------------------------------------------------
     // Subdomains (#14)
     // -------------------------------------------------------------------------
 

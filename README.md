@@ -55,6 +55,16 @@ is the same suite as a native Pelican plugin.
   server is never left wiped.
 - **Reset** the server: world only, or a clean slate.
 
+### Properties (server tab)
+- `server.properties` as a form: switches for on/off settings, number boxes,
+  choices (difficulty, gamemode), and a filter box. Only the values you change
+  are written; comments and the file's order stay, and a typo can't add a
+  setting.
+- **Save**, or **Save and restart**. When you change `level-seed`, you can reset
+  the world so the new seed applies: the server is stopped first, the world
+  folders are deleted only once it's offline (plugins and configs stay), then
+  it starts again.
+
 ### Subdomains (server tab)
 - Claim `name.domain` on a domain the panel admin offers, or on the server
   owner's **own Cloudflare domain**. Players join with just the name: an A
@@ -131,6 +141,7 @@ are hidden (the server checks every request too).
 | Mods → Configs | `file.read-content` | `file.update` (the same file permissions as the File Manager) |
 | Backups | `backup.read` | `backup.create` (back up now, rename), `backup.delete` (delete, lock), `backup.restore`, `backup.download`; the schedule needs `backup.create` + `backup.delete` (rotation deletes the oldest) |
 | Versions | `startup.read` | switching version or loader needs `startup.update`, `startup.docker-image`, `settings.reinstall` and `backup.create`; the reset needs `settings.reinstall` + `file.delete` |
+| Properties | `file.read-content` | `file.update`; **Save and restart** also needs `control.restart`; resetting the world after a seed change needs `file.delete`, `control.stop` and `control.start` |
 | Subdomains | `subdomains.read` | `subdomains.manage` (claim, release, re-point, status cards, own domain and its token) |
 
 Every change made through Server Suite (mods installed, updated or removed,

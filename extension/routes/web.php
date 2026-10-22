@@ -36,6 +36,14 @@ Route::post('/{server}/configs/render', [ModManagerController::class, 'configsRe
 Route::post('/{server}/configs/file', [ModManagerController::class, 'configsSave'])
     ->name('extension.serversuite.configs-save');
 
+// Properties (#20): server.properties as a form; restart or world reset after saving.
+Route::get('/{server}/properties', [ModManagerController::class, 'properties'])
+    ->name('extension.serversuite.properties');
+Route::post('/{server}/properties', [ModManagerController::class, 'propertiesSave'])
+    ->name('extension.serversuite.properties-save');
+Route::post('/{server}/properties/reset-world', [ModManagerController::class, 'propertiesResetWorld'])
+    ->name('extension.serversuite.properties-reset-world');
+
 // Subdomains (#14). Admin routes first so /admin isn't taken as a {server}.
 Route::post('/admin/domains', [ModManagerController::class, 'adminAddDomain'])
     ->name('extension.serversuite.admin-add-domain');

@@ -18,6 +18,8 @@ return [
             'loader-switch' => 'Started a loader switch',
             'reset' => 'Reset the server (:mode)',
             'config-saved' => 'Edited :file',
+            'properties-saved' => 'Changed server.properties: :changed',
+            'world-reset' => 'Reset the world for a new seed',
             'backup-schedule-saved' => 'Changed the backup schedule',
             'backup-rotated' => 'Ran a backup rotation',
             'backup-created' => 'Took a backup',
