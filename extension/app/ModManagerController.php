@@ -90,7 +90,7 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
-        $clearance = $this->preChange($request, $srv);
+        $clearance = $this->requireClearance($request, $srv);
         if ($clearance instanceof JsonResponse) {
             return $clearance;
         }
@@ -638,7 +638,7 @@ class ModManagerController extends Controller
 
         $plan = $this->mods->planInstall($data['source'], $data['mod_id'], $data['version_id'], $srv);
 
-        $clearance = $this->preChange($request, $srv);
+        $clearance = $this->requireClearance($request, $srv);
         if ($clearance instanceof JsonResponse) {
             return $clearance;
         }
@@ -717,7 +717,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => 'Manually tracked files have no repository to update from.'], 422);
         }
 
-        $clearance = $this->preChange($request, $srv);
+        $clearance = $this->requireClearance($request, $srv);
         if ($clearance instanceof JsonResponse) {
             return $clearance;
         }
@@ -778,7 +778,7 @@ class ModManagerController extends Controller
             }
         }
 
-        $clearance = $this->preChange($request, $srv);
+        $clearance = $this->requireClearance($request, $srv);
         if ($clearance instanceof JsonResponse) {
             return $clearance;
         }
@@ -1099,7 +1099,7 @@ class ModManagerController extends Controller
      *
      * @return array{ok: bool, backup: ?string, message: ?string}|JsonResponse
      */
-    protected function preChange(Request $request, Server $srv): array|JsonResponse
+    protected function requireClearance(Request $request, Server $srv): array|JsonResponse
     {
         $c = app(\ServerSuite\Services\PreChangeBackup::class)->redeem($srv->uuid, $request->input('clearance'));
 
@@ -1286,12 +1286,12 @@ class ModManagerController extends Controller
             'values' => ['nullable', 'array', 'required_without:content'], 'content' => ['nullable', 'string', 'required_without:values'],
         ]);
         // A config edit is a mod change too: same "Backup before changes" (#24).
-        $clearance = $this->preChange($request, $srv);
+        $clearance = $this->requireClearance($request, $srv);
         if ($clearance instanceof JsonResponse) {
             return $clearance;
         }
 
-        return $this->configAction(function ($svc) use ($srv, $data) {
+        return $this->configAction(function ($svc) use ($srv, $data, $clearance) {
             $values = $data['values'] ?? null;
             $r = $svc->save($srv->uuid, $data['path'], $data['hash'], $values, $values === null ? ($data['content'] ?? '') : null);
             if ($r['written']) {
