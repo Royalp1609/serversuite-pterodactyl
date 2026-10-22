@@ -21,6 +21,7 @@ class Network extends Model
 
     protected $casts = ['owner_id' => 'integer', 'applied_at' => 'datetime'];
 
+    /** @return HasMany<NetworkMember, $this> */
     public function members(): HasMany
     {
         return $this->hasMany(NetworkMember::class)->orderBy('position')->orderBy('id');
