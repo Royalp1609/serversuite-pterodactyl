@@ -6,6 +6,7 @@ import { faArrowLeft, faFileAlt, faFolder, faSave, faSpinner } from '@fortawesom
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
 import ConfigFields, { ConfigField } from './ConfigFields';
+import { getClearance } from './prechange';
 
 /*
  * Server Suite — Mods tab, Configs view (#21).
@@ -125,12 +126,20 @@ export default ({ uuid }: { uuid: string }) => {
         }
     };
 
-    const save = () => {
+    const save = async () => {
         if (!file) return;
         setBusy(true);
         setError(null);
         setNotice(null);
-        const body = mode === 'form' ? { path: file.path, hash: file.hash, values } : { path: file.path, hash: file.hash, content: text };
+        let clearance: string | null;
+        try {
+            clearance = await getClearance(`/extensions/serversuite/${uuid}`, `edit ${file.path.replace(/^\//, '')}`, setNotice);
+        } catch (e: any) {
+            setBusy(false);
+            setError(e.message);
+            return;
+        }
+        const body = mode === 'form' ? { path: file.path, hash: file.hash, values, clearance } : { path: file.path, hash: file.hash, content: text, clearance };
         http.post(`${base}/file`, body)
             .then((res) => {
                 const d = res.data.data;

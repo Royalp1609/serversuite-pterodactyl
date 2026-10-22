@@ -38,6 +38,12 @@ is the same suite as a native Pelican plugin.
   and the result is read back and checked before anything is written. **Text
   editor** switches to the raw file. A save is refused if the server rewrote the
   file since you opened it. Up to 512 KiB.
+- **Backup before changes** (on the Manage view: Ask, Always or Never; default
+  Ask): before mods are installed, updated or removed, or a config is saved,
+  Server Suite takes a "Pre-mod-change" backup and runs the change only once it
+  has finished (a backup from the last 30 minutes is reused). The backup's name
+  goes in the Activity entry, so you know what to restore. The server enforces
+  it, not just the tab.
 
 ### Backups (server tab)
 - **Scheduled backups with rotation**: pick how often (6 hours to weekly) and

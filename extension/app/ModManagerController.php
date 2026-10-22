@@ -90,9 +90,13 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
+        $clearance = $this->preChange($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
         $result = $this->mods->updateAll($srv);
 
-        $this->audit($srv, 'mods-updated-all', ['updated' => is_array($result['updated'] ?? null) ? count($result['updated']) : null]);
+        $this->audit($srv, 'mods-updated-all', ['updated' => is_array($result['updated'] ?? null) ? count($result['updated']) : null, 'backup' => $clearance['backup']]);
         return response()->json(['data' => $result]);
     }
 
@@ -627,13 +631,17 @@ class ModManagerController extends Controller
 
         $plan = $this->mods->planInstall($data['source'], $data['mod_id'], $data['version_id'], $srv);
 
+        $clearance = $this->preChange($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
         try {
             $result = $this->mods->executePlan($plan, $srv, (int) $request->user()->id, (bool) ($data['queue'] ?? false));
         } catch (DeliveryException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        $this->audit($srv, 'mod-installed', ['source' => $data['source'], 'mod' => $data['mod_id'], 'version' => $data['version_id']]);
+        $this->audit($srv, 'mod-installed', ['source' => $data['source'], 'mod' => $data['mod_id'], 'version' => $data['version_id'], 'backup' => $clearance['backup']]);
         return response()->json(['data' => $result]);
     }
 
@@ -700,13 +708,17 @@ class ModManagerController extends Controller
             return response()->json(['error' => 'Manually tracked files have no repository to update from.'], 422);
         }
 
+        $clearance = $this->preChange($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
         try {
             $updated = $this->mods->update($mod, $srv);
         } catch (DeliveryException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        $this->audit($srv, 'mod-updated', ['mod' => $mod->mod_name, 'version' => $updated->installed_version]);
+        $this->audit($srv, 'mod-updated', ['mod' => $mod->mod_name, 'version' => $updated->installed_version, 'backup' => $clearance['backup']]);
         return response()->json(['data' => [
             'mod_name'          => $updated->mod_name,
             'installed_version' => $updated->installed_version,
@@ -756,6 +768,10 @@ class ModManagerController extends Controller
             }
         }
 
+        $clearance = $this->preChange($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
         try {
             $this->mods->remove($mod, $srv, $force);
         } catch (DeliveryException $e) {
@@ -764,7 +780,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 409);
         }
 
-        $this->audit($srv, 'mod-removed', ['mod' => $mod->mod_name]);
+        $this->audit($srv, 'mod-removed', ['mod' => $mod->mod_name, 'backup' => $clearance['backup']]);
         return response()->json(['data' => ['removed' => true]]);
     }
 
@@ -1015,6 +1031,71 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Backup before mod changes (#24)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/prechange: the server's setting (always | ask | never) */
+    public function prechangeMode(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => ['mode' => \ServerSuite\Services\PreChangeBackup::mode($srv->uuid)]]);
+    }
+
+    /** POST /{server}/prechange/mode { mode } */
+    public function prechangeSetMode(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $mode = (string) $request->validate(['mode' => ['required', 'string', 'in:' . implode(',', \ServerSuite\Services\PreChangeBackup::MODES)]])['mode'];
+        ModManagerSetting::forServer($srv->uuid)->forceFill(['pre_change_backup' => $mode])->save();
+        $this->audit($srv, 'pre-change-backup-set', ['mode' => $mode]);
+
+        return response()->json(['data' => ['mode' => $mode]]);
+    }
+
+    /**
+     * POST /{server}/prechange { label, take? }: decide on the backup before
+     * a change and hand back the clearance token the change needs.
+     */
+    public function prechange(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        if (! PanelPermissions::holds($request->user(), $srv, ['mods.install']) && ! PanelPermissions::holds($request->user(), $srv, ['mods.update'])
+            && ! PanelPermissions::holds($request->user(), $srv, ['mods.remove'])) {
+            abort(403, 'You do not have permission to change mods on this server.');
+        }
+        $data = $request->validate(['label' => ['required', 'string', 'max:150'], 'take' => ['nullable', 'boolean']]);
+        $r = app(\ServerSuite\Services\PreChangeBackup::class)->clear($srv->uuid, $data['label'], array_key_exists('take', $data) && $data['take'] !== null ? (bool) $data['take'] : null);
+
+        return response()->json(['data' => $r], $r['status'] === 'failed' ? 422 : 200);
+    }
+
+    /** GET /{server}/prechange/{token}: waiting | ready | failed | unknown */
+    public function prechangeState(Request $request, string $server, string $token): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => ['state' => app(\ServerSuite\Services\PreChangeBackup::class)->clearanceState($srv->uuid, $token)]]);
+    }
+
+    /**
+     * The clearance a mod change needs when the server backs up first: the
+     * redeemed clearance, or the 409 to send back.
+     *
+     * @return array{ok: bool, backup: ?string, message: ?string}|JsonResponse
+     */
+    protected function preChange(Request $request, Server $srv): array|JsonResponse
+    {
+        $c = app(\ServerSuite\Services\PreChangeBackup::class)->redeem($srv->uuid, $request->input('clearance'));
+
+        return $c['ok'] ? $c : response()->json(['error' => $c['message'], 'needs_backup' => true], 409);
+    }
+
+    // -------------------------------------------------------------------------
     // Configs (#21)
     // -------------------------------------------------------------------------
 
@@ -1056,13 +1137,18 @@ class ModManagerController extends Controller
             'path' => ['required', 'string', 'max:1024'], 'hash' => ['required', 'string', 'size:40'],
             'values' => ['nullable', 'array', 'required_without:content'], 'content' => ['nullable', 'string', 'required_without:values'],
         ]);
+        // A config edit is a mod change too: same "Backup before changes" (#24).
+        $clearance = $this->preChange($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
 
         return $this->configAction(function ($svc) use ($srv, $data) {
             $values = $data['values'] ?? null;
             $r = $svc->save($srv->uuid, $data['path'], $data['hash'], $values, $values === null ? ($data['content'] ?? '') : null);
             if ($r['written']) {
                 $changed = $r['changed'] === [] ? null : implode(', ', array_slice($r['changed'], 0, 20)) . (count($r['changed']) > 20 ? ', …' : '');
-                $this->audit($srv, 'config-saved', ['file' => \ServerSuite\Services\ConfigFilesService::safe($data['path']), 'changed' => $changed]);
+                $this->audit($srv, 'config-saved', ['file' => \ServerSuite\Services\ConfigFilesService::safe($data['path']), 'changed' => $changed, 'backup' => $clearance['backup']]);
             }
 
             return $r + $svc->open($srv->uuid, $data['path']);

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Can from '@/components/elements/Can';
 import ConfigsPanel from './ConfigsPanel';
+import { getClearance } from './prechange';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -228,6 +229,8 @@ export default () => {
     const [installed, setInstalled] = useState<InstalledMod[]>([]);
     const [loadingInstalled, setLoadingInstalled] = useState(false);
     const [manageError, setManageError] = useState<string | null>(null);
+    const [preChangeStatus, setPreChangeStatus] = useState<string | null>(null);
+    const [preChangeMode, setPreChangeMode] = useState<string>('ask');
     const [manageSearch, setManageSearch] = useState('');
     const [rowBusy, setRowBusy] = useState<Record<number, string>>({}); // id -> 'update'|'remove'
     const [highlightId, setHighlightId] = useState<number | null>(null);
@@ -365,8 +368,10 @@ export default () => {
         if (!selected || !chosenVersion) return;
         setInstalling(true); setInstallState('working'); setInstallMessage('Installing…');
         try {
+            const clearance = await getClearance(base, `install ${selected.name || 'this mod'}`, (t) => t && setInstallMessage(t));
+            setInstallMessage('Installing…');
             const res = await http.post(`${base}/install`, {
-                source: selected.source, mod_id: selected.id, version_id: chosenVersion,
+                source: selected.source, mod_id: selected.id, version_id: chosenVersion, clearance,
             });
             const result = res.data.data;
             if (result.mode === 'queued' && result.batch_id) {
@@ -510,14 +515,22 @@ export default () => {
     // and whenever entering the Manage tab (to refresh).
     useEffect(() => { if (uuid) loadInstalled(); }, [uuid]);
     useEffect(() => { if (tab === 'manage') loadInstalled(); }, [tab, loadInstalled]);
+    useEffect(() => {
+        if (uuid && tab === 'manage') http.get(`${base}/prechange`).then((res) => setPreChangeMode(res.data.data.mode)).catch(() => undefined);
+    }, [uuid, tab]);
+    const savePreChangeMode = (mode: string) => {
+        setPreChangeMode(mode);
+        http.post(`${base}/prechange/mode`, { mode }).catch((e) => setManageError(e?.response?.data?.message || 'Could not save the backup setting.'));
+    };
 
     const updateMod = async (mod: InstalledMod) => {
         setRowBusy(s => ({ ...s, [mod.id]: 'update' }));
         try {
-            await http.post(`${base}/mods/${mod.id}/update`, {});
+            const clearance = await getClearance(base, `update ${mod.mod_name}`, setPreChangeStatus);
+            await http.post(`${base}/mods/${mod.id}/update`, { clearance });
             await loadInstalled();
         } catch (e: any) {
-            setManageError(`Update failed for ${mod.mod_name}: ${e?.response?.data?.message || e.message}`);
+            setManageError(`Update failed for ${mod.mod_name}: ${e?.response?.data?.error || e?.response?.data?.message || e.message}`);
         } finally {
             setRowBusy(s => { const n = { ...s }; delete n[mod.id]; return n; });
         }
@@ -561,18 +574,20 @@ export default () => {
         const orphanIds = removeOrphans.filter(o => checkedOrphans[o.id]).map(o => o.id);
 
         try {
+            const clearance = await getClearance(base, `remove ${removeTarget.mod_name}`, (t) => setRemoveError(t));
+            setRemoveError(null);
             // Remove the target first (force if it has dependents the user accepted).
-            await http.delete(`${base}/mods/${removeTarget.id}`, { data: { force } });
+            await http.delete(`${base}/mods/${removeTarget.id}`, { data: { force, clearance } });
             // Then the checked orphans — force each, since their dependent (the
             // target) is going away in the same operation.
             for (const id of orphanIds) {
-                await http.delete(`${base}/mods/${id}`, { data: { force: true } });
+                await http.delete(`${base}/mods/${id}`, { data: { force: true, clearance } });
             }
             const removedIds = new Set([removeTarget.id, ...orphanIds]);
             setInstalled(list => list.filter(m => !removedIds.has(m.id)));
             setRemoveTarget(null);
         } catch (e: any) {
-            if (e?.response?.status === 409 && !force) {
+            if (e?.response?.status === 409 && !force && !e.response.data?.needs_backup) {
                 // target still has dependents the user hasn't accepted; surface them
                 setRemoveDependents(e.response.data?.dependents || []);
                 setRemoveError('This mod is required by others — choose "Remove anyway" to proceed.');
@@ -648,7 +663,8 @@ export default () => {
         setUpdatingAll(true);
         setManageError(null);
         try {
-            const res = await http.post(`${base}/update-all`, {});
+            const clearance = await getClearance(base, `update ${pendingCount} mod${pendingCount === 1 ? '' : 's'}`, setPreChangeStatus);
+            const res = await http.post(`${base}/update-all`, { clearance });
             const data = res.data.data;
             await loadInstalled();
             if (data.failed && data.failed.length > 0) {
@@ -656,7 +672,7 @@ export default () => {
                     data.failed.map((f: any) => f.mod_name).join(', '));
             }
         } catch (e: any) {
-            setManageError(e?.response?.data?.message || e.message || 'Bulk update failed');
+            setManageError(e?.response?.data?.error || e?.response?.data?.message || e.message || 'Bulk update failed');
         } finally {
             setUpdatingAll(false);
         }
@@ -723,6 +739,16 @@ export default () => {
                                 <label className="text-xs text-neutral-400 uppercase tracking-wide">Search</label>
                                 <Input placeholder="Search installed mods…" value={manageSearch} onChange={e => setManageSearch(e.target.value)} />
                             </div>
+                            <Can action={'mods.install'}>
+                                <label className="flex items-center gap-2 text-xs text-neutral-400" title="Take a backup before mods are installed, updated or removed">
+                                    Backup before changes
+                                    <Field value={preChangeMode} onChange={(e) => savePreChangeMode(e.currentTarget.value)}>
+                                        <option value="ask">Ask</option>
+                                        <option value="always">Always</option>
+                                        <option value="never">Never</option>
+                                    </Field>
+                                </label>
+                            </Can>
                             <GhostButton onClick={loadInstalled} title="Refresh">
                                 <FontAwesomeIcon icon={faSync} spin={loadingInstalled} /> Refresh
                             </GhostButton>
@@ -737,6 +763,11 @@ export default () => {
                         </div>
                     </Panel>
 
+                    {preChangeStatus && (
+                        <div className="text-sm rounded-lg p-3 mb-4" style={{ background: 'rgba(99,102,241,0.12)', color: 'rgb(165,180,252)' }}>
+                            <FontAwesomeIcon icon={faSpinner} spin /> {preChangeStatus}
+                        </div>
+                    )}
                     {manageError && (
                         <Panel><p className="text-red-400 text-center py-2"><FontAwesomeIcon icon={faTimesCircle} /> {manageError}</p></Panel>
                     )}
