@@ -15,6 +15,8 @@ return [
             'mod-adopted' => 'Started tracking :file',
             'mod-forgotten' => 'Stopped tracking :mod',
             'mod-disabled' => 'Disabled :mod',
+            'bedrock-setup' => 'Added Bedrock crossplay (:installed)',
+            'bedrock-configured' => 'Set Geyser to :transport on port :port',
             'mod-enabled' => 'Enabled :mod',
             'version-switch' => 'Started a switch to Minecraft :target',
             'loader-switch' => 'Started a loader switch',

@@ -46,6 +46,14 @@ Route::post('/{server}/mods/{serverMod}/disable', [ModManagerController::class, 
 Route::post('/{server}/mods/{serverMod}/enable', [ModManagerController::class, 'crashEnable'])
     ->whereNumber('serverMod')->name('extension.serversuite.mod-enable');
 
+// Bedrock crossplay (#28): Geyser + Floodgate.
+Route::get('/{server}/crossplay', [ModManagerController::class, 'crossplay'])
+    ->name('extension.serversuite.crossplay');
+Route::post('/{server}/crossplay/install', [ModManagerController::class, 'crossplayInstall'])
+    ->name('extension.serversuite.crossplay-install');
+Route::post('/{server}/crossplay/configure', [ModManagerController::class, 'crossplayConfigure'])
+    ->name('extension.serversuite.crossplay-configure');
+
 // Configs (#21): browse /plugins, /config, ... and edit files (text or form).
 Route::get('/{server}/configs', [ModManagerController::class, 'configs'])
     ->name('extension.serversuite.configs');

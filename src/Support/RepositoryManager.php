@@ -18,6 +18,9 @@ class RepositoryManager
     /** @var array<string, class-string<RepositoryContract>|RepositoryContract> */
     protected array $drivers = [];
 
+    /** Install-only sources (no search): not listed by keys() or searched. */
+    protected array $direct = ['geysermc'];
+
     public function __construct(protected Application $app)
     {
         $this->registerBuiltInDrivers();
@@ -68,7 +71,7 @@ class RepositoryManager
      */
     public function enabledDrivers(?array $only = null): array
     {
-        $keys = $only ?? array_keys($this->drivers);
+        $keys = $only ?? $this->keys();
 
         return array_values(
             array_filter(
@@ -88,7 +91,7 @@ class RepositoryManager
      */
     public function keys(): array
     {
-        return array_keys($this->drivers);
+        return array_values(array_diff(array_keys($this->drivers), $this->direct));
     }
 
     // -------------------------------------------------------------------------
@@ -100,5 +103,6 @@ class RepositoryManager
         $this->register('modrinth',   ModrinthDriver::class);
         $this->register('curseforge', CurseForgeDriver::class);
         $this->register('hangar',     HangarDriver::class);
+        $this->register('geysermc',   \ServerSuite\Drivers\GeyserMcDriver::class);
     }
 }
