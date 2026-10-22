@@ -1,11 +1,11 @@
 Navigation:
   Routes:
-    - { Name: 'Mods', Permission: 'mods.*', Path: '/mod-manager', Type: 'server', Component: 'server/serversuite/ModManagerContainer', AdminOnly: 'false' }
-    - { Name: 'Modpacks', Permission: 'mods.*', Path: '/modpacks', Type: 'server', Component: 'server/serversuite/ModpacksContainer', AdminOnly: 'false' }
-    - { Name: 'Backups', Permission: 'backup.*', Path: '/backup-rotation', Type: 'server', Component: 'server/serversuite/BackupsContainer', AdminOnly: 'false' }
-    - { Name: 'Versions', Permission: 'startup.*', Path: '/versions', Type: 'server', Component: 'server/serversuite/VersionsContainer', AdminOnly: 'false' }
-    - { Name: 'Subdomains', Permission: 'subdomains.*', Path: '/subdomains', Type: 'server', Component: 'server/serversuite/SubdomainsContainer', AdminOnly: 'false' }
-    - { Name: 'Properties', Permission: 'file.read-content', Path: '/properties', Type: 'server', Component: 'server/serversuite/PropertiesContainer', AdminOnly: 'false' }
-    - { Name: 'Players', Permission: 'players.*', Path: '/players', Type: 'server', Component: 'server/serversuite/PlayersContainer', AdminOnly: 'false' }
-    - { Name: 'Notifications', Permission: 'notifications.*', Path: '/notifications', Type: 'server', Component: 'server/serversuite/NotificationsContainer', AdminOnly: 'false' }
-    - { Name: 'Network', Permission: 'serversuite.network', Path: '/network', Type: 'server', Component: 'server/serversuite/NetworkContainer', AdminOnly: 'false' }
+    - { Name: 'Mods', Permission: '"mods.*"', Path: '/mod-manager', Type: 'server', Component: 'server/serversuite/ModManagerContainer', AdminOnly: 'false' }
+    - { Name: 'Modpacks', Permission: '"mods.*"', Path: '/modpacks', Type: 'server', Component: 'server/serversuite/ModpacksContainer', AdminOnly: 'false' }
+    - { Name: 'Backups', Permission: '"backup.*"', Path: '/backup-rotation', Type: 'server', Component: 'server/serversuite/BackupsContainer', AdminOnly: 'false' }
+    - { Name: 'Versions', Permission: '"startup.*"', Path: '/versions', Type: 'server', Component: 'server/serversuite/VersionsContainer', AdminOnly: 'false' }
+    - { Name: 'Subdomains', Permission: '"subdomains.*"', Path: '/subdomains', Type: 'server', Component: 'server/serversuite/SubdomainsContainer', AdminOnly: 'false' }
+    - { Name: 'Properties', Permission: '"file.read-content"', Path: '/properties', Type: 'server', Component: 'server/serversuite/PropertiesContainer', AdminOnly: 'false' }
+    - { Name: 'Players', Permission: '"players.*"', Path: '/players', Type: 'server', Component: 'server/serversuite/PlayersContainer', AdminOnly: 'false' }
+    - { Name: 'Notifications', Permission: '"notifications.*"', Path: '/notifications', Type: 'server', Component: 'server/serversuite/NotificationsContainer', AdminOnly: 'false' }
+    - { Name: 'Network', Permission: '"serversuite.network"', Path: '/network', Type: 'server', Component: 'server/serversuite/NetworkContainer', AdminOnly: 'false' }
