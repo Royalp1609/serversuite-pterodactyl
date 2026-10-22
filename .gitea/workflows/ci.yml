@@ -173,6 +173,13 @@ jobs:
         run: |
           cp -r "$GITHUB_WORKSPACE/extension/resources/scripts/components/server/serversuite" \
             resources/scripts/components/server/serversuite
+          # Blueprint adds the @blueprint alias and generates routes.ts on
+          # install; Sidebar.tsx imports it, so stand in for both.
+          mkdir -p resources/scripts/blueprint/extends/routers
+          printf '%s\n' "import React from 'react';" \
+            "interface R { path: string; name: string | undefined; component: React.ComponentType; exact?: boolean; adminOnly: boolean; identifier: string; permission: string | string[] | null }" \
+            "export default { account: [] as R[], server: [] as R[] };" > resources/scripts/blueprint/extends/routers/routes.ts
+          node -e 'const fs=require("fs"),c=JSON.parse(fs.readFileSync("tsconfig.json"));c.compilerOptions.paths["@blueprint/*"]=["./resources/scripts/blueprint/*"];fs.writeFileSync("tsconfig.json",JSON.stringify(c,null,2))'
           yarn -s tsc
       - name: Build serversuite.blueprint
         if: matrix.panel == 'v1.14.0'

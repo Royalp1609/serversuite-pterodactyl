@@ -8,3 +8,57 @@
 a[href*="/server/"][href$="/backups"] {
     display: none !important;
 }
+
+/*
+ * Server Suite — the server menu as a grouped left sidebar, like Pelican's
+ * (Sidebar.tsx, mounted before Pterodactyl's sub-navigation). Only while
+ * body has .ss-sidebar (server pages) and only on wide screens; narrow
+ * screens keep Pterodactyl's top row. --ss-top follows the top bar as it
+ * scrolls away.
+ */
+.ss-side { display: none; }
+
+@media (min-width: 1024px) {
+    body.ss-sidebar #SubNavigation {
+        position: fixed;
+        top: var(--ss-top, 56px);
+        bottom: 0;
+        left: 0;
+        width: 15rem;
+        overflow-y: auto;
+        z-index: 20;
+        background: rgb(30, 41, 59);
+        box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06);
+    }
+    /* Pterodactyl's row of links (and the admin icon in it) */
+    body.ss-sidebar #SubNavigation > div { display: none; }
+    /* the page itself: everything after the menu */
+    body.ss-sidebar #SubNavigation ~ * { margin-left: 15rem; }
+
+    body.ss-sidebar .ss-side { display: block; padding: 0.75rem 0.6rem 2rem; }
+    .ss-side-group { margin-bottom: 1rem; }
+    .ss-side-title {
+        margin: 0 0 0.3rem;
+        padding: 0 0.6rem;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: rgb(148, 163, 184);
+    }
+    .ss-side-link {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.45rem 0.6rem;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        color: rgb(203, 213, 225);
+        text-decoration: none;
+        transition: background-color 0.15s, color 0.15s;
+    }
+    .ss-side-link svg { color: rgb(148, 163, 184); width: 1rem; }
+    .ss-side-link:hover { background: rgba(51, 65, 85, 0.6); color: #fff; }
+    .ss-side-link.active { background: rgba(99, 102, 241, 0.18); color: #fff; }
+    .ss-side-link.active svg { color: rgb(165, 180, 252); }
+}
