@@ -15,6 +15,7 @@ use ServerSuite\Policies\ServerModPolicy;
 use ServerSuite\Models\ServerMod;
 use ServerSuite\Models\ModManagerGlobalSetting;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 use ServerSuite\Console\Commands\CheckUpdatesCommand;
 use ServerSuite\Console\Commands\RotateBackupsCommand;
 
@@ -119,6 +120,9 @@ class ModManagerServiceProvider extends ServiceProvider
      * Keep subdomain DNS in step with the panel (#14): remove the records when
      * a server is deleted, and repoint them when its primary allocation
      * changes. Best effort: a DNS failure must never block the panel action.
+     * Pterodactyl deletes servers and changes allocations inside a
+     * transaction, so the DNS calls wait for the commit (#35): a rolled-back
+     * change keeps its DNS.
      */
     protected function registerServerHooks(): void
     {
@@ -128,22 +132,27 @@ class ModManagerServiceProvider extends ServiceProvider
         $server = self::SERVER_MODEL;
 
         $server::deleted(function ($s) {
-            try {
-                app(\ServerSuite\Services\SubdomainService::class)->cleanupServer((string) $s->uuid);
-            } catch (\Throwable $e) {
-                logger()->warning('[Server Suite] subdomain cleanup failed', ['server' => $s->uuid, 'error' => $e->getMessage()]);
-            }
+            $uuid = (string) $s->uuid;
+            DB::afterCommit(function () use ($uuid) {
+                try {
+                    app(\ServerSuite\Services\SubdomainService::class)->cleanupServer($uuid);
+                } catch (\Throwable $e) {
+                    logger()->warning('[Server Suite] subdomain cleanup failed', ['server' => $uuid, 'error' => $e->getMessage()]);
+                }
+            });
         });
 
         $server::updated(function ($s) {
             if (! $s->wasChanged('allocation_id')) {
                 return;
             }
-            try {
-                app(\ServerSuite\Services\SubdomainService::class)->repointServer($s->fresh(['allocation']) ?? $s);
-            } catch (\Throwable $e) {
-                logger()->warning('[Server Suite] subdomain repoint failed', ['server' => $s->uuid, 'error' => $e->getMessage()]);
-            }
+            DB::afterCommit(function () use ($s) {
+                try {
+                    app(\ServerSuite\Services\SubdomainService::class)->repointServer($s->fresh(['allocation']) ?? $s);
+                } catch (\Throwable $e) {
+                    logger()->warning('[Server Suite] subdomain repoint failed', ['server' => $s->uuid, 'error' => $e->getMessage()]);
+                }
+            });
         });
     }
 

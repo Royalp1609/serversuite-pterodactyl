@@ -194,7 +194,10 @@ class SubdomainService
         }
     }
 
-    /** Remove a deleted server's records and rows. Best effort. */
+    /**
+     * Remove a deleted server's records and rows, then forget its own-domain
+     * token so no credential outlives the server (#35). Best effort.
+     */
     public function cleanupServer(string $serverUuid): void
     {
         foreach (Subdomain::query()->where('server_uuid', $serverUuid)->get() as $sub) {
@@ -205,6 +208,9 @@ class SubdomainService
             }
             $sub->delete();
         }
+
+        ModManagerSetting::query()->where('server_uuid', $serverUuid)
+            ->update(['own_dns_zone' => null, 'own_dns_zone_id' => null, 'own_dns_token' => null, 'subdomain_limit' => 0]);
     }
 
     /**
