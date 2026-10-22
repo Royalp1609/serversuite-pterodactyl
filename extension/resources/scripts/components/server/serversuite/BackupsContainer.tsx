@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import Can from '@/components/elements/Can';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -316,10 +317,10 @@ export default () => {
                         </Subtitle>
                     </div>
                     <BackupControls>
-                        <PrimaryButton onClick={() => { setNotice(null); setBackupName(''); setModal('backup'); }} disabled={busy !== null || backupsDisabled}>
+                        <Can action={'backup.create'}><PrimaryButton onClick={() => { setNotice(null); setBackupName(''); setModal('backup'); }} disabled={busy !== null || backupsDisabled}>
                             <FontAwesomeIcon icon={busy === 'rotate' ? faSpinner : faSync} spin={busy === 'rotate'} />
                             Back Up
-                        </PrimaryButton>
+                        </PrimaryButton></Can>
                     </BackupControls>
                 </Header>
 
@@ -387,10 +388,10 @@ export default () => {
                         </RetentionValue>
                         <LimitNote>Set by this server&apos;s backup limit — a panel admin changes it.</LimitNote>
                     </Retention>
-                    <GhostButton onClick={saveSettings} disabled={busy !== null}>
+                    <Can action={['backup.create', 'backup.delete']}><GhostButton onClick={saveSettings} disabled={busy !== null}>
                         <FontAwesomeIcon icon={busy === 'settings' ? faSpinner : faSave} spin={busy === 'settings'} />
                         Save settings
-                    </GhostButton>
+                    </GhostButton></Can>
                 </Grid>
             </Panel>
 
@@ -423,34 +424,34 @@ export default () => {
                                     </MetaLine>
                                 </Col>
                                 <Actions>
-                                    <GhostButton
+                                    <Can action={'backup.restore'}><GhostButton
                                         onClick={() => restoreBackup(b)}
                                         disabled={busy !== null || inProgress || !b.is_successful}
                                         title={inProgress ? 'Backup still in progress' : !b.is_successful ? 'Backup did not complete' : 'Restore this backup'}
                                     >
                                         <FontAwesomeIcon icon={faUndo} /> Restore
-                                    </GhostButton>
-                                    <GhostButton
+                                    </GhostButton></Can>
+                                    <Can action={'backup.download'}><GhostButton
                                         onClick={() => downloadBackup(b)}
                                         disabled={busy !== null || inProgress || !b.is_successful}
                                         title={inProgress ? 'Backup still in progress' : !b.is_successful ? 'Backup did not complete' : 'Download backup'}
                                     >
                                         <FontAwesomeIcon icon={faDownload} />
-                                    </GhostButton>
-                                    <GhostButton onClick={() => renameBackup(b)} disabled={busy !== null} title="Rename backup">
+                                    </GhostButton></Can>
+                                    <Can action={'backup.create'}><GhostButton onClick={() => renameBackup(b)} disabled={busy !== null} title="Rename backup">
                                         <FontAwesomeIcon icon={faPen} />
-                                    </GhostButton>
-                                    <GhostButton onClick={() => toggleLock(b)} disabled={busy !== null}>
+                                    </GhostButton></Can>
+                                    <Can action={'backup.delete'}><GhostButton onClick={() => toggleLock(b)} disabled={busy !== null}>
                                         <FontAwesomeIcon icon={busy === b.uuid ? faSpinner : (b.is_locked ? faLockOpen : faLock)} spin={busy === b.uuid} />
                                         {b.is_locked ? 'Unlock' : 'Lock'}
-                                    </GhostButton>
-                                    <GhostButton
+                                    </GhostButton></Can>
+                                    <Can action={'backup.delete'}><GhostButton
                                         onClick={() => removeBackup(b)}
                                         disabled={busy !== null || b.is_locked}
                                         title={b.is_locked ? 'Unlock before deleting' : 'Delete backup'}
                                     >
                                         <FontAwesomeIcon icon={faTrash} />
-                                    </GhostButton>
+                                    </GhostButton></Can>
                                 </Actions>
                             </Row>
                         );

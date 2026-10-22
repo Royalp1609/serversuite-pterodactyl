@@ -3,8 +3,8 @@
 namespace Pterodactyl\BlueprintFramework\Extensions\serversuite;
 
 use Illuminate\Http\Request;
+use ServerSuite\Support\PanelPermissions;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Gate;
 use Pterodactyl\Http\Controllers\Controller;
 use Pterodactyl\Models\Server;
 
@@ -40,7 +40,7 @@ class ModManagerController extends Controller
     public function gameVersions(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         return response()->json(['data' => $this->mods->gameVersions($srv)]);
     }
@@ -54,7 +54,7 @@ class ModManagerController extends Controller
     public function details(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'source'  => ['required', 'string', 'in:modrinth,curseforge,hangar'],
@@ -88,7 +88,7 @@ class ModManagerController extends Controller
     public function updateAll(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $result = $this->mods->updateAll($srv);
 
@@ -260,7 +260,7 @@ class ModManagerController extends Controller
     public function reconcile(Request $request, string $server, ReconciliationService $recon): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         try {
             return response()->json(['data' => $recon->reconcile($srv)]);
@@ -276,7 +276,7 @@ class ModManagerController extends Controller
     public function reconcileAdopt(Request $request, string $server, ReconciliationService $recon): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'install');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'filename'   => ['required', 'string'],
@@ -304,7 +304,7 @@ class ModManagerController extends Controller
     public function reconcileForget(Request $request, string $server, ReconciliationService $recon): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'remove');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate(['id' => ['required', 'integer']]);
 
@@ -323,7 +323,7 @@ class ModManagerController extends Controller
     public function repositories(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $out = [];
         foreach (['modrinth', 'curseforge', 'hangar'] as $key) {
@@ -348,7 +348,7 @@ class ModManagerController extends Controller
     public function search(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'query'           => ['nullable', 'string'],   // empty = browse all (paginated)
@@ -386,7 +386,7 @@ class ModManagerController extends Controller
     public function versions(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'source' => ['required', 'string', 'in:modrinth,curseforge,hangar'],
@@ -407,7 +407,7 @@ class ModManagerController extends Controller
     public function serverVersions(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $svc       = app(ServerVersionService::class);
         $current   = $svc->current($srv);
@@ -426,7 +426,7 @@ class ModManagerController extends Controller
     public function serverStatus(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         return response()->json(['data' => app(PanelServerOps::class)->runtimeState($server)]);
     }
@@ -440,7 +440,7 @@ class ModManagerController extends Controller
     public function serverVersionNuclear(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'mode'         => ['required', 'string', 'in:keep_plugins,clean_slate'],
@@ -469,7 +469,7 @@ class ModManagerController extends Controller
     public function loaders(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $current = app(ServerVersionService::class)->current($srv);
 
@@ -487,7 +487,7 @@ class ModManagerController extends Controller
     public function loaderSwitch(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'egg_id'       => ['required', 'integer'],
@@ -521,7 +521,7 @@ class ModManagerController extends Controller
     public function serverVersionPreflight(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'version' => ['required', 'string', 'max:32'],
@@ -542,7 +542,7 @@ class ModManagerController extends Controller
     public function serverVersionApply(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'version'        => ['required', 'string', 'max:32'],
@@ -574,7 +574,7 @@ class ModManagerController extends Controller
     public function plan(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'install');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'source'     => ['required', 'string', 'in:modrinth,curseforge,hangar'],
@@ -593,7 +593,7 @@ class ModManagerController extends Controller
     public function install(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'install');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'source'     => ['required', 'string', 'in:modrinth,curseforge,hangar'],
@@ -619,7 +619,7 @@ class ModManagerController extends Controller
     public function tasks(Request $request, string $server, string $batch): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $tasks = ModInstallTask::forBatch($batch)
             ->where('server_uuid', $srv->uuid)
@@ -644,7 +644,7 @@ class ModManagerController extends Controller
     public function installed(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $mods = $this->mods->installed($srv->uuid)->map(fn (ServerMod $m) => [
             'id'                => $m->id,
@@ -668,7 +668,7 @@ class ModManagerController extends Controller
     public function update(Request $request, string $server, int $serverMod): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $mod = ServerMod::where('id', $serverMod)->where('server_uuid', $srv->uuid)->firstOrFail();
 
@@ -694,7 +694,7 @@ class ModManagerController extends Controller
     public function destroy(Request $request, string $server, int $serverMod): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'remove');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $mod = ServerMod::where('id', $serverMod)->where('server_uuid', $srv->uuid)->firstOrFail();
 
@@ -757,7 +757,7 @@ class ModManagerController extends Controller
     public function backups(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $ops      = app(PanelServerOps::class);
         $resolver = app(BackupRetentionResolver::class);
@@ -804,7 +804,7 @@ class ModManagerController extends Controller
     public function backupsSaveSettings(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $presets = array_values((array) config('serversuite.backups.interval_presets', [6, 12, 24, 48, 168]));
 
@@ -835,7 +835,7 @@ class ModManagerController extends Controller
     public function backupsRotate(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $result = app(BackupRotationService::class)->rotate($server);
 
@@ -849,7 +849,7 @@ class ModManagerController extends Controller
     public function backupsCreate(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'name' => ['nullable', 'string', 'max:191'],
@@ -870,7 +870,7 @@ class ModManagerController extends Controller
     public function backupsRename(Request $request, string $server, string $backup): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'name' => ['required', 'string', 'max:191'],
@@ -892,7 +892,7 @@ class ModManagerController extends Controller
     public function backupsLock(Request $request, string $server, string $backup): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate(['locked' => ['required', 'boolean']]);
 
@@ -911,7 +911,7 @@ class ModManagerController extends Controller
     public function backupsDelete(Request $request, string $server, string $backup): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         try {
             app(PanelServerOps::class)->deleteBackup($server, $backup);
@@ -929,7 +929,7 @@ class ModManagerController extends Controller
     public function backupsDownload(Request $request, string $server, string $backup): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         try {
             $url = app(PanelServerOps::class)->downloadUrl($server, $backup, $request->user());
@@ -947,7 +947,7 @@ class ModManagerController extends Controller
     public function backupsRestore(Request $request, string $server, string $backup): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
             'truncate' => ['nullable', 'boolean'],
@@ -988,7 +988,7 @@ class ModManagerController extends Controller
     public function subdomains(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'view');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         return response()->json(['data' => app(\ServerSuite\Services\SubdomainService::class)->overview($srv)]);
     }
@@ -997,7 +997,7 @@ class ModManagerController extends Controller
     public function subdomainsClaim(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         $data = $request->validate([
             'domain' => ['required'],
             'label'  => ['required', 'string', 'max:63'],
@@ -1011,7 +1011,7 @@ class ModManagerController extends Controller
     public function subdomainsRelease(Request $request, string $server, int $id): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         return $this->subdomainAction(fn ($svc) => $svc->release($srv, $id));
     }
@@ -1020,7 +1020,7 @@ class ModManagerController extends Controller
     public function subdomainsRepoint(Request $request, string $server, int $id): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         return $this->subdomainAction(fn ($svc) => $svc->repoint($srv, $id)->fqdn);
     }
@@ -1029,7 +1029,7 @@ class ModManagerController extends Controller
     public function subdomainsStatusCard(Request $request, string $server, int $id): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         $public = (bool) $request->validate(['public' => ['required', 'boolean']])['public'];
 
         return $this->subdomainAction(fn () => app(\ServerSuite\Services\StatusCardService::class)->setPublic($srv, $id, $public)->fqdn);
@@ -1039,7 +1039,7 @@ class ModManagerController extends Controller
     public function subdomainsSaveOwn(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         $data = $request->validate([
             'zone'  => ['required', 'string', 'max:253'],
             'token' => ['nullable', 'string', 'max:255'],
@@ -1052,7 +1052,7 @@ class ModManagerController extends Controller
     public function subdomainsRemoveOwn(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
-        $this->authorizeAbility($request, $srv, 'update');
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         return $this->subdomainAction(fn ($svc) => $svc->removeOwnDomain($srv));
     }
@@ -1134,15 +1134,14 @@ class ModManagerController extends Controller
     }
 
     /**
-     * Authorize an action against the installed ServerModPolicy via the gate
-     * nodes the package registers (mod-manager.view/install/update/remove).
+     * The permissions this endpoint needs (#17), checked the way Pterodactyl
+     * checks its own: root admins and the owner pass, subusers need every
+     * permission listed for the endpoint in PanelPermissions::ENDPOINTS.
      */
-    protected function authorizeAbility(Request $request, Server $server, string $ability): void
+    protected function authorizeEndpoint(Request $request, Server $server, string $endpoint): void
     {
-        $node = config("serversuite.permissions.{$ability}");
-
-        if (! $node || ! Gate::forUser($request->user())->allows($node, $server)) {
-            abort(403, "You do not have permission to {$ability} mods for this server.");
+        if (! PanelPermissions::allows($request->user(), $server, $endpoint)) {
+            abort(403, 'You do not have permission to do this on this server (needs ' . implode(', ', PanelPermissions::required($endpoint)) . ').');
         }
     }
 }

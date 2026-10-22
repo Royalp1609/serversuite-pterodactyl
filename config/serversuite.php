@@ -182,20 +182,8 @@ return [
         'default'    => '/mods',
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Permissions
-    |--------------------------------------------------------------------------
-    | The granular permission nodes registered with the panel's permission
-    | system. These are prefixed automatically by the panel if needed.
-    */
-    'permissions' => [
-        'view'    => 'mod_manager.view',
-        'install' => 'mod_manager.install',
-        'update'  => 'mod_manager.update',
-        'remove'  => 'mod_manager.remove',
-        'manage'  => 'mod_manager.manage',
-    ],
+    // Permissions are Pterodactyl's own subuser permissions (#17): see
+    // ServerSuite\Support\PanelPermissions for what each action needs.
 
     /*
     |--------------------------------------------------------------------------

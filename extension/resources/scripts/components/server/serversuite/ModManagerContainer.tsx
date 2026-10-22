@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import Can from '@/components/elements/Can';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -718,13 +719,13 @@ export default () => {
                                 <FontAwesomeIcon icon={faSync} spin={loadingInstalled} /> Refresh
                             </GhostButton>
                             {pendingCount > 0 && (
-                                <PrimaryButton onClick={updateAllMods} disabled={updatingAll} style={{ background: 'rgb(16,185,129)' }}>
+                                <Can action={'mods.update'}><PrimaryButton onClick={updateAllMods} disabled={updatingAll} style={{ background: 'rgb(16,185,129)' }}>
                                     <FontAwesomeIcon icon={updatingAll ? faSpinner : faArrowUp} spin={updatingAll} /> Update all ({pendingCount})
-                                </PrimaryButton>
+                                </PrimaryButton></Can>
                             )}
-                            <GhostButton onClick={openReconcile} title="Compare the mods folder with what's tracked here">
+                            <Can action={'mods.configure'}><GhostButton onClick={openReconcile} title="Compare the mods folder with what's tracked here">
                                 <FontAwesomeIcon icon={faPuzzlePiece} /> Reconcile
-                            </GhostButton>
+                            </GhostButton></Can>
                         </div>
                     </Panel>
 
@@ -776,18 +777,18 @@ export default () => {
                                         </div>
                                         <div className="flex items-center gap-2 mt-auto">
                                             {mod.source !== 'manual' && (
-                                                <GhostButton onClick={() => updateMod(mod)} disabled={!!busy}>
+                                                <Can action={'mods.update'}><GhostButton onClick={() => updateMod(mod)} disabled={!!busy}>
                                                     <FontAwesomeIcon icon={busy === 'update' ? faSpinner : faSync} spin={busy === 'update'} /> Update
-                                                </GhostButton>
+                                                </GhostButton></Can>
                                             )}
                                             {mod.source !== 'manual' && (
                                             <GhostButton onClick={() => openDetails(mod.source, mod.source_id)} disabled={!!busy}>
                                                 <FontAwesomeIcon icon={faInfoCircle} />
                                             </GhostButton>
                                             )}
-                                            <PrimaryButton onClick={() => openRemove(mod)} disabled={!!busy} style={{ marginLeft: 'auto', background: 'rgb(139,92,246)' }}>
+                                            <Can action={'mods.remove'}><PrimaryButton onClick={() => openRemove(mod)} disabled={!!busy} style={{ marginLeft: 'auto', background: 'rgb(139,92,246)' }}>
                                                 <FontAwesomeIcon icon={faTrash} /> Remove
-                                            </PrimaryButton>
+                                            </PrimaryButton></Can>
                                         </div>
                                     </Card>
                                 );
@@ -944,9 +945,9 @@ export default () => {
                                                 );
                                             }
                                             return (
-                                                <PrimaryButton onClick={() => openInstall(mod)} style={{ marginLeft: 'auto' }}>
+                                                <Can action={'mods.install'}><PrimaryButton onClick={() => openInstall(mod)} style={{ marginLeft: 'auto' }}>
                                                     <FontAwesomeIcon icon={faDownload} /> Install
-                                                </PrimaryButton>
+                                                </PrimaryButton></Can>
                                             );
                                         })()}
                                     </div>
@@ -1177,9 +1178,9 @@ export default () => {
                                                 <FontAwesomeIcon icon={faExternalLinkAlt} />
                                             </GhostButton>
                                         )}
-                                        <PrimaryButton onClick={() => details.versions[0] && installFromDetails(details.versions[0].version_id)}>
+                                        <Can action={'mods.install'}><PrimaryButton onClick={() => details.versions[0] && installFromDetails(details.versions[0].version_id)}>
                                             <FontAwesomeIcon icon={faDownload} /> Install
-                                        </PrimaryButton>
+                                        </PrimaryButton></Can>
                                     </div>
                                 </div>
 
@@ -1262,9 +1263,9 @@ export default () => {
                                                                             <FontAwesomeIcon icon={faCheckCircle} /> Installed
                                                                         </GhostButton>
                                                                     ) : (
-                                                                        <PrimaryButton onClick={() => installFromDetails(v.version_id)} className="flex-shrink-0">
+                                                                        <Can action={'mods.install'}><PrimaryButton onClick={() => installFromDetails(v.version_id)} className="flex-shrink-0">
                                                                             <FontAwesomeIcon icon={faDownload} /> Install
-                                                                        </PrimaryButton>
+                                                                        </PrimaryButton></Can>
                                                                     )}
                                                                 </div>
                                                             </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import Can from '@/components/elements/Can';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -196,25 +197,25 @@ export default () => {
                                 <FontAwesomeIcon icon={faCopy} />
                             </GhostButton>
                             {data.status_cards && (
-                                <GhostButton disabled={busy !== null}
+                                <Can action={'subdomains.manage'}><GhostButton disabled={busy !== null}
                                     onClick={() => run(`card-${s.id}`, `${base}/${s.id}/status-card`, { public: !s.status_public }, () => s.status_public
                                         ? `The status card for ${s.fqdn} is off. Its page and badge now return 404.`
                                         : `The status card for ${s.fqdn} is on. Anyone with the link can see whether the server is online, its player count, MOTD and version.`)}>
                                     <FontAwesomeIcon icon={busy === `card-${s.id}` ? faSpinner : faSignal} spin={busy === `card-${s.id}`} />
                                     {s.status_public ? 'Hide status card' : 'Show status card'}
-                                </GhostButton>
+                                </GhostButton></Can>
                             )}
                             {s.stale && (
-                                <GhostButton disabled={busy !== null} title="Move DNS now, even if the server hasn't restarted on it yet"
+                                <Can action={'subdomains.manage'}><GhostButton disabled={busy !== null} title="Move DNS now, even if the server hasn't restarted on it yet"
                                     onClick={() => run(`repoint-${s.id}`, `${base}/${s.id}/repoint`, {}, () => `${s.fqdn} now points at this server's current address.`)}>
                                     <FontAwesomeIcon icon={busy === `repoint-${s.id}` ? faSpinner : faSync} spin={busy === `repoint-${s.id}`} /> Move now
-                                </GhostButton>
+                                </GhostButton></Can>
                             )}
-                            <DangerButton disabled={busy !== null}
+                            <Can action={'subdomains.manage'}><DangerButton disabled={busy !== null}
                                 onClick={() => window.confirm(`Remove ${s.fqdn}? Its DNS records are deleted and players can no longer use it.`)
                                     && run(`release-${s.id}`, `${base}/${s.id}/release`, {}, () => `${s.fqdn} removed.`)}>
                                 <FontAwesomeIcon icon={busy === `release-${s.id}` ? faSpinner : faTrash} spin={busy === `release-${s.id}`} /> Remove
-                            </DangerButton>
+                            </DangerButton></Can>
                         </Actions>
                         {s.card_url && s.badge_url && (
                             <Snippets>
@@ -248,10 +249,10 @@ export default () => {
                                 {data.own.configured && <option value="own">.{data.own.zone} (yours)</option>}
                             </Select>
                         </Col>
-                        <PrimaryButton disabled={busy !== null || !label || !domain}
+                        <Can action={'subdomains.manage'}><PrimaryButton disabled={busy !== null || !label || !domain}
                             onClick={() => run('claim', base, { domain, label }, (fqdn) => `${fqdn ?? `${label}.${zoneFor(domain)}`} created. DNS can take a minute to update.`)}>
                             <FontAwesomeIcon icon={busy === 'claim' ? faSpinner : faPlus} spin={busy === 'claim'} /> Claim
-                        </PrimaryButton>
+                        </PrimaryButton></Can>
                     </Form>
                 )}
                 {canClaim && label && domain && <Hint>Players will join with <strong>{label}.{zoneFor(domain)}</strong>.</Hint>}
@@ -275,16 +276,16 @@ export default () => {
                             placeholder={data.own.configured ? 'saved (leave blank to keep)' : 'Cloudflare API token'}
                             onChange={(e) => setOwnToken(e.target.value)} />
                     </Col>
-                    <GhostButton disabled={busy !== null || !ownZone}
+                    <Can action={'subdomains.manage'}><GhostButton disabled={busy !== null || !ownZone}
                         onClick={() => run('own', `${base}/own`, { zone: ownZone, token: ownToken || null }, () => { setOwnToken(''); return 'Domain saved. The token was checked with Cloudflare.'; })}>
                         <FontAwesomeIcon icon={busy === 'own' ? faSpinner : faSave} spin={busy === 'own'} /> Save
-                    </GhostButton>
+                    </GhostButton></Can>
                     {data.own.configured && (
-                        <DangerButton disabled={busy !== null}
+                        <Can action={'subdomains.manage'}><DangerButton disabled={busy !== null}
                             onClick={() => window.confirm('Remove your domain and its saved token?')
                                 && run('own-remove', `${base}/own/remove`, {}, () => 'Your domain was removed.')}>
                             <FontAwesomeIcon icon={faTrash} /> Remove
-                        </DangerButton>
+                        </DangerButton></Can>
                     )}
                 </Form>
                 <Hint>Subdomains on your own domain still count towards this server&apos;s allowance.</Hint>

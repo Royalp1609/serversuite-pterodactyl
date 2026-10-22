@@ -3,7 +3,6 @@
 namespace ServerSuite\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Console\Scheduling\Schedule;
 use ServerSuite\Services\ModManagerService;
 use ServerSuite\Services\FileDeliveryService;
@@ -11,8 +10,7 @@ use ServerSuite\Services\ManifestService;
 use ServerSuite\Services\LoaderDetectionService;
 use ServerSuite\Services\PanelCompatService;
 use ServerSuite\Support\RepositoryManager;
-use ServerSuite\Policies\ServerModPolicy;
-use ServerSuite\Models\ServerMod;
+use ServerSuite\Support\PanelPermissions;
 use ServerSuite\Models\ModManagerGlobalSetting;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
@@ -22,17 +20,8 @@ use ServerSuite\Console\Commands\MoveSubdomainsCommand;
 
 class ModManagerServiceProvider extends ServiceProvider
 {
-    /**
-     * All model policy bindings.
-     *
-     * @var array<string, string>
-     */
     /** Referenced by name so the package still loads where the panel isn't present (tests). */
     private const SERVER_MODEL = '\\Pterodactyl\\Models\\Server';
-
-    protected array $policies = [
-        ServerMod::class => ServerModPolicy::class,
-    ];
 
     public function register(): void
     {
@@ -111,7 +100,7 @@ class ModManagerServiceProvider extends ServiceProvider
         $this->registerPublishables();
         $this->registerMigrations();
         $this->registerStatusCards();
-        $this->registerPolicies();
+        $this->registerPermissions();
         $this->registerCommands();
         $this->applyGlobalSettingOverrides();
         $this->registerScheduler();
@@ -203,46 +192,17 @@ class ModManagerServiceProvider extends ServiceProvider
     }
 
     // -------------------------------------------------------------------------
-    // Policies
+    // Permissions (#17)
     // -------------------------------------------------------------------------
 
-    protected function registerPolicies(): void
+    /**
+     * Pterodactyl's own subuser permissions decide everything (see
+     * PanelPermissions). This adds the mods and subdomains groups to the
+     * panel's list so they can be granted on its subuser screen.
+     */
+    protected function registerPermissions(): void
     {
-        foreach ($this->policies as $model => $policy) {
-            Gate::policy($model, $policy);
-        }
-
-        // Named permission gates delegate to the policy so authorization logic
-        // lives in exactly one place (ServerModPolicy). Each gate maps to the
-        // matching policy ability and is called as Gate::allows('mod_manager.install', $server).
-        $abilityMap = [
-            'view'    => 'view',
-            'install' => 'install',
-            'update'  => 'update',
-            'remove'  => 'remove',
-            'manage'  => 'manage',
-        ];
-
-        foreach (config('serversuite.permissions', []) as $ability => $node) {
-            if (! isset($abilityMap[$ability])) {
-                continue;
-            }
-
-            $policyAbility = $abilityMap[$ability];
-
-            Gate::define($node, function ($user, $server) use ($policyAbility) {
-                /** @var ServerModPolicy $policy */
-                $policy = app(ServerModPolicy::class);
-
-                // Honour the policy's before() hook (root admin bypass)
-                $before = $policy->before($user, $policyAbility);
-                if ($before !== null) {
-                    return $before;
-                }
-
-                return $policy->{$policyAbility}($user, $server);
-            });
-        }
+        PanelPermissions::register();
     }
 
     // -------------------------------------------------------------------------
