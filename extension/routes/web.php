@@ -26,6 +26,16 @@ Route::post('/admin/import-catalog', [ModManagerController::class, 'adminImportC
 Route::post('/admin/update-eggs', [ModManagerController::class, 'adminUpdateAllEggs'])
     ->name('extension.serversuite.admin-update-eggs');
 
+// Configs (#21): browse /plugins, /config, ... and edit files (text or form).
+Route::get('/{server}/configs', [ModManagerController::class, 'configs'])
+    ->name('extension.serversuite.configs');
+Route::get('/{server}/configs/file', [ModManagerController::class, 'configsOpen'])
+    ->name('extension.serversuite.configs-open');
+Route::post('/{server}/configs/render', [ModManagerController::class, 'configsRender'])
+    ->name('extension.serversuite.configs-render');
+Route::post('/{server}/configs/file', [ModManagerController::class, 'configsSave'])
+    ->name('extension.serversuite.configs-save');
+
 // Subdomains (#14). Admin routes first so /admin isn't taken as a {server}.
 Route::post('/admin/domains', [ModManagerController::class, 'adminAddDomain'])
     ->name('extension.serversuite.admin-add-domain');

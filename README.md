@@ -31,6 +31,13 @@ is the same suite as a native Pelican plugin.
 - **Scheduled update checks** (admin-tunable, optional auto-apply).
 - **Reconcile**: find jars on disk the suite doesn't know about (identified by
   hash on Modrinth) and records whose file has gone, then adopt or forget them.
+- **Configs**: browse `plugins/`, `config/`, `defaultconfigs/` and `kubejs/` and
+  edit a file. YAML, TOML, JSON/JSON5, `.properties`, `.ini`, `.cfg` and `.conf`
+  open as a **form** (switches, numbers with their ranges, choices, one-per-line
+  lists); only the values you change are written, so comments and layout stay,
+  and the result is read back and checked before anything is written. **Text
+  editor** switches to the raw file. A save is refused if the server rewrote the
+  file since you opened it. Up to 512 KiB.
 
 ### Backups (server tab)
 - **Scheduled backups with rotation**: pick how often (6 hours to weekly) and
@@ -121,6 +128,7 @@ are hidden (the server checks every request too).
 | Tab | To see it | To change things |
 |---|---|---|
 | Mods | `mods.read` | `mods.install`, `mods.update`, `mods.remove`; `mods.configure` to adopt or forget files found on disk |
+| Mods → Configs | `file.read-content` | `file.update` (the same file permissions as the File Manager) |
 | Backups | `backup.read` | `backup.create` (back up now, rename), `backup.delete` (delete, lock), `backup.restore`, `backup.download`; the schedule needs `backup.create` + `backup.delete` (rotation deletes the oldest) |
 | Versions | `startup.read` | switching version or loader needs `startup.update`, `startup.docker-image`, `settings.reinstall` and `backup.create`; the reset needs `settings.reinstall` + `file.delete` |
 | Subdomains | `subdomains.read` | `subdomains.manage` (claim, release, re-point, status cards, own domain and its token) |

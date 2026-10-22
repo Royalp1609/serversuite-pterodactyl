@@ -41,7 +41,7 @@ it('logs every endpoint that changes something, with a label for each event', fu
     $labels = require __DIR__ . '/../../lang/en/activity.php';
 
     foreach (PanelPermissions::ENDPOINTS as $endpoint => $perms) {
-        $reads = array_filter($perms, fn ($p) => str_ends_with($p, '.read'));
+        $reads = array_filter($perms, fn ($p) => str_ends_with($p, '.read') || str_ends_with($p, '.read-content'));
         if (count($reads) === count($perms) || in_array($endpoint, ['plan', 'serverVersionPreflight'], true)) {
             continue;   // read-only, or a dry run
         }

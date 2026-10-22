@@ -77,4 +77,11 @@ interface DaemonFileClient
      * @param  int    $maxBytes  Refuse files larger than this.
      */
     public function readFile(string $serverUuid, string $path, int $maxBytes = 131072): ?string;
+
+    /**
+     * Write a whole file (create or replace) through Wings (#21).
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function writeFile(string $serverUuid, string $path, string $content): void;
 }

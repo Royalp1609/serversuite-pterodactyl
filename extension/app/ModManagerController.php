@@ -1015,6 +1015,72 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Configs (#21)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/configs?path=  (no path: the config roots that exist) */
+    public function configs(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return $this->configAction(fn ($svc) => $svc->browse($srv->uuid, $request->query('path')));
+    }
+
+    /** GET /{server}/configs/file?path= : text, hash and the typed form */
+    public function configsOpen(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $path = (string) $request->validate(['path' => ['required', 'string', 'max:1024']])['path'];
+
+        return $this->configAction(fn ($svc) => $svc->open($srv->uuid, $path));
+    }
+
+    /** POST /{server}/configs/render { path, hash, values } : the text with form values applied, not saved */
+    public function configsRender(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate(['path' => ['required', 'string', 'max:1024'], 'hash' => ['required', 'string', 'size:40'], 'values' => ['present', 'array']]);
+
+        return $this->configAction(fn ($svc) => ['content' => $svc->render($srv->uuid, $data['path'], $data['hash'], $data['values'])]);
+    }
+
+    /** POST /{server}/configs/file { path, hash, values | content } */
+    public function configsSave(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate([
+            'path' => ['required', 'string', 'max:1024'], 'hash' => ['required', 'string', 'size:40'],
+            'values' => ['nullable', 'array', 'required_without:content'], 'content' => ['nullable', 'string', 'required_without:values'],
+        ]);
+
+        return $this->configAction(function ($svc) use ($srv, $data) {
+            $values = $data['values'] ?? null;
+            $r = $svc->save($srv->uuid, $data['path'], $data['hash'], $values, $values === null ? ($data['content'] ?? '') : null);
+            if ($r['written']) {
+                $changed = $r['changed'] === [] ? null : implode(', ', array_slice($r['changed'], 0, 20)) . (count($r['changed']) > 20 ? ', …' : '');
+                $this->audit($srv, 'config-saved', ['file' => \ServerSuite\Services\ConfigFilesService::safe($data['path']), 'changed' => $changed]);
+            }
+
+            return $r + $svc->open($srv->uuid, $data['path']);
+        });
+    }
+
+    private function configAction(callable $fn): JsonResponse
+    {
+        try {
+            return response()->json(['data' => $fn(app(\ServerSuite\Services\ConfigFilesService::class))]);
+        } catch (\InvalidArgumentException | \ServerSuite\Support\Config\ConfigEditException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        } catch (DeliveryException $e) {
+            return response()->json(['error' => $e->getMessage()], 502);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Subdomains (#14)
     // -------------------------------------------------------------------------
 
