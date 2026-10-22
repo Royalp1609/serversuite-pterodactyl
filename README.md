@@ -66,6 +66,11 @@ is the same suite as a native Pelican plugin.
   the server can't be reinstalled (e.g. *Skip Egg Install Script* is on), so a
   server is never left wiped.
 - **Reset** the server: world only, or a clean slate.
+- Switches point the egg's `DL_PATH` at the exact server jar from
+  [MCJars](https://mcjars.app) (Paper, Purpur, Folia, Fabric, Velocity, ...;
+  not Forge/NeoForge/Quilt, which use installers), which gets around broken
+  egg install scripts. Eggs without `DL_PATH` are unaffected.
+  `SERVERSUITE_MCJARS=false` turns it off.
 
 ### Properties (server tab)
 - `server.properties` as a form: switches for on/off settings, number boxes,

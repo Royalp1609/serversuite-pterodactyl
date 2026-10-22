@@ -143,6 +143,14 @@ class LoaderSwitchService
 
         $env = $this->buildEnvironment($egg, $mc);
         $image = $this->resolveEggImage($egg, $mc);
+        // A direct jar from MCJars (#22) for eggs that take DL_PATH.
+        $pin = app(McJarsService::class)->pinFor(McJarsService::keywordForEgg((string) $egg->name), $mc);
+        if ($pin !== null && array_key_exists('DL_PATH', $env)) {   // $env holds every variable the egg has
+            $env['DL_PATH'] = $pin['url'];
+            if (array_key_exists('SERVER_JARFILE', $env)) {
+                $env['SERVER_JARFILE'] = $pin['file'];
+            }
+        }
 
         // Mandatory clean slate — wipe everything but eula.txt.
         $wiped = $this->files->wipeForNuclear($uuid, 'clean_slate');
@@ -291,4 +299,5 @@ class LoaderSwitchService
 
         return false;
     }
+
 }

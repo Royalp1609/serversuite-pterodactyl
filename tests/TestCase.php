@@ -32,6 +32,8 @@ abstract class TestCase extends Orchestra
         $app['config']->set('serversuite.repositories.curseforge', true);
         $app['config']->set('serversuite.repositories.hangar', true);
         $app['config']->set('serversuite.curseforge_api_key', 'test-key');
+        // No real MCJars lookups from switch tests (#22); McJarsTest turns it on with Http::fake.
+        $app['config']->set('serversuite.versions.mcjars', false);
     }
 
     protected function defineDatabaseMigrations(): void

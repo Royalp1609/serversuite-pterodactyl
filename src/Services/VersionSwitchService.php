@@ -110,10 +110,14 @@ class VersionSwitchService
         }
 
         // 1. Pin the exact version + build the egg's install script will fetch.
+        //    With a direct jar from MCJars (#22), DL_PATH points straight at it,
+        //    which gets around broken install scripts; eggs without DL_PATH
+        //    ignore it (only the egg's own variables are written).
+        $pin = app(McJarsService::class)->pinFor(\ServerSuite\Models\ModManagerSetting::forServer($uuid)->loader, $targetVersion);
         $this->ops->setServerVariables($uuid, [
             'MINECRAFT_VERSION' => $targetVersion,
             'BUILD_NUMBER'      => (string) $build,
-        ]);
+        ] + ($pin ? ['DL_PATH' => $pin['url'], 'SERVER_JARFILE' => $pin['file']] : []));
 
         // 2. Move the Docker image only when the Java requirement actually changes.
         $imageChanged = false;

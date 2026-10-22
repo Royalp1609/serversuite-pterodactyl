@@ -285,6 +285,12 @@ return [
 
     // Public status cards (#29): /status/<fqdn> and /status/<fqdn>/badge.svg,
     // for subdomains whose owner switched them on. Off here hides them all.
+    // #22: on a version or loader switch, point the egg's DL_PATH at the
+    // direct jar from MCJars (mcjars.app), around broken install scripts.
+    'versions' => [
+        'mcjars' => env('SERVERSUITE_MCJARS', true),
+    ],
+
     'status_cards' => [
         'enabled'       => env('SERVERSUITE_STATUS_CARDS', true),
         'cache_seconds' => env('SERVERSUITE_STATUS_CARD_CACHE', 30),
