@@ -83,7 +83,7 @@ is the same suite as a native Pelican plugin.
 | 1.15.x (Laravel 12) | **beta-2026-08** or newer | **0.17.0+** |
 
 PHP 8.2 or 8.3 · Node 22 for the Blueprint build. Every change is tested in CI
-against real Pterodactyl 1.14.0 and 1.15.1 checkouts.
+against real Pterodactyl 1.14.0 and 1.15.2 checkouts.
 
 ## Install and update
 
@@ -147,7 +147,7 @@ tools/        build-blueprint.py (package + checks), release.py
 ```
 
 - **CI** (every PR and push to `main`): PHP lint, Pest on Laravel 11 and 12,
-  install into real Pterodactyl 1.14.0/1.15.1 checkouts with PHPStan, a
+  install into real Pterodactyl 1.14.0/1.15.2 checkouts with PHPStan, a
   TypeScript check of the extension against both panel frontends, and a package
   check (`serversuite.blueprint` in sync with `extension/`, versions match,
   no Blueprint placeholder tokens such as `{name}` in source files).
