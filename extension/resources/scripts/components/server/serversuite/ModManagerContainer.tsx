@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Can from '@/components/elements/Can';
 import ConfigsPanel from './ConfigsPanel';
 import { getClearance } from './prechange';
-import { BackupPromptHost } from './BackupPrompt';
+import { BackupChoice, BackupPromptHost } from './BackupPrompt';
 import CrashCard from './CrashCard';
 import CrossplayCard from './CrossplayCard';
 import { ServerContext } from '@/state/server';
@@ -228,6 +228,8 @@ export default () => {
     // Install queue: several mods, one backup, one batch.
     const [queue, setQueue] = useState<QueueItem[]>([]);
     const queueLoaded = useRef<string | null>(null);
+    // "Take a backup first" in the Install / Remove dialogs and the queue (Ask mode).
+    const [backupFirst, setBackupFirst] = useState(true);
     const [queueState, setQueueState] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
     const [queueMessage, setQueueMessage] = useState('');
     const [versions, setVersions] = useState<ModVersion[]>([]);
@@ -382,7 +384,7 @@ export default () => {
         if (!selected || !chosenVersion) return;
         setInstalling(true); setInstallState('working'); setInstallMessage('Installing…');
         try {
-            const clearance = await getClearance(base, `install ${selected.name || 'this mod'}`, (t) => t && setInstallMessage(t));
+            const clearance = await getClearance(base, `install ${selected.name || 'this mod'}`, (t) => t && setInstallMessage(t), backupFirst ? 'backup' : 'skip');
             setInstallMessage('Installing…');
             const res = await http.post(`${base}/install`, {
                 source: selected.source, mod_id: selected.id, version_id: chosenVersion, clearance,
@@ -452,7 +454,7 @@ export default () => {
         const n = queue.length;
         setQueueState('working'); setQueueMessage('Planning…');
         try {
-            const clearance = await getClearance(base, `install ${n} mod${n === 1 ? '' : 's'}`, (t) => t && setQueueMessage(t));
+            const clearance = await getClearance(base, `install ${n} mod${n === 1 ? '' : 's'}`, (t) => t && setQueueMessage(t), backupFirst ? 'backup' : 'skip');
             setQueueMessage('Installing…');
             const res = await http.post(`${base}/install-batch`, {
                 items: queue.map((q) => ({ source: q.source, mod_id: q.id, version_id: q.version_id })), clearance,
@@ -582,7 +584,7 @@ export default () => {
     useEffect(() => { if (uuid) loadInstalled(); }, [uuid]);
     useEffect(() => { if (tab === 'manage') loadInstalled(); }, [tab, loadInstalled]);
     useEffect(() => {
-        if (uuid && tab === 'manage') http.get(`${base}/prechange`).then((res) => setPreChangeMode(res.data.data.mode)).catch(() => undefined);
+        if (uuid) http.get(`${base}/prechange`).then((res) => setPreChangeMode(res.data.data.mode)).catch(() => undefined);
     }, [uuid, tab]);
     const savePreChangeMode = (mode: string) => {
         setPreChangeMode(mode);
@@ -640,7 +642,7 @@ export default () => {
         const orphanIds = removeOrphans.filter(o => checkedOrphans[o.id]).map(o => o.id);
 
         try {
-            const clearance = await getClearance(base, `remove ${removeTarget.mod_name}`, (t) => setRemoveError(t));
+            const clearance = await getClearance(base, `remove ${removeTarget.mod_name}`, (t) => setRemoveError(t), backupFirst ? 'backup' : 'skip');
             setRemoveError(null);
             // Remove the target first (force if it has dependents the user accepted).
             await http.delete(`${base}/mods/${removeTarget.id}`, { data: { force, clearance } });
@@ -947,6 +949,7 @@ export default () => {
                                     </div>
                                 ))}
                             </div>
+                            {queue.length > 0 && queueState !== 'working' && <BackupChoice mode={preChangeMode} value={backupFirst} onChange={setBackupFirst} />}
                             {queueState === 'working' && <p className="text-indigo-300 text-sm mt-3"><FontAwesomeIcon icon={faSpinner} spin /> {queueMessage}</p>}
                             {queueState === 'done' && <p className="text-emerald-400 text-sm mt-3"><FontAwesomeIcon icon={faCheckCircle} /> {queueMessage}</p>}
                             {queueState === 'error' && <p className="text-red-400 text-sm mt-3"><FontAwesomeIcon icon={faTimesCircle} /> {queueMessage}</p>}
@@ -1274,8 +1277,9 @@ export default () => {
                             </div>
                         )}
 
+                        <BackupChoice mode={preChangeMode} value={backupFirst} onChange={setBackupFirst} />
                         {removeError && (
-                            <p className="text-red-400 text-sm mb-3"><FontAwesomeIcon icon={faTimesCircle} /> {removeError}</p>
+                            <p className="text-red-400 text-sm mb-3 mt-3"><FontAwesomeIcon icon={faTimesCircle} /> {removeError}</p>
                         )}
 
                         <div className="flex justify-end gap-3 mt-4 flex-wrap">
@@ -1578,6 +1582,7 @@ export default () => {
                             </div>
                         )}
 
+                        {installState !== 'done' && <BackupChoice mode={preChangeMode} value={backupFirst} onChange={setBackupFirst} />}
                         {installState === 'working' && <p className="text-indigo-300 text-sm mt-4"><FontAwesomeIcon icon={faSpinner} spin /> {installMessage}</p>}
                         {installState === 'done' && <p className="text-emerald-400 text-sm mt-4"><FontAwesomeIcon icon={faCheckCircle} /> {installMessage}</p>}
                         {installState === 'error' && <p className="text-red-400 text-sm mt-4"><FontAwesomeIcon icon={faTimesCircle} /> {installMessage}</p>}
