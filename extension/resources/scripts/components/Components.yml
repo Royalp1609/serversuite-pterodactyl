@@ -7,4 +7,4 @@ Navigation:
     - { Name: 'Properties', Permission: '"file.read-content"', Path: '/properties', Type: 'server', Component: 'server/serversuite/PropertiesContainer', AdminOnly: 'false' }
     - { Name: 'Players', Permission: '"players.*"', Path: '/players', Type: 'server', Component: 'server/serversuite/PlayersContainer', AdminOnly: 'false' }
     - { Name: 'Notifications', Permission: '"notifications.*"', Path: '/notifications', Type: 'server', Component: 'server/serversuite/NotificationsContainer', AdminOnly: 'false' }
-    - { Name: 'Network', Permission: '"serversuite.network"', Path: '/network', Type: 'server', Component: 'server/serversuite/NetworkContainer', AdminOnly: 'false' }
+    - { Name: 'Velocity', Permission: '"serversuite.network"', Path: '/velocity', Type: 'server', Component: 'server/serversuite/NetworkContainer', AdminOnly: 'false' }

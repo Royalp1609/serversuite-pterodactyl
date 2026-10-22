@@ -109,7 +109,7 @@ final class PanelPermissions
     ];
 
     /** Tab => permission pattern Pterodactyl's router checks (Components.yml carries the same). */
-    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*', 'Notifications' => 'notifications.*', 'Network' => 'serversuite.network'];
+    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*', 'Notifications' => 'notifications.*', 'Velocity' => 'serversuite.network'];
 
     /** What a Properties save also needs, by what happens after it. */
     public const PROPERTIES_AFTER = [
