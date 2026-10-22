@@ -27,12 +27,17 @@ class SubdomainService
     /** @var (callable(string, string, ?string): DnsProvider)|null */
     private $factory;
 
+    /** @var (callable(object): ?\DateTimeInterface)|null */
+    private $startedAt;
+
     /**
      * @param (callable(string $token, string $zone, ?string $zoneId): DnsProvider)|null $factory
+     * @param (callable(object $server): ?\DateTimeInterface)|null $startedAt when the running server started (null: not running / unknown)
      */
-    public function __construct(?callable $factory = null)
+    public function __construct(?callable $factory = null, ?callable $startedAt = null)
     {
         $this->factory = $factory;
+        $this->startedAt = $startedAt;
     }
 
     // -------------------------------------------------------------------------
@@ -67,6 +72,7 @@ class SubdomainService
                 'ip'    => $s->ip,
                 'port'  => $s->port,
                 'stale' => $ip !== null && ($s->ip !== $ip || $s->port !== $port),
+                'move_pending' => $s->move_pending_since !== null,
             ])->values()->all(),
             'reserved'  => $this->reserved(),
         ];
@@ -174,24 +180,98 @@ class SubdomainService
             throw new SubdomainException($e->getMessage(), previous: $e);
         }
 
-        $sub->forceFill(['ip' => $ip, 'port' => $port])->save();
+        $sub->forceFill(['ip' => $ip, 'port' => $port, 'move_pending_since' => null])->save();
 
         return $sub;
     }
 
     /**
-     * Repoint all of a server's subdomains (after its primary allocation
-     * changed). Best effort: failures stay marked stale in the UI.
+     * A server's primary allocation changed (#37): its subdomains wait for
+     * the server to start on it. Called from the Server::updated hook.
      */
-    public function repointServer(object $server): void
+    public function markMovePending(string $serverUuid): void
     {
-        foreach (Subdomain::query()->where('server_uuid', $server->uuid)->get() as $sub) {
-            try {
-                $this->repoint($server, $sub->id);
-            } catch (\Throwable) {
-                // left stale; the owner can retry from the Subdomains tab
+        Subdomain::query()->where('server_uuid', $serverUuid)->update(['move_pending_since' => now()]);
+    }
+
+    /**
+     * Move subdomains whose server has a new primary allocation, once the
+     * server has started since the change. A new port only takes effect when
+     * the server (re)starts, and "something answers on the port" doesn't
+     * prove it: Docker answers on every mapped port, including a secondary
+     * allocation the game isn't on. Run every minute by the scheduler; also
+     * retries moves that failed at Cloudflare. Returns how many moved.
+     */
+    public function applyPendingMoves(): int
+    {
+        $model = '\\Pterodactyl\\Models\\Server';
+        if (! class_exists($model)) {
+            return 0;
+        }
+
+        $moved = 0;
+        foreach (Subdomain::query()->distinct()->pluck('server_uuid')->chunk(200) as $uuids) {
+            $subs = Subdomain::query()->whereIn('server_uuid', $uuids)->get()->groupBy('server_uuid');
+            $servers = $model::query()->with('allocation')->whereIn('uuid', $uuids)->get();
+            foreach ($servers as $server) {
+                $all = $subs[$server->uuid] ?? collect();
+                [$ip, $port] = $this->target($server);
+                $waiting = $all->filter(fn (Subdomain $s) => $ip !== null && ($s->ip !== $ip || $s->port !== $port));
+
+                // Switched back before a restart: nothing to move any more.
+                $settled = $all->diff($waiting)->filter(fn (Subdomain $s) => $s->move_pending_since !== null);
+                if ($settled->isNotEmpty()) {
+                    Subdomain::query()->whereIn('id', $settled->pluck('id'))->update(['move_pending_since' => null]);
+                }
+                if ($waiting->isEmpty()) {
+                    continue;
+                }
+
+                // Changed without the hook (plugin off, older version): wait
+                // for a start from now on.
+                $unmarked = $waiting->filter(fn (Subdomain $s) => $s->move_pending_since === null);
+                if ($unmarked->isNotEmpty()) {
+                    Subdomain::query()->whereIn('id', $unmarked->pluck('id'))->update(['move_pending_since' => now()]);
+                    continue;
+                }
+
+                $since = $waiting->max('move_pending_since');
+                $started = $this->startedAt($server);
+                if ($started === null || $started < $since) {
+                    continue;
+                }
+
+                foreach ($waiting as $sub) {
+                    try {
+                        $this->repoint($server, $sub->id);
+                        $moved++;
+                    } catch (\Throwable $e) {
+                        logger()->warning('[Server Suite] subdomain move failed', ['fqdn' => $sub->fqdn, 'error' => $e->getMessage()]);
+                    }
+                }
             }
         }
+
+        return $moved;
+    }
+
+    /** When the server started, if Wings says it's running; null otherwise or when unreachable. */
+    private function startedAt(object $server): ?\DateTimeInterface
+    {
+        if ($this->startedAt !== null) {
+            return ($this->startedAt)($server);
+        }
+
+        $repo = '\\Pterodactyl\\Repositories\\Wings\\DaemonServerRepository';
+        try {
+            $d = app($repo)->setServer($server)->getDetails();
+        } catch (\Throwable) {
+            return null;
+        }
+        $state = $d['state'] ?? ($d['utilization']['state'] ?? null);
+        $uptime = (int) ($d['utilization']['uptime'] ?? 0);
+
+        return $state === 'running' && $uptime > 0 ? now()->subMilliseconds($uptime) : null;
     }
 
     /**

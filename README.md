@@ -53,8 +53,9 @@ is the same suite as a native Pelican plugin.
   owner's **own Cloudflare domain**. Players join with just the name: an A
   record points at the server and a SRV record carries the port.
 - Each server has an **admin-set allowance** (default 0).
-- Records are removed when a server is deleted and re-pointed when its primary
-  allocation changes.
+- Records are removed when a server is deleted. When its primary allocation
+  changes, they move once the server has restarted on the new address (or
+  straight away with **Move now**).
 
 ### Admin (Admin → Extensions → Server Suite)
 - Repository toggles, CurseForge API key, update-check schedule, install

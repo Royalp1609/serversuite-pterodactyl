@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $ip
  * @property int|null $port
  * @property int|null $created_by
+ * @property \Illuminate\Support\Carbon|null $move_pending_since  new allocation not live yet (#37)
  */
 class Subdomain extends Model
 {
@@ -27,12 +28,13 @@ class Subdomain extends Model
 
     protected $fillable = [
         'server_uuid', 'domain_id', 'provider', 'label', 'zone', 'fqdn',
-        'a_record_id', 'srv_record_id', 'ip', 'port', 'created_by',
+        'a_record_id', 'srv_record_id', 'ip', 'port', 'created_by', 'move_pending_since',
     ];
 
     protected $casts = [
         'domain_id'  => 'integer',
         'port'       => 'integer',
         'created_by' => 'integer',
+        'move_pending_since' => 'datetime',
     ];
 }

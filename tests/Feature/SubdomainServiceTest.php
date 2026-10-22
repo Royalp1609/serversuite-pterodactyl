@@ -200,7 +200,7 @@ it('flags a changed allocation as stale and repoints both records', function () 
     $moved = cfServer(ip: '198.51.100.7', port: 25570);
     expect(cfService()->overview($moved)['items'][0]['stale'])->toBeTrue();
 
-    cfService()->repointServer($moved);
+    cfService()->repoint($moved, $sub->id);
 
     expect($sub->refresh()->ip)->toBe('198.51.100.7')->and($sub->port)->toBe(25570);
     expect(cfService()->overview($moved)['items'][0]['stale'])->toBeFalse();
