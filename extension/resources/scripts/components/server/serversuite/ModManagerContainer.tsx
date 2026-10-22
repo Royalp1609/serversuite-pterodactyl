@@ -3,6 +3,7 @@ import Can from '@/components/elements/Can';
 import ConfigsPanel from './ConfigsPanel';
 import { getClearance } from './prechange';
 import CrashCard from './CrashCard';
+import CrossplayCard from './CrossplayCard';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -766,6 +767,7 @@ export default () => {
                     </Panel>
 
                     <CrashCard base={base} refreshKey={installed.length} onChanged={loadInstalled} />
+                    <CrossplayCard base={base} onChanged={loadInstalled} />
                     {preChangeStatus && (
                         <div className="text-sm rounded-lg p-3 mb-4" style={{ background: 'rgba(99,102,241,0.12)', color: 'rgb(165,180,252)' }}>
                             <FontAwesomeIcon icon={faSpinner} spin /> {preChangeStatus}

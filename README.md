@@ -50,6 +50,12 @@ is the same suite as a native Pelican plugin.
   trace), and offers to **disable** it (renamed to `.disabled`, so the loader
   skips it), points at the backup taken before the change, or shows the report.
   Nothing happens on its own.
+- **Bedrock crossplay** (Paper, Purpur, Spigot, Fabric, NeoForge): one click
+  installs **Geyser** and **Floodgate** (plus ViaVersion on Paper), so phones,
+  consoles and Windows players can join. **Set up connections** then puts
+  Geyser on the Java port with NetherNet (the only way Bedrock connects from
+  27 October 2026) and GeyserMC's signaling; with a second allocation, older
+  clients keep RakNet too. The card shows the address players join with.
 
 ### Backups (server tab)
 - **Scheduled backups with rotation**: pick how often (6 hours to weekly) and

@@ -1180,6 +1180,70 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Bedrock crossplay (#28)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/crossplay */
+    public function crossplay(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => app(\ServerSuite\Services\CrossplayService::class)->status($srv)]);
+    }
+
+    /** POST /{server}/crossplay/install { clearance }: Geyser, Floodgate (+ ViaVersion on Paper) and their dependencies */
+    public function crossplayInstall(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        try {
+            $items = app(\ServerSuite\Services\CrossplayService::class)->planItems($srv);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $clearance = $this->preChange($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
+
+        $done = [];
+        $failed = [];
+        foreach ($items as $it) {
+            if (($it['status'] ?? '') !== 'install') {
+                continue;
+            }
+            try {
+                $this->mods->install($it['mod_id'], $it['source'], $it['version_id'], $srv, (int) $request->user()->id);
+                $done[] = $it['mod_name'] ?? $it['mod_id'];
+            } catch (\Throwable $e) {
+                $failed[] = ($it['mod_name'] ?? $it['mod_id']) . ': ' . $e->getMessage();
+            }
+        }
+        if ($done !== []) {
+            $this->audit($srv, 'bedrock-setup', ['installed' => implode(', ', $done), 'backup' => $clearance['backup']]);
+            $this->recordChange($srv, 'add Bedrock crossplay (Geyser + Floodgate)', $clearance);
+        }
+
+        return response()->json(['data' => ['installed' => $done, 'failed' => $failed]], $failed !== [] && $done === [] ? 422 : 200);
+    }
+
+    /** POST /{server}/crossplay/configure: Geyser's port, transport and signaling (needs a restart) */
+    public function crossplayConfigure(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        try {
+            $set = app(\ServerSuite\Services\CrossplayService::class)->configure($srv);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $this->audit($srv, 'bedrock-configured', ['transport' => $set['transport'], 'port' => $set['port']]);
+
+        return response()->json(['data' => $set]);
+    }
+
+    // -------------------------------------------------------------------------
     // Configs (#21)
     // -------------------------------------------------------------------------
 

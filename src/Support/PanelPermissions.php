@@ -81,6 +81,8 @@ final class PanelPermissions
         // Crash help (#25)
         'crash' => ['mods.read'], 'crashDismiss' => ['mods.read'],
         'crashDisable' => ['mods.remove'], 'crashEnable' => ['mods.install'],
+        // Bedrock crossplay (#28)
+        'crossplay' => ['mods.read'], 'crossplayInstall' => ['mods.install'], 'crossplayConfigure' => ['mods.install'],
         // Configs (#21): Pterodactyl's own file permissions, as its File Manager uses
         'configs' => ['file.read'], 'configsOpen' => ['file.read-content'], 'configsRender' => ['file.read-content'],
         'configsSave' => ['file.update'],
