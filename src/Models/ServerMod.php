@@ -42,10 +42,12 @@ class ServerMod extends Model
         'install_path',
         'dependencies',
         'installed_by',
+        'disabled_at',
     ];
 
     protected $casts = [
         'dependencies' => 'array',
+        'disabled_at'  => 'datetime',
     ];
 
     // -------------------------------------------------------------------------

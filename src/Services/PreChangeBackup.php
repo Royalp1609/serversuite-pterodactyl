@@ -116,12 +116,12 @@ class PreChangeBackup
      * Use a clearance for a change: whether the change may run (with the
      * backup's name, if any), or the reason it may not.
      *
-     * @return array{ok: bool, backup: ?string, message: ?string}
+     * @return array{ok: bool, backup: ?string, backup_uuid?: ?string, message: ?string}
      */
     public function redeem(string $serverUuid, ?string $token): array
     {
         if (self::mode($serverUuid) === 'never') {
-            return ['ok' => true, 'backup' => null, 'message' => null];
+            return ['ok' => true, 'backup' => null, 'backup_uuid' => null, 'message' => null];
         }
         if ($token === null || $token === '' || $this->clearanceState($serverUuid, $token) !== 'ready') {
             return ['ok' => false, 'backup' => null, 'message' => 'This server backs up before mod changes. Ask for the backup first (or wait for it to finish).'];
@@ -136,7 +136,7 @@ class PreChangeBackup
             \Illuminate\Support\Facades\Cache::put($key, ['ready_at' => now()->toIso8601String(), 'pending' => false] + $c, now()->addMinutes(10));
         }
 
-        return ['ok' => true, 'backup' => $c['name'], 'message' => null];
+        return ['ok' => true, 'backup' => $c['name'], 'backup_uuid' => $c['backup'], 'message' => null];
     }
 
     private static function key(string $serverUuid, string $token): string

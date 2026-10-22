@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Can from '@/components/elements/Can';
 import ConfigsPanel from './ConfigsPanel';
 import { getClearance } from './prechange';
+import CrashCard from './CrashCard';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -161,6 +162,7 @@ interface InstalledMod {
     installed_version: string | null;
     target_filename: string | null;
     has_update: boolean;
+    disabled?: boolean;
     available_version: string | null;
 }
 
@@ -763,6 +765,7 @@ export default () => {
                         </div>
                     </Panel>
 
+                    <CrashCard base={base} refreshKey={installed.length} onChanged={loadInstalled} />
                     {preChangeStatus && (
                         <div className="text-sm rounded-lg p-3 mb-4" style={{ background: 'rgba(99,102,241,0.12)', color: 'rgb(165,180,252)' }}>
                             <FontAwesomeIcon icon={faSpinner} spin /> {preChangeStatus}
@@ -805,6 +808,16 @@ export default () => {
                                                 <h3 className="text-base font-bold text-white truncate">{mod.mod_name}</h3>
                                                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                     {mod.installed_version && <Badge>{mod.installed_version}</Badge>}
+                                                    {mod.disabled && (
+                                                        <span className="text-xs px-2 py-0.5 rounded-md font-medium flex items-center gap-2"
+                                                            style={{ background: 'rgba(245,158,11,0.18)', color: 'rgb(251,191,36)' }}>
+                                                            disabled
+                                                            <Can action={'mods.install'}>
+                                                                <button className="underline" onClick={() => http.post(`${base}/mods/${mod.id}/enable`, {}).then(loadInstalled)
+                                                                    .catch((e) => setManageError(e?.response?.data?.error || 'Could not enable it.'))}>enable</button>
+                                                            </Can>
+                                                        </span>
+                                                    )}
                                                     {mod.has_update && mod.available_version && (
                                                         <span className="text-xs px-2 py-0.5 rounded-md font-medium flex items-center gap-1"
                                                             style={{ background: 'rgba(16,185,129,0.18)', color: 'rgb(52,211,153)' }}>

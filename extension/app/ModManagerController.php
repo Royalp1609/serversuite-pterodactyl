@@ -97,6 +97,7 @@ class ModManagerController extends Controller
         $result = $this->mods->updateAll($srv);
 
         $this->audit($srv, 'mods-updated-all', ['updated' => is_array($result['updated'] ?? null) ? count($result['updated']) : null, 'backup' => $clearance['backup']]);
+        $this->recordChange($srv, 'update all mods', $clearance);
         return response()->json(['data' => $result]);
     }
 
@@ -642,6 +643,7 @@ class ModManagerController extends Controller
         }
 
         $this->audit($srv, 'mod-installed', ['source' => $data['source'], 'mod' => $data['mod_id'], 'version' => $data['version_id'], 'backup' => $clearance['backup']]);
+        $this->recordChange($srv, 'install ' . $data['mod_id'], $clearance);
         return response()->json(['data' => $result]);
     }
 
@@ -688,6 +690,7 @@ class ModManagerController extends Controller
             'installed_version' => $m->installed_version,
             'target_filename'   => $m->target_filename,
             'has_update'        => $m->pendingUpdate !== null,
+            'disabled'          => $m->disabled_at !== null,
             'available_version' => $m->pendingUpdate->available_version ?? null,
         ]);
 
@@ -719,6 +722,7 @@ class ModManagerController extends Controller
         }
 
         $this->audit($srv, 'mod-updated', ['mod' => $mod->mod_name, 'version' => $updated->installed_version, 'backup' => $clearance['backup']]);
+        $this->recordChange($srv, 'update ' . $mod->mod_name, $clearance);
         return response()->json(['data' => [
             'mod_name'          => $updated->mod_name,
             'installed_version' => $updated->installed_version,
@@ -781,6 +785,7 @@ class ModManagerController extends Controller
         }
 
         $this->audit($srv, 'mod-removed', ['mod' => $mod->mod_name, 'backup' => $clearance['backup']]);
+        $this->recordChange($srv, 'remove ' . $mod->mod_name, $clearance);
         return response()->json(['data' => ['removed' => true]]);
     }
 
@@ -1096,6 +1101,79 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Crash help (#25)
+    // -------------------------------------------------------------------------
+
+    /** Remembered so a crash after it can be traced to it. Never fails the change. */
+    protected function recordChange(Server $srv, string $label, array $clearance): void
+    {
+        try {
+            app(\ServerSuite\Services\CrashHelpService::class)->recordChange($srv->uuid, $label,
+                ! empty($clearance['backup_uuid']) ? ['uuid' => $clearance['backup_uuid'], 'name' => $clearance['backup']] : null);
+        } catch (\Throwable) {
+        }
+    }
+
+    /** GET /{server}/crash: the crash after the last mod change, or null */
+    public function crash(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        try {
+            $crash = app(\ServerSuite\Services\CrashHelpService::class)->analyze($srv);
+        } catch (\Throwable) {
+            $crash = null;
+        }
+
+        return response()->json(['data' => $crash]);
+    }
+
+    /** POST /{server}/crash/dismiss */
+    public function crashDismiss(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        app(\ServerSuite\Services\CrashHelpService::class)->dismiss($srv->uuid);
+
+        return response()->json(['data' => ['ok' => true]]);
+    }
+
+    /** POST /{server}/mods/{serverMod}/disable: rename the jar to .disabled (loaders skip it) */
+    public function crashDisable(Request $request, string $server, int $serverMod): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $mod = ServerMod::where('id', $serverMod)->where('server_uuid', $srv->uuid)->whereNull('disabled_at')->firstOrFail();
+
+        try {
+            app(\ServerSuite\Services\CrashHelpService::class)->disable($mod);
+        } catch (DeliveryException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $this->audit($srv, 'mod-disabled', ['mod' => $mod->mod_name]);
+
+        return response()->json(['data' => ['ok' => true]]);
+    }
+
+    /** POST /{server}/mods/{serverMod}/enable */
+    public function crashEnable(Request $request, string $server, int $serverMod): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $mod = ServerMod::where('id', $serverMod)->where('server_uuid', $srv->uuid)->whereNotNull('disabled_at')->firstOrFail();
+
+        try {
+            app(\ServerSuite\Services\CrashHelpService::class)->enable($mod);
+        } catch (DeliveryException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $this->audit($srv, 'mod-enabled', ['mod' => $mod->mod_name]);
+
+        return response()->json(['data' => ['ok' => true]]);
+    }
+
+    // -------------------------------------------------------------------------
     // Configs (#21)
     // -------------------------------------------------------------------------
 
@@ -1149,6 +1227,7 @@ class ModManagerController extends Controller
             if ($r['written']) {
                 $changed = $r['changed'] === [] ? null : implode(', ', array_slice($r['changed'], 0, 20)) . (count($r['changed']) > 20 ? ', …' : '');
                 $this->audit($srv, 'config-saved', ['file' => \ServerSuite\Services\ConfigFilesService::safe($data['path']), 'changed' => $changed, 'backup' => $clearance['backup']]);
+                $this->recordChange($srv, 'edit ' . ltrim(\ServerSuite\Services\ConfigFilesService::safe($data['path']), '/'), $clearance);
             }
 
             return $r + $svc->open($srv->uuid, $data['path']);

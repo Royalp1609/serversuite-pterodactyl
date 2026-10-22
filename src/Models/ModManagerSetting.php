@@ -37,6 +37,7 @@ class ModManagerSetting extends Model
         'backup_last_run_at',
         'subdomain_limit',
         'pre_change_backup',
+        'last_change',
         'own_dns_zone',
         'own_dns_zone_id',
         'own_dns_token',
@@ -57,6 +58,7 @@ class ModManagerSetting extends Model
         'backup_schedule_hour'    => 'integer',
         'backup_last_run_at'      => 'datetime',
         'subdomain_limit'         => 'integer',
+        'last_change'             => 'array',
         'own_dns_token'           => 'encrypted',
     ];
 

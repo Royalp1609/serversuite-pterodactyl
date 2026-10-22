@@ -36,6 +36,16 @@ Route::post('/{server}/prechange', [ModManagerController::class, 'prechange'])
 Route::get('/{server}/prechange/{token}', [ModManagerController::class, 'prechangeState'])
     ->where('token', '[a-f0-9]{32}')->name('extension.serversuite.prechange-state');
 
+// Crash help (#25)
+Route::get('/{server}/crash', [ModManagerController::class, 'crash'])
+    ->name('extension.serversuite.crash');
+Route::post('/{server}/crash/dismiss', [ModManagerController::class, 'crashDismiss'])
+    ->name('extension.serversuite.crash-dismiss');
+Route::post('/{server}/mods/{serverMod}/disable', [ModManagerController::class, 'crashDisable'])
+    ->whereNumber('serverMod')->name('extension.serversuite.mod-disable');
+Route::post('/{server}/mods/{serverMod}/enable', [ModManagerController::class, 'crashEnable'])
+    ->whereNumber('serverMod')->name('extension.serversuite.mod-enable');
+
 // Configs (#21): browse /plugins, /config, ... and edit files (text or form).
 Route::get('/{server}/configs', [ModManagerController::class, 'configs'])
     ->name('extension.serversuite.configs');

@@ -31,7 +31,7 @@ class FakeFiles implements DaemonFileClient
             $rest = substr($path, strlen($dir) + 1);
             $name = explode('/', $rest)[0];
             $isFile = ! str_contains($rest, '/');
-            $out[$name] = ['name' => $name, 'size' => $isFile ? strlen($this->files[$path]) : 0, 'is_file' => $isFile, 'modified_at' => null];
+            $out[$name] = ['name' => $name, 'size' => $isFile ? strlen($this->files[$path]) : 0, 'is_file' => $isFile, 'modified_at' => $isFile ? ($this->mtimes[$path] ?? null) : null];
         }
         if ($out === []) {
             throw DeliveryException::daemonError("{$dir} not found");
@@ -57,5 +57,22 @@ class FakeFiles implements DaemonFileClient
     public function writeFile(string $serverUuid, string $path, string $content): void
     {
         $this->put($path, $content);
+    }
+
+    /** @var array<string, string> path => ISO time, for listDirectory */
+    public array $mtimes = [];
+
+    public function tailFile(string $serverUuid, string $path, int $bytes): ?array
+    {
+        $c = $this->files['/' . ltrim($path, '/')] ?? null;
+
+        return $c === null ? null : ['text' => substr($c, -$bytes), 'size' => strlen($c)];
+    }
+
+    public function rename(string $serverUuid, string $root, string $from, string $to): void
+    {
+        $dir = rtrim('/' . ltrim($root, '/'), '/');
+        $this->put("{$dir}/{$to}", $this->files["{$dir}/{$from}"] ?? throw \ServerSuite\Exceptions\DeliveryException::daemonError("{$from} not found"));
+        unset($this->files["{$dir}/{$from}"]);
     }
 }
