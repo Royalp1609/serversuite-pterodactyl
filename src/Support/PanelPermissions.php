@@ -61,6 +61,9 @@ final class PanelPermissions
         'serverVersionPreflight' => ['startup.read'],
         'serverVersionApply' => self::VERSION_CHANGE, 'loaderSwitch' => self::VERSION_CHANGE,
         'serverVersionNuclear' => ['settings.reinstall', 'file.delete'],
+        // Configs (#21): Pterodactyl's own file permissions, as its File Manager uses
+        'configs' => ['file.read'], 'configsOpen' => ['file.read-content'], 'configsRender' => ['file.read-content'],
+        'configsSave' => ['file.update'],
         // Subdomains
         'subdomains' => ['subdomains.read'],
         'subdomainsClaim' => ['subdomains.manage'], 'subdomainsRelease' => ['subdomains.manage'],

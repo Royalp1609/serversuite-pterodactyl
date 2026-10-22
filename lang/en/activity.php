@@ -17,6 +17,7 @@ return [
             'version-switch' => 'Started a switch to Minecraft :target',
             'loader-switch' => 'Started a loader switch',
             'reset' => 'Reset the server (:mode)',
+            'config-saved' => 'Edited :file',
             'backup-schedule-saved' => 'Changed the backup schedule',
             'backup-rotated' => 'Ran a backup rotation',
             'backup-created' => 'Took a backup',

@@ -115,6 +115,15 @@ class PterodactylDaemonFileClient implements DaemonFileClient
         }
     }
 
+    public function writeFile(string $serverUuid, string $path, string $content): void
+    {
+        try {
+            $this->repoForServer($serverUuid)->putContent($path, $content);
+        } catch (\Throwable $e) {
+            throw DeliveryException::daemonError('write failed: ' . $e->getMessage(), $e);
+        }
+    }
+
     // -------------------------------------------------------------------------
 
     /**

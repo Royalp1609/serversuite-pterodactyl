@@ -59,6 +59,10 @@ function recordingDaemon(): DaemonFileClient
         {
             return null;
         }
+
+        public function writeFile(string $serverUuid, string $path, string $content): void
+        {
+        }
     };
 }
 

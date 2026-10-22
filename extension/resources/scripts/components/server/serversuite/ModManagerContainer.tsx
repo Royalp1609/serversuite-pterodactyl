@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Can from '@/components/elements/Can';
+import ConfigsPanel from './ConfigsPanel';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSearch, faDownload, faSpinner, faCheckCircle, faTimesCircle,
     faTimes, faCube, faExternalLinkAlt, faExclamationTriangle, faPuzzlePiece,
-    faSync, faTrash, faArrowUp, faInfoCircle, faUser, faHeart,
+    faSync, faTrash, faArrowUp, faInfoCircle, faUser, faHeart, faCogs,
 } from '@fortawesome/free-solid-svg-icons';
 import debounce from 'debounce';
 import tw from 'twin.macro';
@@ -699,7 +700,14 @@ export default () => {
                 <Tab active={tab === 'manage'} onClick={() => setTab('manage')}>
                     <FontAwesomeIcon icon={faPuzzlePiece} /> Manage Mods
                 </Tab>
+                <Can action={'file.read-content'}>
+                    <Tab active={tab === 'configs'} onClick={() => setTab('configs')}>
+                        <FontAwesomeIcon icon={faCogs} /> Configs
+                    </Tab>
+                </Can>
             </div>
+
+            {tab === 'configs' && uuid && <ConfigsPanel uuid={uuid} />}
 
             {tab === 'manage' && (
                 <>
