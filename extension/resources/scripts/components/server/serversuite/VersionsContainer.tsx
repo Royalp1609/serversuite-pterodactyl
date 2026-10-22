@@ -19,7 +19,7 @@ import styled from 'styled-components/macro';
  * halt boot across versions). Endpoints under /extensions/serversuite/<uuid>.
  */
 
-const Wrapper = styled.div`${tw`my-6`};`;
+const Wrapper = styled.div`${tw`p-6 max-w-7xl mx-auto`};`;  // same page margins as the Mods tab
 const Panel = styled.div`
     ${tw`rounded-2xl p-5 mb-6`};
     background: rgba(30, 41, 59, 0.4);

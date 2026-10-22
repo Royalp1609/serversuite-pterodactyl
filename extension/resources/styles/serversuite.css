@@ -24,7 +24,7 @@ a[href*="/server/"][href$="/backups"] {
         top: var(--ss-top, 56px);
         bottom: 0;
         left: 0;
-        width: 15rem;
+        width: 16rem;
         overflow-y: auto;
         z-index: 20;
         background: rgb(30, 41, 59);
@@ -33,14 +33,16 @@ a[href*="/server/"][href$="/backups"] {
     /* Pterodactyl's row of links (and the admin icon in it) */
     body.ss-sidebar #SubNavigation > div { display: none; }
     /* the page itself: everything after the menu */
-    body.ss-sidebar #SubNavigation ~ * { margin-left: 15rem; }
+    body.ss-sidebar #SubNavigation ~ * { margin-left: 16rem; }
 
-    body.ss-sidebar .ss-side { display: block; padding: 0.75rem 0.6rem 2rem; }
-    .ss-side-group { margin-bottom: 1rem; }
+    /* full height, "Open in admin" pinned to the bottom */
+    body.ss-sidebar .ss-side { display: flex; flex-direction: column; min-height: 100%; padding: 1.25rem 0.75rem 1.25rem; }
+    .ss-side-group { margin-bottom: 1.5rem; }
+    .ss-side-group.ss-side-bottom { margin-top: auto; margin-bottom: 0; }
     .ss-side-title {
-        margin: 0 0 0.3rem;
-        padding: 0 0.6rem;
-        font-size: 0.68rem;
+        margin: 0 0 0.45rem;
+        padding: 0 0.75rem;
+        font-size: 0.72rem;
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -49,10 +51,11 @@ a[href*="/server/"][href$="/backups"] {
     .ss-side-link {
         display: flex;
         align-items: center;
-        gap: 0.65rem;
-        padding: 0.45rem 0.6rem;
+        gap: 0.75rem;
+        padding: 0.6rem 0.75rem;
+        margin-bottom: 0.15rem;
         border-radius: 0.5rem;
-        font-size: 0.875rem;
+        font-size: 0.925rem;
         color: rgb(203, 213, 225);
         text-decoration: none;
         transition: background-color 0.15s, color 0.15s;

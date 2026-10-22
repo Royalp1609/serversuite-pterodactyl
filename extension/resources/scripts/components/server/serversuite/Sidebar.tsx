@@ -149,7 +149,7 @@ const ServerSidebar = () => {
                 </div>
             ))}
             {rootAdmin && serverId && (
-                <div className={'ss-side-group'}>
+                <div className={'ss-side-group ss-side-bottom'}>
                     <a href={`/admin/servers/view/${serverId}`} target={'_blank'} rel={'noreferrer'} className={'ss-side-link'}>
                         <FontAwesomeIcon icon={faExternalLinkAlt} fixedWidth />
                         <span>Open in admin</span>
