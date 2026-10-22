@@ -87,7 +87,7 @@ const Stale = styled.span`
     color: rgb(251, 191, 36);
 `;
 
-interface Item { id: number; fqdn: string; own: boolean; ip: string | null; port: number | null; stale: boolean }
+interface Item { id: number; fqdn: string; own: boolean; ip: string | null; port: number | null; stale: boolean; move_pending: boolean }
 interface Overview {
     allowance: number;
     used: number;
@@ -164,7 +164,11 @@ export default () => {
                         <div>
                             <Name>
                                 {s.fqdn}
-                                {s.stale && <Stale><FontAwesomeIcon icon={faExclamationTriangle} /> points at an old address</Stale>}
+                                {s.stale && (
+                                    <Stale title="DNS moves within a minute of the server starting on the new address.">
+                                        <FontAwesomeIcon icon={faExclamationTriangle} /> moves to {data.target.ip}:{data.target.port} after the next restart
+                                    </Stale>
+                                )}
                             </Name>
                             <Meta>
                                 → {s.ip}:{s.port}{s.own ? ' · your domain' : ''}
@@ -175,9 +179,9 @@ export default () => {
                                 <FontAwesomeIcon icon={faCopy} />
                             </GhostButton>
                             {s.stale && (
-                                <GhostButton disabled={busy !== null}
+                                <GhostButton disabled={busy !== null} title="Move DNS now, even if the server hasn't restarted on it yet"
                                     onClick={() => run(`repoint-${s.id}`, `${base}/${s.id}/repoint`, {}, () => `${s.fqdn} now points at this server's current address.`)}>
-                                    <FontAwesomeIcon icon={busy === `repoint-${s.id}` ? faSpinner : faSync} spin={busy === `repoint-${s.id}`} /> Re-point
+                                    <FontAwesomeIcon icon={busy === `repoint-${s.id}` ? faSpinner : faSync} spin={busy === `repoint-${s.id}`} /> Move now
                                 </GhostButton>
                             )}
                             <DangerButton disabled={busy !== null}

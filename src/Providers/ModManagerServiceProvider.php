@@ -15,8 +15,10 @@ use ServerSuite\Policies\ServerModPolicy;
 use ServerSuite\Models\ServerMod;
 use ServerSuite\Models\ModManagerGlobalSetting;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 use ServerSuite\Console\Commands\CheckUpdatesCommand;
 use ServerSuite\Console\Commands\RotateBackupsCommand;
+use ServerSuite\Console\Commands\MoveSubdomainsCommand;
 
 class ModManagerServiceProvider extends ServiceProvider
 {
@@ -117,8 +119,14 @@ class ModManagerServiceProvider extends ServiceProvider
 
     /**
      * Keep subdomain DNS in step with the panel (#14): remove the records when
-     * a server is deleted, and repoint them when its primary allocation
-     * changes. Best effort: a DNS failure must never block the panel action.
+     * a server is deleted, and when its primary allocation changes, mark them
+     * to move once the server has started on it (#37,
+     * serversuite:move-subdomains). Moving straight away broke the address
+     * until the next restart, since the game still listens on the old port.
+     * Best effort: a DNS failure must never block the panel action.
+     * Pterodactyl deletes servers and changes allocations inside a
+     * transaction, so the DNS calls wait for the commit (#35): a rolled-back
+     * change keeps its DNS.
      */
     protected function registerServerHooks(): void
     {
@@ -128,22 +136,28 @@ class ModManagerServiceProvider extends ServiceProvider
         $server = self::SERVER_MODEL;
 
         $server::deleted(function ($s) {
-            try {
-                app(\ServerSuite\Services\SubdomainService::class)->cleanupServer((string) $s->uuid);
-            } catch (\Throwable $e) {
-                logger()->warning('[Server Suite] subdomain cleanup failed', ['server' => $s->uuid, 'error' => $e->getMessage()]);
-            }
+            $uuid = (string) $s->uuid;
+            DB::afterCommit(function () use ($uuid) {
+                try {
+                    app(\ServerSuite\Services\SubdomainService::class)->cleanupServer($uuid);
+                } catch (\Throwable $e) {
+                    logger()->warning('[Server Suite] subdomain cleanup failed', ['server' => $uuid, 'error' => $e->getMessage()]);
+                }
+            });
         });
 
         $server::updated(function ($s) {
             if (! $s->wasChanged('allocation_id')) {
                 return;
             }
-            try {
-                app(\ServerSuite\Services\SubdomainService::class)->repointServer($s->fresh(['allocation']) ?? $s);
-            } catch (\Throwable $e) {
-                logger()->warning('[Server Suite] subdomain repoint failed', ['server' => $s->uuid, 'error' => $e->getMessage()]);
-            }
+            $uuid = (string) $s->uuid;
+            DB::afterCommit(function () use ($uuid) {
+                try {
+                    app(\ServerSuite\Services\SubdomainService::class)->markMovePending($uuid);
+                } catch (\Throwable $e) {
+                    logger()->warning('[Server Suite] subdomain move mark failed', ['server' => $uuid, 'error' => $e->getMessage()]);
+                }
+            });
         });
     }
 
@@ -228,6 +242,7 @@ class ModManagerServiceProvider extends ServiceProvider
             $this->commands([
                 CheckUpdatesCommand::class,
                 RotateBackupsCommand::class,
+                MoveSubdomainsCommand::class,
             ]);
         }
     }
@@ -288,6 +303,12 @@ class ModManagerServiceProvider extends ServiceProvider
                 ->withoutOverlapping()
                 ->runInBackground()
                 ->appendOutputTo(storage_path('logs/serversuite-updates.log'));
+
+            // Subdomains waiting for their server to start on a new
+            // allocation (#37). Cheap when nothing is waiting.
+            $schedule->command(MoveSubdomainsCommand::class)
+                ->everyMinute()
+                ->withoutOverlapping();
 
             // Rolling-backup rotation — only scheduled when the master switch is
             // on. Runs on a fixed, frequent TICK; the command itself decides

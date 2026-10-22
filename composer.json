@@ -29,7 +29,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "ServerSuite\\Tests\\": "tests/"
+            "ServerSuite\\Tests\\": "tests/",
+            "Pterodactyl\\Models\\": "tests/Fakes/Pterodactyl/Models/"
         }
     },
     "extra": {

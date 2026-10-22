@@ -173,7 +173,11 @@ for the server's IP plus a `_minecraft._tcp` SRV record for the port).
 
 Owners can also add their own Cloudflare domain and token on the tab; those
 subdomains count towards the same allowance. Records are deleted when a server
-is deleted and re-pointed when its primary allocation changes.
+is deleted, along with the server's own-domain token. When a server's primary
+allocation changes, its records move within a minute of the server starting on
+the new address (`serversuite:move-subdomains`, run every minute by the
+scheduler), so players aren't sent to a port the game isn't on yet. **Move now**
+on the tab moves them straight away.
 
 ## Configuration
 

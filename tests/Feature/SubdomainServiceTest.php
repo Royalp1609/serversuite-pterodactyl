@@ -200,7 +200,7 @@ it('flags a changed allocation as stale and repoints both records', function () 
     $moved = cfServer(ip: '198.51.100.7', port: 25570);
     expect(cfService()->overview($moved)['items'][0]['stale'])->toBeTrue();
 
-    cfService()->repointServer($moved);
+    cfService()->repoint($moved, $sub->id);
 
     expect($sub->refresh()->ip)->toBe('198.51.100.7')->and($sub->port)->toBe(25570);
     expect(cfService()->overview($moved)['items'][0]['stale'])->toBeFalse();
@@ -218,6 +218,19 @@ it("removes a deleted server's records and rows", function () {
 
     expect(Subdomain::count())->toBe(0);
     Http::assertSentCount(1 + 4 + 4); // zone lookup, 2x(A+SRV) create, 2x(A+SRV) delete
+});
+
+it("forgets a deleted server's own domain, token and allowance (#35)", function () {
+    allow('srv-1', 1);
+    cfService()->saveOwnDomain(cfServer(), 'own.example', 'own-token');
+    cfService()->claim(cfServer(), 'smp', 'own');
+
+    cfService()->cleanupServer('srv-1');
+
+    expect(Subdomain::count())->toBe(0);
+    Http::assertSent(fn (Request $r) => $r->method() === 'DELETE' && $r->hasHeader('Authorization', 'Bearer own-token'));
+    $raw = DB::table('mod_manager_settings')->where('server_uuid', 'srv-1')->first();
+    expect($raw->own_dns_zone)->toBeNull()->and($raw->own_dns_token)->toBeNull()->and((int) $raw->subdomain_limit)->toBe(0);
 });
 
 it("won't remove an admin domain that still has subdomains", function () {
