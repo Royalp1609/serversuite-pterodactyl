@@ -227,6 +227,7 @@ export default () => {
     const [selected, setSelected] = useState<ModResult | null>(null);
     // Install queue: several mods, one backup, one batch.
     const [queue, setQueue] = useState<QueueItem[]>([]);
+    const queueLoaded = useRef<string | null>(null);
     const [queueState, setQueueState] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
     const [queueMessage, setQueueMessage] = useState('');
     const [versions, setVersions] = useState<ModVersion[]>([]);
@@ -416,6 +417,25 @@ export default () => {
         }
         report('error', 'Timed out waiting for install to finish.');
     };
+
+    // The queue survives leaving the tab: kept in this browser, per server.
+    const queueKey = uuid ? `serversuite.queue.${uuid}` : null;
+    useEffect(() => {
+        if (!queueKey) return;
+        try {
+            const saved = JSON.parse(window.localStorage.getItem(queueKey) || '[]');
+            setQueue(Array.isArray(saved) ? saved : []);
+        } catch { setQueue([]); }
+        queueLoaded.current = queueKey;
+    }, [queueKey]);
+    useEffect(() => {
+        if (!queueKey || queueLoaded.current !== queueKey) return;   // not before it's been read
+        try {
+            if (queue.length > 0) window.localStorage.setItem(queueKey, JSON.stringify(queue));
+            else window.localStorage.removeItem(queueKey);
+        } catch { /* storage blocked: the queue just won't survive a reload */ }
+    }, [queue, queueKey]);
+    const queuedFor = (source: string, id: string) => queue.find((q) => q.source === source && q.id === id);
 
     /** Put the open mod in the queue at the chosen version (replacing it if it's already there). */
     const addToQueue = () => {
@@ -750,7 +770,6 @@ export default () => {
 
     return (
         <div className="p-6 max-w-7xl mx-auto">
-            <BackupPromptHost />
             <div className="flex items-center gap-3 mb-4">
                 <FontAwesomeIcon icon={faCube} className="text-2xl text-indigo-400" />
                 <h1 className="text-2xl font-bold text-white">Mod Manager</h1>
@@ -1075,6 +1094,15 @@ export default () => {
                                                             <FontAwesomeIcon icon={faPuzzlePiece} /> Manage
                                                         </GhostButton>
                                                     </div>
+                                                );
+                                            }
+                                            const q = queuedFor(mod.source, mod.id);
+                                            if (q) {
+                                                return (
+                                                    <GhostButton onClick={() => openInstall(mod)} style={{ marginLeft: 'auto', color: 'rgb(52,211,153)', borderColor: 'rgba(16,185,129,0.4)' }}
+                                                        title="In the install queue; click to change the version or install it now">
+                                                        <FontAwesomeIcon icon={faCheckCircle} /> Queued · {q.version_number}
+                                                    </GhostButton>
                                                 );
                                             }
                                             return (
@@ -1557,10 +1585,23 @@ export default () => {
                         <div className="flex justify-end gap-3 mt-6">
                             <GhostButton onClick={closeModal}>{installState === 'done' ? 'Close' : 'Cancel'}</GhostButton>
                             {installState !== 'done' && (
-                                <GhostButton onClick={addToQueue} disabled={installing || loadingVersions || versions.length === 0 || !chosenVersion}
-                                    title="Queue it with others: they install together after one backup">
-                                    Add to queue{queue.length > 0 ? ` (${queue.length})` : ''}
-                                </GhostButton>
+                                (() => {
+                                    const q = selected ? queuedFor(selected.source, selected.id) : undefined;
+                                    if (q && q.version_id === chosenVersion) {
+                                        return (
+                                            <GhostButton onClick={() => { setQueue((all) => all.filter((x) => x !== q)); }}
+                                                title="Click to take it out of the queue" style={{ color: 'rgb(52,211,153)', borderColor: 'rgba(16,185,129,0.4)' }}>
+                                                <FontAwesomeIcon icon={faCheckCircle} /> Queued · {q.version_number}
+                                            </GhostButton>
+                                        );
+                                    }
+                                    return (
+                                        <GhostButton onClick={addToQueue} disabled={installing || loadingVersions || versions.length === 0 || !chosenVersion}
+                                            title="Queue it with others: they install together after one backup">
+                                            {q ? `Queue this version instead of ${q.version_number}` : `Add to queue${queue.length > 0 ? ` (${queue.length})` : ''}`}
+                                        </GhostButton>
+                                    );
+                                })()
                             )}
                             {installState !== 'done' && (
                                 <PrimaryButton onClick={doInstall} disabled={installing || loadingVersions || versions.length === 0 || !chosenVersion}>
@@ -1571,6 +1612,7 @@ export default () => {
                     </Panel>
                 </div>
             )}
+            <BackupPromptHost />
         </div>
     );
 };

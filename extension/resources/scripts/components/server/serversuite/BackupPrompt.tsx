@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Modal from '@/components/elements/Modal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArchive } from '@fortawesome/free-solid-svg-icons';
@@ -10,7 +11,9 @@ import styled from 'styled-components/macro';
  * as an in-panel dialog like Pterodactyl's EULA prompt instead of the
  * browser's confirm() boxes. Mount <BackupPromptHost /> once on a page;
  * askBackup() (used by getClearance in prechange.ts) opens it and resolves
- * with the answer. Closing it (Escape, background) cancels.
+ * with the answer. Closing it (Escape, background) cancels. It renders at
+ * the end of <body> above everything, because it is asked from inside other
+ * dialogs (Remove, the install dialog) and must not open underneath them.
  */
 
 export type BackupAnswer = 'backup' | 'skip' | 'cancel';
@@ -49,22 +52,25 @@ export const BackupPromptHost = () => {
         setAsk(null);
     };
 
-    return (
-        <Modal visible={ask !== null} onDismissed={() => answer('cancel')} closeOnBackground closeOnEscape>
-            <h2 className="text-2xl mb-4 text-neutral-100 flex items-center gap-3">
-                <FontAwesomeIcon icon={faArchive} className="text-indigo-400" /> Back up first?
-            </h2>
-            <p className="text-neutral-200">
-                You&apos;re about to <strong>{ask?.label}</strong>. A backup lets you put the server back exactly as it is now if something goes wrong.
-            </p>
-            <p className="text-neutral-400 text-sm mt-2">
-                The change runs as soon as the backup finishes. To stop being asked, change &quot;Backup before changes&quot; on the Mods tab (Installed).
-            </p>
-            <div className="mt-8 flex flex-wrap items-center justify-end gap-3">
-                <Ghost onClick={() => answer('cancel')}>Cancel</Ghost>
-                <Ghost onClick={() => answer('skip')}>Go ahead without</Ghost>
-                <Primary onClick={() => answer('backup')}>Back up first</Primary>
-            </div>
-        </Modal>
+    return createPortal(
+        <div style={{ position: 'relative', zIndex: 1000 }}>
+            <Modal visible={ask !== null} onDismissed={() => answer('cancel')} closeOnBackground closeOnEscape>
+                <h2 className="text-2xl mb-4 text-neutral-100 flex items-center gap-3">
+                    <FontAwesomeIcon icon={faArchive} className="text-indigo-400" /> Back up first?
+                </h2>
+                <p className="text-neutral-200">
+                    You&apos;re about to <strong>{ask?.label}</strong>. A backup lets you put the server back exactly as it is now if something goes wrong.
+                </p>
+                <p className="text-neutral-400 text-sm mt-2">
+                    The change runs as soon as the backup finishes. To stop being asked, change &quot;Backup before changes&quot; on the Mods tab (Installed).
+                </p>
+                <div className="mt-8 flex flex-wrap items-center justify-end gap-3">
+                    <Ghost onClick={() => answer('cancel')}>Cancel</Ghost>
+                    <Ghost onClick={() => answer('skip')}>Go ahead without</Ghost>
+                    <Primary onClick={() => answer('backup')}>Back up first</Primary>
+                </div>
+            </Modal>
+        </div>,
+        document.body,
     );
 };
