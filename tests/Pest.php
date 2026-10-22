@@ -23,6 +23,8 @@ function panelTables(): void
     $schema->create('servers', function (Illuminate\Database\Schema\Blueprint $t) {
         $t->id();
         $t->string('uuid');
+        $t->string('name')->default('Server');
+        $t->unsignedInteger('owner_id')->default(1);
         $t->unsignedBigInteger('node_id')->nullable();
         $t->unsignedBigInteger('allocation_id')->nullable();
         $t->string('status')->nullable();
