@@ -1,10 +1,8 @@
 <?php
 
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Schema;
 use Pterodactyl\Models\Allocation;
 use Pterodactyl\Models\Server;
 use ServerSuite\Models\ModManagerSetting;
@@ -17,19 +15,7 @@ use ServerSuite\Services\SubdomainService;
  */
 
 beforeEach(function () {
-    Schema::create('allocations', function (Blueprint $t) {
-        $t->id();
-        $t->string('ip');
-        $t->string('ip_alias')->nullable();
-        $t->unsignedInteger('port');
-        $t->timestamps();
-    });
-    Schema::create('servers', function (Blueprint $t) {
-        $t->id();
-        $t->string('uuid');
-        $t->unsignedBigInteger('allocation_id')->nullable();
-        $t->timestamps();
-    });
+    panelTables();
 
     $GLOBALS['hookCalls'] = 0;
     Http::fake(function (Request $r) {

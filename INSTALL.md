@@ -179,6 +179,15 @@ the new address (`serversuite:move-subdomains`, run every minute by the
 scheduler), so players aren't sent to a port the game isn't on yet. **Move now**
 on the tab moves them straight away.
 
+**Status cards.** Owners can switch on a public status page per subdomain
+(`/status/<subdomain>`, plus `/status/<subdomain>/badge.svg`). They're off by
+default. `SERVERSUITE_STATUS_CARDS=false` in `.env` turns every card off (they
+return 404), and `SERVERSUITE_STATUS_CARD_CACHE` sets how long a ping is cached
+in seconds (default 30). The pages have no session or cookies and are throttled
+to 120 requests a minute per IP; behind a CDN they can be cached for the same
+time (`Cache-Control: public`). The panel pings the server's allocation itself,
+so it must be able to reach the game port.
+
 ## Configuration
 
 All runtime settings live in **Admin → Extensions → Server Suite** (repo

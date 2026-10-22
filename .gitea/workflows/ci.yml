@@ -18,7 +18,7 @@ jobs:
           coverage: none
       - name: php -l
         run: |
-          find src tests database config extension -name '*.php' -print0 \
+          find src tests database config routes extension -name '*.php' -print0 \
             | xargs -0 -n1 -P4 php -l -d display_errors=1 > /dev/null
       - name: serversuite.blueprint matches extension/, versions match
         run: python3 tools/build-blueprint.py --check

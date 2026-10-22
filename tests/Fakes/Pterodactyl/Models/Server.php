@@ -7,8 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Test stand-in for the panel's Server model, so the provider registers its
- * server hooks under Testbench. Only what the hooks touch: uuid and the
- * primary allocation. Tables come from tests/Feature/ServerHooksTest.php.
+ * server hooks under Testbench. Only what the plugin touches: uuid, status,
+ * node and primary allocation. Tables come from panelTables() in tests/Pest.php.
  */
 class Server extends Model
 {
@@ -19,5 +19,15 @@ class Server extends Model
     public function allocation(): BelongsTo
     {
         return $this->belongsTo(Allocation::class);
+    }
+
+    public function node(): BelongsTo
+    {
+        return $this->belongsTo(Node::class);
+    }
+
+    public function isSuspended(): bool
+    {
+        return $this->status === 'suspended';
     }
 }

@@ -1025,6 +1025,16 @@ class ModManagerController extends Controller
         return $this->subdomainAction(fn ($svc) => $svc->repoint($srv, $id)->fqdn);
     }
 
+    /** POST /{server}/subdomains/{id}/status-card   { public: bool } (#29) */
+    public function subdomainsStatusCard(Request $request, string $server, int $id): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeAbility($request, $srv, 'update');
+        $public = (bool) $request->validate(['public' => ['required', 'boolean']])['public'];
+
+        return $this->subdomainAction(fn () => app(\ServerSuite\Services\StatusCardService::class)->setPublic($srv, $id, $public)->fqdn);
+    }
+
     /** POST /{server}/subdomains/own   { zone, token? } (blank token keeps the stored one) */
     public function subdomainsSaveOwn(Request $request, string $server): JsonResponse
     {

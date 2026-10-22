@@ -56,6 +56,12 @@ is the same suite as a native Pelican plugin.
 - Records are removed when a server is deleted. When its primary allocation
   changes, they move once the server has restarted on the new address (or
   straight away with **Move now**).
+- **Status card** (optional, off by default): switch it on per subdomain for a
+  public page at `/status/<subdomain>` on the panel's address, showing online
+  or offline, players, MOTD, version and icon. The page shows nothing else
+  about the server (no IP, node or ID). It comes with a badge
+  (`/status/<subdomain>/badge.svg`) and an iframe snippet to copy. The panel
+  pings the server at most once every 30 seconds, however many people look.
 
 ### Admin (Admin → Extensions → Server Suite)
 - Repository toggles, CurseForge API key, update-check schedule, install

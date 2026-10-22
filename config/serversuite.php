@@ -295,5 +295,12 @@ return [
                        'ns1', 'ns2', 'mc', 'root', 'node', 'wings', 'status', 'billing'],
     ],
 
+    // Public status cards (#29): /status/<fqdn> and /status/<fqdn>/badge.svg,
+    // for subdomains whose owner switched them on. Off here hides them all.
+    'status_cards' => [
+        'enabled'       => env('SERVERSUITE_STATUS_CARDS', true),
+        'cache_seconds' => env('SERVERSUITE_STATUS_CARD_CACHE', 30),
+    ],
+
 ];
 

@@ -90,6 +90,7 @@ class ModManagerServiceProvider extends ServiceProvider
         // depends only on the PanelServerOps contract above, so it is fully
         // panel-agnostic and unit-testable.
         $this->app->singleton(\ServerSuite\Services\SubdomainService::class);
+        $this->app->singleton(\ServerSuite\Services\StatusCardService::class);
 
         $this->app->singleton(\ServerSuite\Services\BackupRetentionResolver::class);
         $this->app->singleton(\ServerSuite\Services\BackupRotationService::class, function ($app) {
@@ -109,6 +110,7 @@ class ModManagerServiceProvider extends ServiceProvider
     {
         $this->registerPublishables();
         $this->registerMigrations();
+        $this->registerStatusCards();
         $this->registerPolicies();
         $this->registerCommands();
         $this->applyGlobalSettingOverrides();
@@ -187,6 +189,17 @@ class ModManagerServiceProvider extends ServiceProvider
     protected function registerMigrations(): void
     {
         $this->loadMigrationsFrom(__DIR__ . '/../../database/migrations');
+    }
+
+    /**
+     * Public status cards (#29): /status/<fqdn> on the panel's own address.
+     * Loaded before the panel's routes, so its React catch-all doesn't take
+     * the path.
+     */
+    protected function registerStatusCards(): void
+    {
+        $this->loadViewsFrom(__DIR__ . '/../../resources/views', 'serversuite');
+        $this->loadRoutesFrom(__DIR__ . '/../../routes/status.php');
     }
 
     // -------------------------------------------------------------------------

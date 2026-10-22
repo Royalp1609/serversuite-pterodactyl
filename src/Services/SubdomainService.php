@@ -73,7 +73,11 @@ class SubdomainService
                 'port'  => $s->port,
                 'stale' => $ip !== null && ($s->ip !== $ip || $s->port !== $port),
                 'move_pending' => $s->move_pending_since !== null,
+                'status_public' => (bool) $s->status_public,
+                'card_url'  => $s->status_public && StatusCardService::enabled() ? StatusCardService::url($s->fqdn) : null,
+                'badge_url' => $s->status_public && StatusCardService::enabled() ? StatusCardService::url($s->fqdn, true) : null,
             ])->values()->all(),
+            'status_cards' => StatusCardService::enabled(),
             'reserved'  => $this->reserved(),
         ];
     }
