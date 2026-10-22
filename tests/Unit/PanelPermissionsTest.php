@@ -84,4 +84,9 @@ it('hides each tab behind the permission its endpoints use', function () {
         expect($yml)->toMatch("/Name: '{$tab}', Permission: '\"" . preg_quote($perm, '/') . "\"'/");
     }
     expect(preg_match_all("/Permission: '[^\"]/", $yml))->toBe(0, 'a Permission without JS quotes');
+
+    // Pterodactyl's own routes match first, so a tab on one of their paths
+    // shows their page instead (our Velocity tab sat on /network).
+    preg_match_all("/Path: '([^']+)'/", $yml, $m);
+    expect(array_intersect($m[1], ['/', '/files', '/databases', '/schedules', '/users', '/backups', '/network', '/startup', '/settings', '/activity']))->toBe([]);
 });
