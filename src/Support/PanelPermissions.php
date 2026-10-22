@@ -29,6 +29,13 @@ final class PanelPermissions
                 'configure' => 'Adopt or forget mod files found on the server.',
             ],
         ],
+        'players' => [
+            'description' => 'Server Suite: the whitelist, operators and bans.',
+            'keys' => [
+                'read' => 'See the whitelist, operators, bans and who is online.',
+                'manage' => 'Add and remove players on the whitelist, operators and bans, and turn the whitelist on or off.',
+            ],
+        ],
         'subdomains' => [
             'description' => "Server Suite: this server's subdomains.",
             'keys' => [
@@ -76,6 +83,9 @@ final class PanelPermissions
         // with extra()).
         'properties' => ['file.read-content'], 'propertiesSave' => ['file.update'],
         'propertiesResetWorld' => ['file.delete', 'control.start'],
+        // Players (#27)
+        'players' => ['players.read'], 'playersAdd' => ['players.manage'], 'playersRemove' => ['players.manage'],
+        'playersWhitelist' => ['players.manage'],
         // Subdomains
         'subdomains' => ['subdomains.read'],
         'subdomainsClaim' => ['subdomains.manage'], 'subdomainsRelease' => ['subdomains.manage'],
@@ -84,7 +94,7 @@ final class PanelPermissions
     ];
 
     /** Tab => permission pattern Pterodactyl's router checks (Components.yml carries the same). */
-    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content'];
+    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*'];
 
     /** What a Properties save also needs, by what happens after it. */
     public const PROPERTIES_AFTER = [

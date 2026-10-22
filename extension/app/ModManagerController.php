@@ -1302,6 +1302,63 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Players (#27)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/players */
+    public function players(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => app(\ServerSuite\Services\PlayersService::class)->overview($srv)]);
+    }
+
+    /** POST /{server}/players { list, who, reason? } */
+    public function playersAdd(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate(['list' => ['required', 'string', 'in:' . implode(',', array_keys(\ServerSuite\Services\PlayersService::LISTS))],
+            'who' => ['required', 'string', 'max:64'], 'reason' => ['nullable', 'string', 'max:200']]);
+
+        return $this->playersAction($srv, fn ($svc) => $svc->add($srv, $data['list'], $data['who'], (string) ($data['reason'] ?? '')), 'players-added', ['list' => $data['list'], 'who' => trim($data['who'])]);
+    }
+
+    /** POST /{server}/players/remove { list, who } */
+    public function playersRemove(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate(['list' => ['required', 'string', 'in:' . implode(',', array_keys(\ServerSuite\Services\PlayersService::LISTS))],
+            'who' => ['required', 'string', 'max:64']]);
+
+        return $this->playersAction($srv, fn ($svc) => $svc->remove($srv, $data['list'], $data['who']), 'players-removed', ['list' => $data['list'], 'who' => $data['who']]);
+    }
+
+    /** POST /{server}/players/whitelist { on } */
+    public function playersWhitelist(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $on = (bool) $request->validate(['on' => ['required', 'boolean']])['on'];
+
+        return $this->playersAction($srv, fn ($svc) => $svc->setWhitelist($srv, $on), $on ? 'whitelist-on' : 'whitelist-off', []);
+    }
+
+    private function playersAction(Server $srv, callable $fn, string $event, array $props): JsonResponse
+    {
+        try {
+            $msg = $fn(app(\ServerSuite\Services\PlayersService::class));
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $this->audit($srv, $event, $props);
+
+        return response()->json(['data' => ['message' => $msg]]);
+    }
+
+    // -------------------------------------------------------------------------
     // Subdomains (#14)
     // -------------------------------------------------------------------------
 

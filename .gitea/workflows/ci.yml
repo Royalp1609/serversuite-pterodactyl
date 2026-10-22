@@ -116,7 +116,7 @@ jobs:
             $app = require "bootstrap/app.php";
             $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
             $allowed = Pterodactyl\Models\Permission::permissions()->map(fn ($v, $p) => array_map(fn ($k) => "$p.$k", array_keys($v["keys"])))->flatten()->all();
-            foreach (["mods.read", "mods.install", "subdomains.manage", "backup.read"] as $p) {
+            foreach (["mods.read", "mods.install", "subdomains.manage", "players.manage", "backup.read"] as $p) {
                 if (! in_array($p, $allowed, true)) { fwrite(STDERR, "::error::$p is not grantable\n"); exit(1); }
             }
             echo "permission groups ok\n";

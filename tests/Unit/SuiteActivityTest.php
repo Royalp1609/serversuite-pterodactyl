@@ -47,11 +47,12 @@ it('logs every endpoint that changes something, with a label for each event', fu
         }
         $start = strpos($src, "public function {$endpoint}(");
         $body = substr($src, $start, strpos($src, "\n    }\n", $start) - $start);
-        expect(str_contains($body, '$this->audit(') || preg_match('/subdomainAction\(.*, \$srv, /', $body))->toBeTrue("{$endpoint} doesn't log");
+        expect(str_contains($body, '$this->audit(') || preg_match('/subdomainAction\(.*, \$srv, |playersAction\(\$srv, /', $body))->toBeTrue("{$endpoint} doesn't log");
     }
 
     preg_match_all("/audit\\(\\\$srv, '([a-z-]+)'|'([a-z-]+)'\\);\\s*\$|\\? '([a-z-]+)' : '([a-z-]+)'/m", $src, $m);
-    foreach (array_filter(array_merge($m[1], $m[3], $m[4])) as $event) {
+    preg_match_all("/playersAction\\(\\\$srv, .*?, '([a-z-]+)', \\[/", $src, $p);
+    foreach (array_filter(array_merge($m[1], $m[3], $m[4], $p[1])) as $event) {
         expect($labels['server']['serversuite'])->toHaveKey($event);
     }
 });
