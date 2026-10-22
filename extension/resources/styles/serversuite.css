@@ -30,6 +30,22 @@ a[href*="/server/"][href$="/backups"] {
         background: rgb(30, 41, 59);
         box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06);
     }
+    /* Top bar: drop its centred 1200px box so the logo sits over the
+       sidebar, in a block of the same width and colour; the icons go right. */
+    body.ss-sidebar #NavigationBar > .mx-auto { max-width: none; }
+    body.ss-sidebar #NavigationBar #logo {
+        flex: 0 0 16rem;
+        width: 16rem;
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        margin-right: auto;
+        padding-left: 0.5rem;
+        background: rgb(30, 41, 59);
+        box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06);
+    }
+    body.ss-sidebar #NavigationBar #logo a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
     /* Pterodactyl's row of links (and the admin icon in it) */
     body.ss-sidebar #SubNavigation > div { display: none; }
     /* the page itself: everything after the menu */
