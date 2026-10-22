@@ -3,7 +3,7 @@ import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faGlobe, faPlus, faSpinner, faTrash, faSync, faExclamationTriangle, faSave, faCopy,
+    faGlobe, faPlus, faSpinner, faTrash, faSync, faExclamationTriangle, faSave, faCopy, faSignal,
 } from '@fortawesome/free-solid-svg-icons';
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
@@ -15,6 +15,8 @@ import styled from 'styled-components/macro';
  * (the server's IP) and a SRV record (the port), so players can join with
  * just the name. Endpoints under /extensions/serversuite/<uuid>/subdomains.
  * No business logic here: SubdomainService enforces every rule.
+ * Each subdomain can also have a public status card (#29) at
+ * /status/<fqdn>, off by default.
  */
 
 const Wrapper = styled.div`${tw`my-6`};`;
@@ -81,13 +83,26 @@ const ErrorBox = styled.div`
     background: rgba(239, 68, 68, 0.12);
     color: rgb(248, 113, 113);
 `;
+const Public = styled.span`
+    ${tw`text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1`};
+    background: rgba(34, 197, 94, 0.14);
+    color: rgb(74, 222, 128);
+`;
+const Snippets = styled.div`
+    ${tw`text-xs text-neutral-400 w-full flex flex-col gap-1`};
+    code { ${tw`text-neutral-300 break-all`}; user-select: all; }
+    a { ${tw`text-neutral-300 break-all underline`}; }
+`;
 const Stale = styled.span`
     ${tw`text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1`};
     background: rgba(245, 158, 11, 0.15);
     color: rgb(251, 191, 36);
 `;
 
-interface Item { id: number; fqdn: string; own: boolean; ip: string | null; port: number | null; stale: boolean; move_pending: boolean }
+interface Item {
+    id: number; fqdn: string; own: boolean; ip: string | null; port: number | null; stale: boolean; move_pending: boolean;
+    status_public: boolean; card_url: string | null; badge_url: string | null;
+}
 interface Overview {
     allowance: number;
     used: number;
@@ -95,6 +110,7 @@ interface Overview {
     domains: { id: number; zone: string }[];
     own: { zone: string | null; configured: boolean };
     items: Item[];
+    status_cards: boolean;
 }
 
 export default () => {
@@ -169,6 +185,7 @@ export default () => {
                                         <FontAwesomeIcon icon={faExclamationTriangle} /> moves to {data.target.ip}:{data.target.port} after the next restart
                                     </Stale>
                                 )}
+                                {s.status_public && <Public><FontAwesomeIcon icon={faSignal} /> public status card</Public>}
                             </Name>
                             <Meta>
                                 → {s.ip}:{s.port}{s.own ? ' · your domain' : ''}
@@ -178,6 +195,15 @@ export default () => {
                             <GhostButton title="Copy" onClick={() => navigator.clipboard?.writeText(s.fqdn)}>
                                 <FontAwesomeIcon icon={faCopy} />
                             </GhostButton>
+                            {data.status_cards && (
+                                <GhostButton disabled={busy !== null}
+                                    onClick={() => run(`card-${s.id}`, `${base}/${s.id}/status-card`, { public: !s.status_public }, () => s.status_public
+                                        ? `The status card for ${s.fqdn} is off. Its page and badge now return 404.`
+                                        : `The status card for ${s.fqdn} is on. Anyone with the link can see whether the server is online, its player count, MOTD and version.`)}>
+                                    <FontAwesomeIcon icon={busy === `card-${s.id}` ? faSpinner : faSignal} spin={busy === `card-${s.id}`} />
+                                    {s.status_public ? 'Hide status card' : 'Show status card'}
+                                </GhostButton>
+                            )}
                             {s.stale && (
                                 <GhostButton disabled={busy !== null} title="Move DNS now, even if the server hasn't restarted on it yet"
                                     onClick={() => run(`repoint-${s.id}`, `${base}/${s.id}/repoint`, {}, () => `${s.fqdn} now points at this server's current address.`)}>
@@ -190,6 +216,13 @@ export default () => {
                                 <FontAwesomeIcon icon={busy === `release-${s.id}` ? faSpinner : faTrash} spin={busy === `release-${s.id}`} /> Remove
                             </DangerButton>
                         </Actions>
+                        {s.card_url && s.badge_url && (
+                            <Snippets>
+                                <div>Page: <a href={s.card_url} target="_blank" rel="noopener noreferrer">{s.card_url}</a></div>
+                                <div>Badge: <code>{`<a href="${s.card_url}"><img src="${s.badge_url}" alt="${s.fqdn} status"></a>`}</code></div>
+                                <div>Embed: <code>{`<iframe src="${s.card_url}?embed=1" width="480" height="120" style="border:0" title="${s.fqdn} status"></iframe>`}</code></div>
+                            </Snippets>
+                        )}
                     </Row>
                 ))}
 

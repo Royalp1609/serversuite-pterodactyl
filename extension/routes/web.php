@@ -48,6 +48,8 @@ Route::post('/{server}/subdomains/{id}/release', [ModManagerController::class, '
     ->whereNumber('id')->name('extension.serversuite.subdomains-release');
 Route::post('/{server}/subdomains/{id}/repoint', [ModManagerController::class, 'subdomainsRepoint'])
     ->whereNumber('id')->name('extension.serversuite.subdomains-repoint');
+Route::post('/{server}/subdomains/{id}/status-card', [ModManagerController::class, 'subdomainsStatusCard'])
+    ->whereNumber('id')->name('extension.serversuite.subdomains-status-card');
 
 Route::get('/{server}/repositories', [ModManagerController::class, 'repositories'])
     ->name('extension.serversuite.repositories');
