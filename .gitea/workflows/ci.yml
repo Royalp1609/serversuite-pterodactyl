@@ -121,7 +121,7 @@ jobs:
             }
             echo "permission groups ok\n";
             $activity = app("translator")->getLoader()->load("en", "activity");
-            if (! isset($activity["server"]["serversuite"]["mod-removed"], $activity["server"]["file"])) { fwrite(STDERR, "::error::activity labels not merged with the panel's\n"); exit(1); }
+            if (! isset($activity["server"]["serversuite"]["mod-removed"], $activity["server"]["file"])) { fwrite(STDERR, "::error::activity labels not merged with the panel ones\n"); exit(1); }
             echo "activity labels ok\n";
             foreach (["GET" => "api/application/serversuite/servers/{ref}", "PUT" => "api/application/serversuite/servers/{ref}/subdomains"] as $m => $uri) {
                 $r = collect(app("router")->getRoutes()->getRoutes())->first(fn ($r) => $r->uri() === $uri && in_array($m, $r->methods(), true));
