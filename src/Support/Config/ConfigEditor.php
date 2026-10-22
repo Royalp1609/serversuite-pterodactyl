@@ -233,16 +233,22 @@ class ConfigEditor
      *
      * @return array{0: int|float|null, 1: int|float|null, 2: list<string>|null}
      */
+    /** "64" as 64, "0.5" or "1e3" as a float. */
+    private static function number(string $s): int|float
+    {
+        return preg_match('/^-?\d+$/', $s) ? (int) $s : (float) $s;
+    }
+
     private static function hints(string $help): array
     {
         $num = '-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?';
         $min = $max = $choices = null;
         if (preg_match("/Range:\s*($num)\s*~\s*($num)/i", $help, $m)) {
-            [$min, $max] = [$m[1] + 0, $m[2] + 0];
+            [$min, $max] = [self::number($m[1]), self::number($m[2])];
         } elseif (preg_match("/Range:\s*>\s*=?\s*($num)/i", $help, $m)) {
-            $min = $m[1] + 0;
+            $min = self::number($m[1]);
         } elseif (preg_match("/Range:\s*<\s*=?\s*($num)/i", $help, $m)) {
-            $max = $m[1] + 0;
+            $max = self::number($m[1]);
         }
         if (abs((float) $min) >= 1e15) {
             $min = null;
