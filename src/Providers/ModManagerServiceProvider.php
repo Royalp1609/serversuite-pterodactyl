@@ -235,6 +235,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 CheckUpdatesCommand::class,
                 RotateBackupsCommand::class,
                 MoveSubdomainsCommand::class,
+                \ServerSuite\Console\Commands\WatchCrashesCommand::class,
             ]);
         }
     }
@@ -300,6 +301,11 @@ class ModManagerServiceProvider extends ServiceProvider
             // allocation (#37). Cheap when nothing is waiting.
             $schedule->command(MoveSubdomainsCommand::class)
                 ->everyMinute()
+                ->withoutOverlapping();
+
+            // Crash after a mod change, for servers with notifications (#26).
+            $schedule->command(\ServerSuite\Console\Commands\WatchCrashesCommand::class)
+                ->everyFiveMinutes()
                 ->withoutOverlapping();
 
             // Rolling-backup rotation — only scheduled when the master switch is

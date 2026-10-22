@@ -86,6 +86,20 @@ is the same suite as a native Pelican plugin.
 - Everything bound for the console is checked first (names, IPs, one-line
   ban reasons).
 
+### Notifications (server tab)
+- Server Suite events to **Discord webhooks** or **ntfy** topics: mod updates
+  available, a scheduled backup that failed or was skipped, a crash after a mod
+  change, a version or loader switch that started or failed, and subdomains
+  claimed or released.
+- Each server can add its own targets and pick the events; without its own, it
+  uses the admin's default (**Admin → Server Suite → Default notifications**).
+  **Send a test** checks every target. URLs and tokens are stored encrypted and
+  never shown again.
+- Repeats are held back (a day for the same updates, six hours for a failing
+  backup, at most 30 messages a server an hour). Targets an owner enters must be
+  on the public internet; the admin default may point at your own network.
+  Needs the panel's queue worker and scheduler.
+
 ### Subdomains (server tab)
 - Claim `name.domain` on a domain the panel admin offers, or on the server
   owner's **own Cloudflare domain**. Players join with just the name: an A
@@ -164,6 +178,7 @@ are hidden (the server checks every request too).
 | Versions | `startup.read` | switching version or loader needs `startup.update`, `startup.docker-image`, `settings.reinstall` and `backup.create`; the reset needs `settings.reinstall` + `file.delete` |
 | Properties | `file.read-content` | `file.update`; **Save and restart** also needs `control.restart`; resetting the world after a seed change needs `file.delete`, `control.stop` and `control.start` |
 | Players | `players.read` | `players.manage` (add and remove on the whitelist, operators and bans; whitelist on/off) |
+| Notifications | `notifications.manage` | `notifications.manage` (targets hold webhook URLs and tokens) |
 | Subdomains | `subdomains.read` | `subdomains.manage` (claim, release, re-point, status cards, own domain and its token) |
 
 Every change made through Server Suite (mods installed, updated or removed,

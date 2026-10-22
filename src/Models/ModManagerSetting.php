@@ -41,10 +41,11 @@ class ModManagerSetting extends Model
         'own_dns_zone',
         'own_dns_zone_id',
         'own_dns_token',
+        'notify',
     ];
 
     /** The own-domain Cloudflare token is write-only: never serialised. */
-    protected $hidden = ['own_dns_token'];
+    protected $hidden = ['own_dns_token', 'notify'];
 
     protected $casts = [
         'modrinth_enabled'   => 'boolean',
@@ -59,6 +60,7 @@ class ModManagerSetting extends Model
         'backup_last_run_at'      => 'datetime',
         'subdomain_limit'         => 'integer',
         'last_change'             => 'array',
+        'notify'                  => 'encrypted:array',
         'own_dns_token'           => 'encrypted',
     ];
 
