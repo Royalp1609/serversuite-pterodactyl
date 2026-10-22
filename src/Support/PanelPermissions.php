@@ -64,6 +64,11 @@ final class PanelPermissions
         // Configs (#21): Pterodactyl's own file permissions, as its File Manager uses
         'configs' => ['file.read'], 'configsOpen' => ['file.read-content'], 'configsRender' => ['file.read-content'],
         'configsSave' => ['file.update'],
+        // Properties (#20): server.properties is a server file. Saving with a
+        // restart or a world reset also needs control.* / file.delete (checked
+        // with extra()).
+        'properties' => ['file.read-content'], 'propertiesSave' => ['file.update'],
+        'propertiesResetWorld' => ['file.delete', 'control.start'],
         // Subdomains
         'subdomains' => ['subdomains.read'],
         'subdomainsClaim' => ['subdomains.manage'], 'subdomainsRelease' => ['subdomains.manage'],
@@ -72,7 +77,12 @@ final class PanelPermissions
     ];
 
     /** Tab => permission pattern Pterodactyl's router checks (Components.yml carries the same). */
-    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*'];
+    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content'];
+
+    /** What a Properties save also needs, by what happens after it. */
+    public const PROPERTIES_AFTER = [
+        'none' => [], 'restart' => ['control.restart'], 'reset_world' => ['file.delete', 'control.stop', 'control.start'],
+    ];
 
     /** @return list<string> */
     public static function required(string $endpoint): array
@@ -87,6 +97,21 @@ final class PanelPermissions
             return false;
         }
         foreach (self::ENDPOINTS[$endpoint] as $permission) {
+            if (! $user->can($permission, $server)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** Whether $user holds every one of $permissions on $server. @param list<string> $permissions */
+    public static function holds(?object $user, object $server, array $permissions): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+        foreach ($permissions as $permission) {
             if (! $user->can($permission, $server)) {
                 return false;
             }
