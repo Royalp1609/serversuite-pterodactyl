@@ -94,10 +94,21 @@ Composer entry), subdomain setup, and common errors.
 
 ## Permissions
 
-Server owners and root admins can use everything. **Subusers currently can't
-use Server Suite**: its permissions aren't in Pterodactyl's subuser list, so
-they can't be granted. Making them native subuser permissions is planned in
-#17.
+Server Suite uses Pterodactyl's own subuser permissions. Owners and root admins
+can do everything; subusers get exactly what you tick on the server's **Users**
+screen, where two new groups appear: **Mods** and **Subdomains**. Each tab only
+shows for subusers holding one of its permissions, and buttons they can't use
+are hidden (the server checks every request too).
+
+| Tab | To see it | To change things |
+|---|---|---|
+| Mods | `mods.read` | `mods.install`, `mods.update`, `mods.remove`; `mods.configure` to adopt or forget files found on disk |
+| Backups | `backup.read` | `backup.create` (back up now, rename), `backup.delete` (delete, lock), `backup.restore`, `backup.download`; the schedule needs `backup.create` + `backup.delete` (rotation deletes the oldest) |
+| Versions | `startup.read` | switching version or loader needs `startup.update`, `startup.docker-image`, `settings.reinstall` and `backup.create`; the reset needs `settings.reinstall` + `file.delete` |
+| Subdomains | `subdomains.read` | `subdomains.manage` (claim, release, re-point, status cards, own domain and its token) |
+
+Upgrading: subusers who already hold `backup.*` or `startup.*` permissions now
+see the Backups and Versions tabs.
 
 ---
 

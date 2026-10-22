@@ -6,7 +6,7 @@ use Pterodactyl\BlueprintFramework\Extensions\serversuite\ModManagerController;
 /*
 | Mod Manager extension routes. Blueprint auto-prefixes every path with
 | /extensions/serversuite/. The React tab calls these via @/api/http.
-| Each handler authorizes via the installed ServerModPolicy and delegates
+| Each handler checks Pterodactyl subuser permissions (PanelPermissions, #17) and delegates
 | to ServerSuite\Services\ModManagerService.
 |
 | The {server} segment is the server UUID, passed from the React tab's

@@ -108,6 +108,19 @@ jobs:
           for c in serversuite:check-updates serversuite:rotate-backups serversuite:move-subdomains; do
             grep -q "^$c " "$RUNNER_TEMP/commands.txt" || { echo "::error::$c not registered"; exit 1; }
           done
+      - name: Server Suite permission groups are grantable (#17)
+        working-directory: ${{ env.PANEL }}
+        run: |
+          php -r '
+            require "vendor/autoload.php";
+            $app = require "bootstrap/app.php";
+            $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+            $allowed = Pterodactyl\Models\Permission::permissions()->map(fn ($v, $p) => array_map(fn ($k) => "$p.$k", array_keys($v["keys"])))->flatten()->all();
+            foreach (["mods.read", "mods.install", "subdomains.manage", "backup.read"] as $p) {
+                if (! in_array($p, $allowed, true)) { fwrite(STDERR, "::error::$p is not grantable\n"); exit(1); }
+            }
+            echo "permission groups ok\n";
+          '
       - name: PHPStan against the panel source
         working-directory: ${{ env.PANEL }}
         run: |

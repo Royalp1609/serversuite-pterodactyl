@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import Can from '@/components/elements/Can';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -475,9 +476,9 @@ export default () => {
                             </Banner>
 
                             <Actions>
-                                <Btn onClick={confirmSwitch} disabled={!preflight.can_proceed || blockers.length > 0}>
+                                <Can action={['startup.update', 'startup.docker-image', 'settings.reinstall', 'backup.create']}><Btn onClick={confirmSwitch} disabled={!preflight.can_proceed || blockers.length > 0}>
                                     <FontAwesomeIcon icon={faSyncAlt} /> Back up &amp; change to {selected}
-                                </Btn>
+                                </Btn></Can>
                                 <Btn variant="ghost" onClick={reset}>Cancel</Btn>
                             </Actions>
                         </>
@@ -568,9 +569,9 @@ export default () => {
                                     <NameInput value={loaderConfirm} onChange={(e) => setLoaderConfirm(e.target.value)} placeholder={serverName} />
 
                                     <Actions>
-                                        <Btn onClick={confirmLoaderSwitch} disabled={loaderConfirm.trim() !== serverName}>
+                                        <Can action={['startup.update', 'startup.docker-image', 'settings.reinstall', 'backup.create']}><Btn onClick={confirmLoaderSwitch} disabled={loaderConfirm.trim() !== serverName}>
                                             <FontAwesomeIcon icon={faSyncAlt} /> Wipe &amp; switch
-                                        </Btn>
+                                        </Btn></Can>
                                         <Btn variant="ghost" onClick={clearLoaderSelection}>Cancel</Btn>
                                     </Actions>
                                 </>
@@ -670,9 +671,9 @@ export default () => {
                             <Note style={{ marginTop: 14 }}>Type the server name <strong tw="text-neutral-100">{serverName}</strong> to confirm:</Note>
                             <NameInput value={nukeConfirm} onChange={(e) => setNukeConfirm(e.target.value)} placeholder={serverName} />
 
-                            <DangerBtn onClick={confirmNuclear} disabled={nukeConfirm.trim() !== serverName}>
+                            <Can action={['settings.reinstall', 'file.delete']}><DangerBtn onClick={confirmNuclear} disabled={nukeConfirm.trim() !== serverName}>
                                 <FontAwesomeIcon icon={faRadiation} /> Wipe &amp; reinstall
-                            </DangerBtn>
+                            </DangerBtn></Can>
                         </>
                     )}
                 </DangerPanel>
