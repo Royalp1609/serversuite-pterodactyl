@@ -622,6 +622,42 @@ class ModManagerController extends Controller
     }
 
     /**
+     * POST /{server}/install-batch { items: [{source, mod_id, version_id}], clearance }
+     * The install queue: every queued mod (and its dependencies, each once)
+     * in one queued batch behind one pre-change backup.
+     */
+    public function installBatch(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        $data = $request->validate([
+            'items'              => ['required', 'array', 'min:1', 'max:50'],
+            'items.*.source'     => ['required', 'string', 'in:modrinth,curseforge,hangar'],
+            'items.*.mod_id'     => ['required', 'string', 'max:128'],
+            'items.*.version_id' => ['required', 'string', 'max:128'],
+        ]);
+
+        $plan = $this->mods->planBatch($data['items'], $srv);
+
+        $clearance = $this->requireClearance($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
+        try {
+            $result = $this->mods->executePlan($plan, $srv, (int) $request->user()->id, true);
+        } catch (DeliveryException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $count = count($data['items']);
+        $this->audit($srv, 'mods-installed', ['count' => $count, 'mods' => implode(', ', array_column($data['items'], 'mod_id')), 'backup' => $clearance['backup']]);
+        $this->recordChange($srv, "install {$count} mods", $clearance);
+
+        return response()->json(['data' => $result + ['plan' => $plan->toArray()['summary']]]);
+    }
+
+    /**
      * POST /{server}/install   { source, mod_id, version_id, queue? }
      */
     public function install(Request $request, string $server): JsonResponse

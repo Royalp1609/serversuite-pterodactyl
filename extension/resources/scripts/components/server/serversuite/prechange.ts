@@ -1,4 +1,5 @@
 import http from '@/api/http';
+import { askBackup } from './BackupPrompt';
 
 /*
  * Server Suite — backup before a mod change (#24).
@@ -17,10 +18,10 @@ export const getClearance = async (base: string, label: string, onStatus: (text:
 
     let take: boolean | undefined;
     if (mode === 'ask') {
-        take = window.confirm(`Back up before you ${label}?\n\nOK: take a backup first (recommended).\nCancel: choose whether to go ahead without one.`);
-        if (!take && !window.confirm(`Go ahead and ${label} without a backup?`)) {
-            throw new Error('Cancelled.');
-        }
+        // The in-panel dialog (BackupPrompt.tsx), not the browser's confirm().
+        const answer = await askBackup(label);
+        if (answer === 'cancel') throw new Error('Cancelled.');
+        take = answer === 'backup';
     }
 
     let r;

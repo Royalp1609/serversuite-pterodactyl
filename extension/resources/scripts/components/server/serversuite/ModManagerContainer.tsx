@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Can from '@/components/elements/Can';
 import ConfigsPanel from './ConfigsPanel';
 import { getClearance } from './prechange';
+import { BackupPromptHost } from './BackupPrompt';
 import CrashCard from './CrashCard';
 import CrossplayCard from './CrossplayCard';
 import { ServerContext } from '@/state/server';
@@ -139,6 +140,10 @@ interface ModVersion {
     game_versions: string[]; file_size?: number; downloads?: number; channel?: string;
     published_at?: string | null; download_url?: string;
 }
+/** A mod waiting in the install queue, at the version picked for it. */
+interface QueueItem {
+    source: string; id: string; name: string; icon_url?: string | null; version_id: string; version_number: string;
+}
 interface PlanItem {
     source: string; mod_id: string; mod_name: string; version_number: string;
     status: 'install' | 'satisfied' | 'conflict' | 'manual';
@@ -220,6 +225,10 @@ export default () => {
     const [searchError, setSearchError] = useState<string | null>(null);
 
     const [selected, setSelected] = useState<ModResult | null>(null);
+    // Install queue: several mods, one backup, one batch.
+    const [queue, setQueue] = useState<QueueItem[]>([]);
+    const [queueState, setQueueState] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
+    const [queueMessage, setQueueMessage] = useState('');
     const [versions, setVersions] = useState<ModVersion[]>([]);
     const [chosenVersion, setChosenVersion] = useState('');
     const [loadingVersions, setLoadingVersions] = useState(false);
@@ -379,7 +388,7 @@ export default () => {
             });
             const result = res.data.data;
             if (result.mode === 'queued' && result.batch_id) {
-                await pollBatch(result.batch_id);
+                await pollBatch(result.batch_id, (s, m) => { setInstallState(s); setInstallMessage(m); });
             } else {
                 setInstallState('done'); setInstallMessage('Installed successfully.');
                 loadInstalled();
@@ -390,21 +399,54 @@ export default () => {
         } finally { setInstalling(false); }
     };
 
-    const pollBatch = async (batch: string) => {
-        for (let i = 0; i < 60; i++) {
+    type Report = (state: 'working' | 'done' | 'error', message: string) => void;
+    const pollBatch = async (batch: string, report: Report, tries = 60) => {
+        for (let i = 0; i < tries; i++) {
             await new Promise(r => setTimeout(r, 1500));
             try {
                 const res = await http.get(`${base}/tasks/${batch}`);
                 const meta = res.data.meta;
-                setInstallMessage(`Installing… ${meta.succeeded}/${meta.total} complete`);
+                report('working', `Installing… ${meta.succeeded}/${meta.total} complete`);
                 if (meta.complete) {
-                    if (meta.failed > 0) { setInstallState('error'); setInstallMessage(`${meta.failed} of ${meta.total} failed.`); }
-                    else { setInstallState('done'); setInstallMessage(`Installed ${meta.succeeded} mod(s) successfully.`); loadInstalled(); }
+                    if (meta.failed > 0) report('error', `${meta.failed} of ${meta.total} failed.`);
+                    else { report('done', `Installed ${meta.succeeded} mod(s) successfully.`); loadInstalled(); }
                     return;
                 }
             } catch { /* tolerate transient errors */ }
         }
-        setInstallState('error'); setInstallMessage('Timed out waiting for install to finish.');
+        report('error', 'Timed out waiting for install to finish.');
+    };
+
+    /** Put the open mod in the queue at the chosen version (replacing it if it's already there). */
+    const addToQueue = () => {
+        const v = versions.find((x) => x.version_id === chosenVersion);
+        if (!selected || !v) return;
+        const item: QueueItem = { source: selected.source, id: selected.id, name: selected.name, icon_url: selected.icon_url, version_id: v.version_id, version_number: v.version_number };
+        setQueue((q) => [...q.filter((x) => !(x.source === item.source && x.id === item.id)), item]);
+        setQueueState('idle');
+        closeModal();
+    };
+
+    const installQueue = async () => {
+        if (queue.length === 0) return;
+        const n = queue.length;
+        setQueueState('working'); setQueueMessage('Planning…');
+        try {
+            const clearance = await getClearance(base, `install ${n} mod${n === 1 ? '' : 's'}`, (t) => t && setQueueMessage(t));
+            setQueueMessage('Installing…');
+            const res = await http.post(`${base}/install-batch`, {
+                items: queue.map((q) => ({ source: q.source, mod_id: q.id, version_id: q.version_id })), clearance,
+            });
+            const result = res.data.data;
+            if (result.mode === 'queued' && result.batch_id) {
+                await pollBatch(result.batch_id, (s, m) => { setQueueState(s); setQueueMessage(m); if (s === 'done') setQueue([]); }, 60 + 40 * n);
+            } else {
+                setQueueState('done'); setQueueMessage('Nothing to install: everything in the queue is already there.'); setQueue([]);
+            }
+        } catch (e: any) {
+            setQueueState('error');
+            setQueueMessage(e?.response?.data?.error || e?.response?.data?.message || e.message || 'Install failed');
+        }
     };
 
     const closeModal = () => { setSelected(null); setPlan(null); setInstallState('idle'); };
@@ -708,6 +750,7 @@ export default () => {
 
     return (
         <div className="p-6 max-w-7xl mx-auto">
+            <BackupPromptHost />
             <div className="flex items-center gap-3 mb-4">
                 <FontAwesomeIcon icon={faCube} className="text-2xl text-indigo-400" />
                 <h1 className="text-2xl font-bold text-white">Mod Manager</h1>
@@ -856,6 +899,40 @@ export default () => {
 
             {tab === 'browse' && (
                 <>
+                    {(queue.length > 0 || queueState !== 'idle') && (
+                        <Panel>
+                            <div className="flex flex-wrap items-center gap-3 mb-3">
+                                <h3 className="text-base font-bold text-white">Install queue</h3>
+                                <span className="text-xs text-neutral-400">{queue.length} mod{queue.length === 1 ? '' : 's'} · one backup for all of them</span>
+                                <div className="flex gap-2" style={{ marginLeft: 'auto' }}>
+                                    {queue.length > 0 && queueState !== 'working' && <GhostButton onClick={() => { setQueue([]); setQueueState('idle'); }}>Clear</GhostButton>}
+                                    {queue.length > 0 && (
+                                        <Can action={'mods.install'}>
+                                            <PrimaryButton onClick={installQueue} disabled={queueState === 'working'}>
+                                                <FontAwesomeIcon icon={queueState === 'working' ? faSpinner : faDownload} spin={queueState === 'working'} /> Install {queue.length} mod{queue.length === 1 ? '' : 's'}
+                                            </PrimaryButton>
+                                        </Can>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                {queue.map((q) => (
+                                    <div key={`${q.source}:${q.id}`} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: 'rgba(15,23,42,0.4)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        {q.icon_url ? <img src={q.icon_url} alt="" className="w-8 h-8 rounded-md object-cover" /> : <FontAwesomeIcon icon={faCube} className="text-indigo-400" />}
+                                        <span className="text-sm text-white truncate">{q.name}</span>
+                                        <Badge>{q.version_number}</Badge>
+                                        {queueState !== 'working' && (
+                                            <button className="text-xs text-neutral-400 hover:text-red-400" style={{ marginLeft: 'auto' }}
+                                                onClick={() => setQueue((all) => all.filter((x) => x !== q))}>Remove</button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            {queueState === 'working' && <p className="text-indigo-300 text-sm mt-3"><FontAwesomeIcon icon={faSpinner} spin /> {queueMessage}</p>}
+                            {queueState === 'done' && <p className="text-emerald-400 text-sm mt-3"><FontAwesomeIcon icon={faCheckCircle} /> {queueMessage}</p>}
+                            {queueState === 'error' && <p className="text-red-400 text-sm mt-3"><FontAwesomeIcon icon={faTimesCircle} /> {queueMessage}</p>}
+                        </Panel>
+                    )}
                     <Panel>
                         <div className="flex flex-wrap gap-4 items-end">
                             <div className="flex flex-col gap-1">
@@ -1479,6 +1556,12 @@ export default () => {
 
                         <div className="flex justify-end gap-3 mt-6">
                             <GhostButton onClick={closeModal}>{installState === 'done' ? 'Close' : 'Cancel'}</GhostButton>
+                            {installState !== 'done' && (
+                                <GhostButton onClick={addToQueue} disabled={installing || loadingVersions || versions.length === 0 || !chosenVersion}
+                                    title="Queue it with others: they install together after one backup">
+                                    Add to queue{queue.length > 0 ? ` (${queue.length})` : ''}
+                                </GhostButton>
+                            )}
                             {installState !== 'done' && (
                                 <PrimaryButton onClick={doInstall} disabled={installing || loadingVersions || versions.length === 0 || !chosenVersion}>
                                     <FontAwesomeIcon icon={installing ? faSpinner : faDownload} spin={installing} /> Install

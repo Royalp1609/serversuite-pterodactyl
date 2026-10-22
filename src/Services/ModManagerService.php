@@ -42,6 +42,32 @@ class ModManagerService
     // -------------------------------------------------------------------------
 
     /**
+     * Plan several installs as one (the install queue): each queued mod is
+     * planned on its own, then the plans are merged so every mod appears
+     * once. A queued mod wins over the same mod pulled in as another's
+     * dependency, so the version the user picked is the one installed.
+     *
+     * @param array<int, array{source: string, mod_id: string, version_id: string}> $items
+     */
+    public function planBatch(array $items, object $server): \ServerSuite\Support\Data\InstallPlan
+    {
+        $all = [];
+        foreach ($items as $item) {
+            foreach ($this->planner->plan($item['source'], $item['mod_id'], $item['version_id'], $server)->items as $planned) {
+                $all[] = $planned;
+            }
+        }
+        usort($all, fn ($a, $b) => ($a->kind === 'primary' ? 0 : 1) <=> ($b->kind === 'primary' ? 0 : 1));
+
+        $merged = [];
+        foreach ($all as $planned) {
+            $merged[$planned->source . ':' . $planned->modId] ??= $planned;
+        }
+
+        return new \ServerSuite\Support\Data\InstallPlan(array_values($merged));
+    }
+
+    /**
      * Search every repository enabled for this server, using the server's
      * detected/overridden loader and game version as filters.
      *
