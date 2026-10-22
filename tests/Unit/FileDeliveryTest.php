@@ -63,6 +63,15 @@ class FakeDaemonFileClient implements DaemonFileClient
     {
         $this->files[$serverUuid][$path] = ['size' => strlen($content)];
     }
+
+    public function tailFile(string $serverUuid, string $path, int $bytes): ?array
+    {
+        return null;
+    }
+
+    public function rename(string $serverUuid, string $root, string $from, string $to): void
+    {
+    }
 }
 
 function makeVersion(int $size, string $filename = 'sodium-fabric.jar', string $url = 'https://cdn/sodium.jar'): ModVersion

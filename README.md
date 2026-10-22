@@ -44,6 +44,12 @@ is the same suite as a native Pelican plugin.
   has finished (a backup from the last 30 minutes is reused). The backup's name
   goes in the Activity entry, so you know what to restore. The server enforces
   it, not just the tab.
+- **Crash help**: if the server crashes after a mod change (a crash report, or
+  a failed start in the log, written after it), the Manage view says what
+  changed, names the likely mod (from the loader's messages, or the stack
+  trace), and offers to **disable** it (renamed to `.disabled`, so the loader
+  skips it), points at the backup taken before the change, or shows the report.
+  Nothing happens on its own.
 
 ### Backups (server tab)
 - **Scheduled backups with rotation**: pick how often (6 hours to weekly) and

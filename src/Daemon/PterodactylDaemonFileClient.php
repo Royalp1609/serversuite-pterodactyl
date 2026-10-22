@@ -124,6 +124,40 @@ class PterodactylDaemonFileClient implements DaemonFileClient
         }
     }
 
+    public function tailFile(string $serverUuid, string $path, int $bytes): ?array
+    {
+        try {
+            $repo = $this->repoForServer($serverUuid);
+            $response = $repo->getHttpClient()->get("/api/servers/{$serverUuid}/files/contents", [
+                'query' => ['file' => $path], 'stream' => true, 'timeout' => 30,
+            ]);
+            $body = $response->getBody();
+            $tail = '';
+            $size = 0;
+            while (! $body->eof()) {
+                $chunk = $body->read(262144);
+                $size += strlen($chunk);
+                $tail .= $chunk;
+                if (strlen($tail) > 2 * $bytes) {
+                    $tail = substr($tail, -$bytes);
+                }
+            }
+
+            return ['text' => strlen($tail) > $bytes ? substr($tail, -$bytes) : $tail, 'size' => $size];
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public function rename(string $serverUuid, string $root, string $from, string $to): void
+    {
+        try {
+            $this->repoForServer($serverUuid)->renameFiles($root, [['from' => $from, 'to' => $to]]);
+        } catch (\Throwable $e) {
+            throw DeliveryException::daemonError('rename failed: ' . $e->getMessage(), $e);
+        }
+    }
+
     // -------------------------------------------------------------------------
 
     /**

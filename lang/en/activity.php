@@ -14,6 +14,8 @@ return [
             'mod-removed' => 'Removed :mod',
             'mod-adopted' => 'Started tracking :file',
             'mod-forgotten' => 'Stopped tracking :mod',
+            'mod-disabled' => 'Disabled :mod',
+            'mod-enabled' => 'Enabled :mod',
             'version-switch' => 'Started a switch to Minecraft :target',
             'loader-switch' => 'Started a loader switch',
             'reset' => 'Reset the server (:mode)',

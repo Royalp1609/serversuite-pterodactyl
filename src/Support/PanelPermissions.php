@@ -65,6 +65,9 @@ final class PanelPermissions
         // change permissions (checked in the controller); the change checks its own.
         'prechangeMode' => ['mods.read'], 'prechangeSetMode' => ['mods.install'],
         'prechange' => ['mods.read'], 'prechangeState' => ['mods.read'],
+        // Crash help (#25)
+        'crash' => ['mods.read'], 'crashDismiss' => ['mods.read'],
+        'crashDisable' => ['mods.remove'], 'crashEnable' => ['mods.install'],
         // Configs (#21): Pterodactyl's own file permissions, as its File Manager uses
         'configs' => ['file.read'], 'configsOpen' => ['file.read-content'], 'configsRender' => ['file.read-content'],
         'configsSave' => ['file.update'],

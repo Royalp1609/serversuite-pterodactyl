@@ -43,7 +43,7 @@ it('takes a backup and only clears the change once it has finished', function ()
 
     finishBackup($this);
     expect($this->svc->clearanceState('srv', $c['token']))->toBe('ready')
-        ->and($this->svc->redeem('srv', $c['token']))->toBe(['ok' => true, 'backup' => "Pre-mod-change \u{2192} install Sodium", 'message' => null])
+        ->and($this->svc->redeem('srv', $c['token']))->toBe(['ok' => true, 'backup' => "Pre-mod-change \u{2192} install Sodium", 'backup_uuid' => 'b-new', 'message' => null])
         ->and($this->svc->redeem('srv', $c['token'])['ok'])->toBeTrue('a mod and its unused dependencies share one');
 });
 

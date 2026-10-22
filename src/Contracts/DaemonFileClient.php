@@ -84,4 +84,20 @@ interface DaemonFileClient
      * @throws \ServerSuite\Exceptions\DeliveryException
      */
     public function writeFile(string $serverUuid, string $path, string $content): void;
+
+    /**
+     * The last $bytes of a file, however big it is (logs, #25). Streamed, so
+     * the panel holds about twice $bytes at most. Null when missing or
+     * unreadable. Non-throwing, like readFile().
+     *
+     * @return array{text: string, size: int}|null size is the whole file's
+     */
+    public function tailFile(string $serverUuid, string $path, int $bytes): ?array;
+
+    /**
+     * Rename a file or folder; $from and $to are relative to $root (#25).
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function rename(string $serverUuid, string $root, string $from, string $to): void;
 }

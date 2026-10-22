@@ -63,6 +63,15 @@ function recordingDaemon(): DaemonFileClient
         public function writeFile(string $serverUuid, string $path, string $content): void
         {
         }
+
+        public function tailFile(string $serverUuid, string $path, int $bytes): ?array
+        {
+            return null;
+        }
+
+        public function rename(string $serverUuid, string $root, string $from, string $to): void
+        {
+        }
     };
 }
 
