@@ -54,6 +54,7 @@ class ServerMod extends Model
     // Relationships
     // -------------------------------------------------------------------------
 
+    /** @return HasOne<ServerModPendingUpdate, $this> */
     public function pendingUpdate(): HasOne
     {
         return $this->hasOne(ServerModPendingUpdate::class, 'server_mod_id');
