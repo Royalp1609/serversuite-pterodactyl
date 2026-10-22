@@ -166,6 +166,14 @@ class ReconciliationService
     ): ServerMod {
         $dir = $this->delivery->targetDirectory($server->uuid);
 
+        // Only a file the reconcile list shows (#36): a bare name, in the
+        // mods folder, not tracked yet. The name later decides what removing
+        // the mod deletes, so "../server.jar" must never get in.
+        $untracked = array_column($this->reconcile($server)['untracked'], 'filename');
+        if (! self::isBareFilename($filename) || ! in_array($filename, $untracked, true)) {
+            throw new \InvalidArgumentException('Only files in the mods folder that are not tracked yet can be adopted.');
+        }
+
         $base = [
             'server_uuid'     => $server->uuid,
             'target_filename' => $filename,
@@ -240,4 +248,12 @@ class ReconciliationService
 
         return implode(' ', $words);
     }
+
+    /** A plain file name: no path separators, no "..", no control characters. */
+    public static function isBareFilename(string $name): bool
+    {
+        return $name !== '' && $name !== '.' && $name !== '..' && ! str_contains($name, '..')
+            && ! preg_match('#[/\\\\\x00-\x1F]#', $name) && strlen($name) <= 255;
+    }
+
 }

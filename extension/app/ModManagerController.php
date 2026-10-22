@@ -285,14 +285,18 @@ class ModManagerController extends Controller
             'version_id' => ['nullable', 'string'],
         ]);
 
-        $row = $recon->adopt(
-            $srv,
-            $data['filename'],
-            $data['source'],
-            $data['mod_id'] ?? null,
-            $data['version_id'] ?? null,
-            (int) ($request->user()->id ?? 0),
-        );
+        try {
+            $row = $recon->adopt(
+                $srv,
+                $data['filename'],
+                $data['source'],
+                $data['mod_id'] ?? null,
+                $data['version_id'] ?? null,
+                (int) ($request->user()->id ?? 0),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
 
         return response()->json(['data' => ['adopted' => true, 'id' => $row->id]]);
     }
@@ -494,6 +498,13 @@ class ModManagerController extends Controller
             'version'      => ['nullable', 'string', 'max:32'],
             'confirm_name' => ['required', 'string'],
         ]);
+
+        // Only the loader eggs the Versions tab offers (#36): changing a
+        // server's egg is otherwise an admin-only action in Pterodactyl.
+        $offered = array_column(app(\ServerSuite\Services\EggManagerService::class)->minecraftLoaders(), 'egg_id');
+        if (! in_array((int) $data['egg_id'], $offered, true)) {
+            return response()->json(['error' => 'That egg is not one of the loaders this panel offers.'], 422);
+        }
 
         if (trim($data['confirm_name']) !== $srv->name) {
             return response()->json(['error' => 'The server name you typed does not match.'], 422);
