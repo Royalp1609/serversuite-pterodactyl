@@ -26,6 +26,8 @@ function panelTables(): void
         $t->unsignedBigInteger('node_id')->nullable();
         $t->unsignedBigInteger('allocation_id')->nullable();
         $t->string('status')->nullable();
+        $t->string('external_id')->nullable();
+        $t->unsignedInteger('backup_limit')->default(0);
         $t->timestamps();
     });
 }

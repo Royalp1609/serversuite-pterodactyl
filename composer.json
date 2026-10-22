@@ -31,7 +31,9 @@
         "psr-4": {
             "ServerSuite\\Tests\\": "tests/",
             "Pterodactyl\\Models\\": "tests/Fakes/Pterodactyl/Models/",
-            "Pterodactyl\\Facades\\": "tests/Fakes/Pterodactyl/Facades/"
+            "Pterodactyl\\Facades\\": "tests/Fakes/Pterodactyl/Facades/",
+            "Pterodactyl\\Http\\Requests\\": "tests/Fakes/Pterodactyl/Http/Requests/",
+            "Pterodactyl\\Services\\Acl\\": "tests/Fakes/Pterodactyl/Services/Acl/"
         }
     },
     "extra": {
