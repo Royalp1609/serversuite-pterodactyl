@@ -678,6 +678,9 @@ export default () => {
                     )}
                 </DangerPanel>
             )}
+            <p className="text-xs text-neutral-500 text-center mt-2">
+                Direct server jars for version and loader switches are powered by <a href="https://mcjars.app" target="_blank" rel="noopener noreferrer" className="underline">MCJars</a>.
+            </p>
         </Wrapper>
     );
 };
