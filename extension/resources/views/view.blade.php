@@ -364,3 +364,67 @@
     load(false);
 })();
 </script>
+
+@php
+    $ssNotifier = app(\ServerSuite\Services\Notifier::class);
+    $ssNotify = $ssNotifier->defaults();
+@endphp
+<div class="row" id="notifications">
+    <div class="col-xs-12 col-md-8">
+        <div class="box">
+            <div class="box-header with-border"><h3 class="box-title">Default notifications (Discord, ntfy)</h3></div>
+            <div class="box-body">
+                @if (request()->query('notify_ok'))
+                    <div class="alert alert-success">{{ request()->query('notify_ok') }}</div>
+                @endif
+                @if (request()->query('notify_error'))
+                    <div class="alert alert-danger">{{ request()->query('notify_error') }}</div>
+                @endif
+                <p class="text-muted small">Where Server Suite events go for servers that haven't set up their own (on their Notifications tab). Unlike owners' targets, these may point at your own network. Stored encrypted; never shown again.</p>
+                <table class="table table-condensed">
+                    <tbody>
+                    @forelse ($ssNotify['targets'] as $i => $t)
+                        <tr>
+                            <td><code>{{ \ServerSuite\Services\Notifier::label($t) }}</code></td>
+                            <td class="text-right">
+                                <form method="POST" action="/extensions/serversuite/admin/notifications" style="display:inline-block;">
+                                    @csrf
+                                    <input type="hidden" name="action" value="remove"><input type="hidden" name="index" value="{{ $i }}">
+                                    <button class="btn btn-xs btn-danger">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td class="text-muted">No default targets.</td></tr>
+                    @endforelse
+                    </tbody>
+                </table>
+                <form method="POST" action="/extensions/serversuite/admin/notifications" class="form-inline" autocomplete="off">
+                    @csrf
+                    <input type="hidden" name="action" value="add">
+                    <select name="type" class="form-control"><option value="discord">Discord</option><option value="ntfy">ntfy</option></select>
+                    <input type="url" name="url" class="form-control" placeholder="Discord webhook URL">
+                    <input type="url" name="server" class="form-control" placeholder="ntfy server (https://ntfy.sh)">
+                    <input type="text" name="topic" class="form-control" placeholder="ntfy topic">
+                    <input type="password" name="token" class="form-control" placeholder="ntfy token (optional)" autocomplete="new-password">
+                    <button type="submit" class="btn btn-primary">Add</button>
+                </form>
+                <hr>
+                <form method="POST" action="/extensions/serversuite/admin/notifications">
+                    @csrf
+                    <input type="hidden" name="action" value="events">
+                    @foreach (\ServerSuite\Services\Notifier::EVENTS as $key => $label)
+                        <div class="checkbox"><label><input type="checkbox" name="event_{{ $key }}" value="1" @checked($ssNotify['events'][$key] ?? true)> {{ $label }}</label></div>
+                    @endforeach
+                    <button type="submit" class="btn btn-default">Save events</button>
+                </form>
+                <form method="POST" action="/extensions/serversuite/admin/notifications" style="margin-top:8px;">
+                    @csrf
+                    <input type="hidden" name="action" value="test">
+                    <button type="submit" class="btn btn-default">Send a test</button>
+                </form>
+                <p class="text-muted small" style="margin-top:8px;">Needs the panel's queue worker and scheduler. Repeats are held back: a day for the same updates, six hours for a failing backup, at most 30 messages a server an hour.</p>
+            </div>
+        </div>
+    </div>
+</div>

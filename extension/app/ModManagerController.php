@@ -529,10 +529,13 @@ class ModManagerController extends Controller
                 true,   // backup-gated
             );
         } catch (\Throwable $e) {
+            app(\ServerSuite\Services\Notifier::class)->notify($srv->uuid, 'switch', 'Loader switch failed', $e->getMessage(), 'error');
+
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
         if (($result['status'] ?? null) !== 'stopping') {   // the tab calls again while the server stops: log the start once
+            app(\ServerSuite\Services\Notifier::class)->notify($srv->uuid, 'switch', 'Loader switch started', 'The server is reinstalling. It starts again when the install finishes.');
             $this->audit($srv, 'loader-switch', ['egg' => (int) $data['egg_id'], 'version' => $data['version'] ?? null]);
         }
         return response()->json(['data' => $result]);
@@ -586,10 +589,13 @@ class ModManagerController extends Controller
                 $data['wipe_mode'] ?? 'none',
             );
         } catch (\Throwable $e) {
+            app(\ServerSuite\Services\Notifier::class)->notify($srv->uuid, 'switch', 'Switch to Minecraft ' . $data['version'] . ' failed', $e->getMessage(), 'error');
+
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
         if (($result['status'] ?? null) !== 'stopping') {   // the tab calls again while the server stops: log the start once
+            app(\ServerSuite\Services\Notifier::class)->notify($srv->uuid, 'switch', 'Switch to Minecraft ' . $data['version'] . ' started', 'The server is reinstalling. It starts again when the install finishes.');
             $this->audit($srv, 'version-switch', ['target' => $data['version'], 'wipe' => $data['wipe_mode'] ?? 'none']);
         }
         return response()->json(['data' => $result]);
@@ -1359,6 +1365,162 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Notifications (#26)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/notifications: labels only, never the URLs or tokens */
+    public function notifications(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => $this->notifyState($srv)]);
+    }
+
+    /** POST /{server}/notifications { type: discord|ntfy, url | server, topic, token } */
+    public function notificationsAdd(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $t = $request->validate(['type' => ['required', 'in:discord,ntfy'], 'url' => ['nullable', 'string', 'max:500'],
+            'server' => ['nullable', 'string', 'max:300'], 'topic' => ['nullable', 'string', 'max:64'], 'token' => ['nullable', 'string', 'max:200']]);
+
+        return $this->notifyChange($srv, function ($n, $cfg) use ($srv, $t) {
+            $n->saveServer($srv->uuid, array_merge($cfg['own'] ? $cfg['targets'] : [], [$t]), $cfg['events']);
+            $this->audit($srv, 'notify-target-added', ['type' => $t['type']]);
+        });
+    }
+
+    /** POST /{server}/notifications/remove { index } */
+    public function notificationsRemove(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $i = (int) $request->validate(['index' => ['required', 'integer', 'min:0']])['index'];
+
+        return $this->notifyChange($srv, function ($n, $cfg) use ($srv, $i) {
+            $targets = $cfg['own'] ? $cfg['targets'] : [];
+            if (! isset($targets[$i])) {
+                throw new \InvalidArgumentException('That target is gone already.');
+            }
+            array_splice($targets, $i, 1);
+            $n->saveServer($srv->uuid, $targets, $cfg['events']);
+            $this->audit($srv, 'notify-target-removed', []);
+        });
+    }
+
+    /** POST /{server}/notifications/events { events: {name: bool} } */
+    public function notificationsEvents(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $events = (array) $request->validate(['events' => ['required', 'array']])['events'];
+
+        return $this->notifyChange($srv, function ($n, $cfg) use ($srv, $events) {
+            $n->saveServer($srv->uuid, $cfg['own'] ? $cfg['targets'] : [], $events);
+            $this->audit($srv, 'notify-events-saved', []);
+        });
+    }
+
+    /** POST /{server}/notifications/test: send a test to every target now */
+    public function notificationsTest(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $n = app(\ServerSuite\Services\Notifier::class);
+        $cfg = $n->forServer($srv->uuid);
+        if ($cfg['targets'] === []) {
+            return response()->json(['error' => 'Add a target first.'], 422);
+        }
+        try {
+            $results = $n->test($cfg['targets'], $cfg['own'], $srv->uuid);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $this->audit($srv, 'notify-test-sent', []);
+
+        return response()->json(['data' => ['results' => $results] + $this->notifyState($srv)]);
+    }
+
+    /** @return array{labels: list<string>, inherits: bool, default_count: int, events: array<string, bool>, catalog: array<string, string>} */
+    private function notifyState(Server $srv): array
+    {
+        $n = app(\ServerSuite\Services\Notifier::class);
+        $cfg = $n->forServer($srv->uuid);
+        $events = [];
+        foreach (array_keys(\ServerSuite\Services\Notifier::EVENTS) as $e) {
+            $events[$e] = (bool) ($cfg['events'][$e] ?? true);
+        }
+
+        return [
+            'labels' => $cfg['own'] ? array_map([\ServerSuite\Services\Notifier::class, 'label'], $cfg['targets']) : [],
+            'inherits' => ! $cfg['own'], 'default_count' => count($n->defaults()['targets']),
+            'events' => $events, 'catalog' => \ServerSuite\Services\Notifier::EVENTS,
+        ];
+    }
+
+    private function notifyChange(Server $srv, callable $fn): JsonResponse
+    {
+        $n = app(\ServerSuite\Services\Notifier::class);
+        try {
+            $fn($n, $n->forServer($srv->uuid));
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->notifyState($srv)]);
+    }
+
+    /** POST /admin/notifications { action: add|remove|events|test, ... }: the default targets */
+    public function adminNotify(Request $request)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $n = app(\ServerSuite\Services\Notifier::class);
+        $d = $n->defaults();
+        $action = (string) $request->input('action');
+        try {
+            $msg = match ($action) {
+                'add' => (function () use ($n, $d, $request) {
+                    $t = $request->validate(['type' => ['required', 'in:discord,ntfy'], 'url' => ['nullable', 'string', 'max:500'],
+                        'server' => ['nullable', 'string', 'max:300'], 'topic' => ['nullable', 'string', 'max:64'], 'token' => ['nullable', 'string', 'max:200']]);
+                    $n->saveDefaults(array_merge($d['targets'], [$t]), $d['events']);
+
+                    return 'Default target added.';
+                })(),
+                'remove' => (function () use ($n, $d, $request) {
+                    $targets = $d['targets'];
+                    array_splice($targets, (int) $request->input('index'), 1);
+                    $n->saveDefaults($targets, $d['events']);
+
+                    return 'Removed.';
+                })(),
+                'events' => (function () use ($n, $d, $request) {
+                    $events = [];
+                    foreach (array_keys(\ServerSuite\Services\Notifier::EVENTS) as $e) {
+                        $events[$e] = $request->boolean("event_{$e}");
+                    }
+                    $n->saveDefaults($d['targets'], $events);
+
+                    return 'Saved.';
+                })(),
+                'test' => (function () use ($n, $d) {
+                    if ($d['targets'] === []) {
+                        throw new \InvalidArgumentException('Add a target first.');
+                    }
+
+                    return implode(' ', array_map(fn ($r) => ($r['ok'] ? '✓ ' : '✗ ') . $r['label'] . ($r['error'] ? ": {$r['error']}" : '') . '.', $n->test($d['targets'], false)));
+                })(),
+                default => throw new \InvalidArgumentException('Unknown action.'),
+            };
+            $q = ['notify_ok' => $msg];
+        } catch (\InvalidArgumentException $e) {
+            $q = ['notify_error' => $e->getMessage()];
+        }
+
+        return redirect()->to('/admin/extensions/serversuite?' . http_build_query($q) . '#notifications');
+    }
+
+    // -------------------------------------------------------------------------
     // Subdomains (#14)
     // -------------------------------------------------------------------------
 
@@ -1492,6 +1654,11 @@ class ModManagerController extends Controller
         }
         if ($srv !== null && $event !== null) {
             $this->audit($srv, $event, is_string($result) ? ['fqdn' => $result] : []);
+        }
+        if ($srv !== null && in_array($event, ['subdomain-created', 'subdomain-removed'], true)) {
+            $fqdn = is_string($result) ? $result : 'a subdomain';
+            app(\ServerSuite\Services\Notifier::class)->notify($srv->uuid, 'subdomain', $event === 'subdomain-created' ? "Subdomain {$fqdn} claimed" : 'A subdomain was released',
+                'By ' . (request()->user()?->username ?? 'a user') . '.');
         }
 
         return response()->json(['data' => ['ok' => true, 'fqdn' => is_string($result) ? $result : null]]);

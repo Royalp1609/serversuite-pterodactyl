@@ -42,8 +42,8 @@ it('logs every endpoint that changes something, with a label for each event', fu
 
     foreach (PanelPermissions::ENDPOINTS as $endpoint => $perms) {
         $reads = array_filter($perms, fn ($p) => str_ends_with($p, '.read') || str_ends_with($p, '.read-content'));
-        if (count($reads) === count($perms) || in_array($endpoint, ['plan', 'serverVersionPreflight'], true)) {
-            continue;   // read-only, or a dry run
+        if (count($reads) === count($perms) || in_array($endpoint, ['plan', 'serverVersionPreflight', 'notifications'], true)) {
+            continue;   // read-only, a dry run, or a read behind a manage permission
         }
         $start = strpos($src, "public function {$endpoint}(");
         $body = substr($src, $start, strpos($src, "\n    }\n", $start) - $start);

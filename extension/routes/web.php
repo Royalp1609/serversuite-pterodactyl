@@ -74,6 +74,20 @@ Route::post('/{server}/players/remove', [ModManagerController::class, 'playersRe
 Route::post('/{server}/players/whitelist', [ModManagerController::class, 'playersWhitelist'])
     ->name('extension.serversuite.players-whitelist');
 
+// Notifications (#26): this server's Discord / ntfy targets and events.
+Route::get('/{server}/notifications', [ModManagerController::class, 'notifications'])
+    ->name('extension.serversuite.notifications');
+Route::post('/{server}/notifications', [ModManagerController::class, 'notificationsAdd'])
+    ->name('extension.serversuite.notifications-add');
+Route::post('/{server}/notifications/remove', [ModManagerController::class, 'notificationsRemove'])
+    ->name('extension.serversuite.notifications-remove');
+Route::post('/{server}/notifications/events', [ModManagerController::class, 'notificationsEvents'])
+    ->name('extension.serversuite.notifications-events');
+Route::post('/{server}/notifications/test', [ModManagerController::class, 'notificationsTest'])
+    ->name('extension.serversuite.notifications-test');
+Route::post('/admin/notifications', [ModManagerController::class, 'adminNotify'])
+    ->name('extension.serversuite.admin-notifications');
+
 // Subdomains (#14). Admin routes first so /admin isn't taken as a {server}.
 Route::post('/admin/domains', [ModManagerController::class, 'adminAddDomain'])
     ->name('extension.serversuite.admin-add-domain');

@@ -36,6 +36,12 @@ final class PanelPermissions
                 'manage' => 'Add and remove players on the whitelist, operators and bans, and turn the whitelist on or off.',
             ],
         ],
+        'notifications' => [
+            'description' => "Server Suite: this server's Discord and ntfy notifications.",
+            'keys' => [
+                'manage' => 'Add and remove notification targets (webhook URLs, tokens), choose events, and send a test.',
+            ],
+        ],
         'subdomains' => [
             'description' => "Server Suite: this server's subdomains.",
             'keys' => [
@@ -86,6 +92,10 @@ final class PanelPermissions
         // Players (#27)
         'players' => ['players.read'], 'playersAdd' => ['players.manage'], 'playersRemove' => ['players.manage'],
         'playersWhitelist' => ['players.manage'],
+        // Notifications (#26)
+        'notifications' => ['notifications.manage'], 'notificationsAdd' => ['notifications.manage'],
+        'notificationsRemove' => ['notifications.manage'], 'notificationsEvents' => ['notifications.manage'],
+        'notificationsTest' => ['notifications.manage'],
         // Subdomains
         'subdomains' => ['subdomains.read'],
         'subdomainsClaim' => ['subdomains.manage'], 'subdomainsRelease' => ['subdomains.manage'],
@@ -94,7 +104,7 @@ final class PanelPermissions
     ];
 
     /** Tab => permission pattern Pterodactyl's router checks (Components.yml carries the same). */
-    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*'];
+    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*', 'Notifications' => 'notifications.*'];
 
     /** What a Properties save also needs, by what happens after it. */
     public const PROPERTIES_AFTER = [

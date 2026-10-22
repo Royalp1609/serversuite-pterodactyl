@@ -96,6 +96,7 @@ class RotateBackupsCommand extends Command
                 $failed++;
                 // Leave last_run_at untouched so a transient error retries next tick.
                 $this->warn("  ! {$uuid}: unexpected error — {$e->getMessage()}");
+                app(\ServerSuite\Services\Notifier::class)->notify($uuid, 'backup', 'Scheduled backup failed', $e->getMessage(), 'error', 'exception');
                 continue;
             }
 
@@ -112,6 +113,11 @@ class RotateBackupsCommand extends Command
             // shifted by the backup timezone's offset.
             if (! $result->isFailed()) {
                 $setting->forceFill(['backup_last_run_at' => $now->setTimezone(config('app.timezone'))])->save();
+            }
+            if (! $result->isRotated()) {
+                app(\ServerSuite\Services\Notifier::class)->notify($uuid, 'backup',
+                    $result->isFailed() ? 'Scheduled backup failed' : 'Scheduled backup skipped',
+                    (string) $result->message, $result->isFailed() ? 'error' : 'warn', (string) $result->reason);
             }
 
             $this->line($this->formatLine($uuid, $result));

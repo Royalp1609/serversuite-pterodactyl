@@ -86,8 +86,27 @@ class CheckUpdatesCommand extends Command
             }
         }
 
+        $this->notifyUpdates($serverUuids);
+
         $this->info("[Server Suite] Done. Checked: {$checked} mods. Updates found: {$flagged}.");
 
         return self::SUCCESS;
     }
+
+    /** #26: each server's waiting updates; the same list is sent once a day at most. */
+    private function notifyUpdates(array $serverUuids): void
+    {
+        $notifier = app(\ServerSuite\Services\Notifier::class);
+        foreach ($serverUuids as $uuid) {
+            $pending = ServerMod::forServer($uuid)->with('pendingUpdate')->get()
+                ->filter(fn ($m) => $m->pendingUpdate !== null && ! $m->pendingUpdate->dismissed);
+            if ($pending->isEmpty()) {
+                continue;
+            }
+            $lines = $pending->map(fn ($m) => "{$m->mod_name}: {$m->installed_version} → {$m->pendingUpdate->available_version}")->values()->all();
+            $notifier->notify($uuid, 'updates', count($lines) . ' mod update(s) available', implode("\n", array_slice($lines, 0, 25))
+                . (count($lines) > 25 ? "\n…" : '') . "\n\nInstall them from the Mods tab.", 'info', implode('|', $lines));
+        }
+    }
+
 }
