@@ -203,6 +203,21 @@ class ModManagerServiceProvider extends ServiceProvider
     protected function registerPermissions(): void
     {
         PanelPermissions::register();
+        $this->registerActivityLabels();
+    }
+
+    /**
+     * Readable Server Suite entries in the Activity tab (#19): the panel's
+     * locale endpoint reads the "activity" group through the translation
+     * loader, which merges every path it has.
+     */
+    protected function registerActivityLabels(): void
+    {
+        $this->callAfterResolving('translation.loader', function ($loader) {
+            if (method_exists($loader, 'addPath')) {
+                $loader->addPath(__DIR__ . '/../../lang');
+            }
+        });
     }
 
     // -------------------------------------------------------------------------

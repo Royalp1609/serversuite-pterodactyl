@@ -92,6 +92,7 @@ class ModManagerController extends Controller
 
         $result = $this->mods->updateAll($srv);
 
+        $this->audit($srv, 'mods-updated-all', ['updated' => is_array($result['updated'] ?? null) ? count($result['updated']) : null]);
         return response()->json(['data' => $result]);
     }
 
@@ -298,6 +299,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, 'mod-adopted', ['file' => $data['filename'], 'source' => $data['source']]);
         return response()->json(['data' => ['adopted' => true, 'id' => $row->id]]);
     }
 
@@ -315,6 +317,7 @@ class ModManagerController extends Controller
         $mod = ServerMod::where('id', $data['id'])->where('server_uuid', $srv->uuid)->firstOrFail();
         $recon->forget($mod);
 
+        $this->audit($srv, 'mod-forgotten', ['mod' => $mod->mod_name]);
         return response()->json(['data' => ['forgotten' => true]]);
     }
 
@@ -462,6 +465,9 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        if (($result['status'] ?? null) !== 'stopping') {   // the tab calls again while the server stops: log the start once
+            $this->audit($srv, 'reset', ['mode' => $data['mode']]);
+        }
         return response()->json(['data' => $result]);
     }
 
@@ -521,6 +527,9 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        if (($result['status'] ?? null) !== 'stopping') {   // the tab calls again while the server stops: log the start once
+            $this->audit($srv, 'loader-switch', ['egg' => (int) $data['egg_id'], 'version' => $data['version'] ?? null]);
+        }
         return response()->json(['data' => $result]);
     }
 
@@ -575,6 +584,9 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        if (($result['status'] ?? null) !== 'stopping') {   // the tab calls again while the server stops: log the start once
+            $this->audit($srv, 'version-switch', ['target' => $data['version'], 'wipe' => $data['wipe_mode'] ?? 'none']);
+        }
         return response()->json(['data' => $result]);
     }
 
@@ -621,6 +633,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, 'mod-installed', ['source' => $data['source'], 'mod' => $data['mod_id'], 'version' => $data['version_id']]);
         return response()->json(['data' => $result]);
     }
 
@@ -693,6 +706,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, 'mod-updated', ['mod' => $mod->mod_name, 'version' => $updated->installed_version]);
         return response()->json(['data' => [
             'mod_name'          => $updated->mod_name,
             'installed_version' => $updated->installed_version,
@@ -750,6 +764,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 409);
         }
 
+        $this->audit($srv, 'mod-removed', ['mod' => $mod->mod_name]);
         return response()->json(['data' => ['removed' => true]]);
     }
 
@@ -836,6 +851,7 @@ class ModManagerController extends Controller
         $setting->backup_schedule_hour = $data['hour'] ?? null;
         $setting->save();
 
+        $this->audit($srv, 'backup-schedule-saved', []);
         return response()->json(['data' => ['ok' => true]]);
     }
 
@@ -850,6 +866,7 @@ class ModManagerController extends Controller
 
         $result = app(BackupRotationService::class)->rotate($server);
 
+        $this->audit($srv, 'backup-rotated', ['result' => $result->toArray()['status'] ?? null]);
         return response()->json(['data' => $result->toArray()]);
     }
 
@@ -872,6 +889,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, 'backup-created', ['name' => $data['name'] ?? null]);
         return response()->json(['data' => $result->toArray()]);
     }
 
@@ -893,6 +911,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, 'backup-renamed', ['backup' => $backup, 'name' => $data['name']]);
         return response()->json(['data' => ['ok' => true]]);
     }
 
@@ -913,6 +932,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, $data['locked'] ? 'backup-locked' : 'backup-unlocked', ['backup' => $backup]);
         return response()->json(['data' => ['ok' => true]]);
     }
 
@@ -930,6 +950,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, 'backup-deleted', ['backup' => $backup]);
         return response()->json(['data' => ['ok' => true]]);
     }
 
@@ -948,6 +969,7 @@ class ModManagerController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        $this->audit($srv, 'backup-downloaded', ['backup' => $backup]);
         return response()->json(['data' => ['url' => $url]]);
     }
 
@@ -988,6 +1010,7 @@ class ModManagerController extends Controller
             // alignment is a nicety, not a requirement
         }
 
+        $this->audit($srv, 'backup-restored', ['backup' => $backup, 'truncate' => (bool) ($data['truncate'] ?? false)]);
         return response()->json(['data' => ['ok' => true, 'aligned' => $aligned]]);
     }
 
@@ -1015,7 +1038,7 @@ class ModManagerController extends Controller
         ]);
         $domain = $data['domain'] === 'own' ? 'own' : (int) $data['domain'];
 
-        return $this->subdomainAction(fn ($svc) => $svc->claim($srv, $data['label'], $domain, $request->user()?->id)->fqdn);
+        return $this->subdomainAction(fn ($svc) => $svc->claim($srv, $data['label'], $domain, $request->user()?->id)->fqdn, $srv, 'subdomain-created');
     }
 
     /** POST /{server}/subdomains/{id}/release */
@@ -1024,7 +1047,7 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
-        return $this->subdomainAction(fn ($svc) => $svc->release($srv, $id));
+        return $this->subdomainAction(fn ($svc) => $svc->release($srv, $id), $srv, 'subdomain-removed');
     }
 
     /** POST /{server}/subdomains/{id}/repoint */
@@ -1033,7 +1056,7 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
-        return $this->subdomainAction(fn ($svc) => $svc->repoint($srv, $id)->fqdn);
+        return $this->subdomainAction(fn ($svc) => $svc->repoint($srv, $id)->fqdn, $srv, 'subdomain-repointed');
     }
 
     /** POST /{server}/subdomains/{id}/status-card   { public: bool } (#29) */
@@ -1043,7 +1066,7 @@ class ModManagerController extends Controller
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         $public = (bool) $request->validate(['public' => ['required', 'boolean']])['public'];
 
-        return $this->subdomainAction(fn () => app(\ServerSuite\Services\StatusCardService::class)->setPublic($srv, $id, $public)->fqdn);
+        return $this->subdomainAction(fn () => app(\ServerSuite\Services\StatusCardService::class)->setPublic($srv, $id, $public)->fqdn, $srv, $public ? 'status-card-enabled' : 'status-card-disabled');
     }
 
     /** POST /{server}/subdomains/own   { zone, token? } (blank token keeps the stored one) */
@@ -1056,7 +1079,7 @@ class ModManagerController extends Controller
             'token' => ['nullable', 'string', 'max:255'],
         ]);
 
-        return $this->subdomainAction(fn ($svc) => $svc->saveOwnDomain($srv, $data['zone'], $data['token'] ?? null));
+        return $this->subdomainAction(fn ($svc) => $svc->saveOwnDomain($srv, $data['zone'], $data['token'] ?? null), $srv, 'own-domain-saved');
     }
 
     /** POST /{server}/subdomains/own/remove */
@@ -1065,7 +1088,7 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
-        return $this->subdomainAction(fn ($svc) => $svc->removeOwnDomain($srv));
+        return $this->subdomainAction(fn ($svc) => $svc->removeOwnDomain($srv), $srv, 'own-domain-removed');
     }
 
     /** POST /admin/domains   { zone, token } */
@@ -1116,12 +1139,15 @@ class ModManagerController extends Controller
     }
 
     /** Run a subdomain action; a refusal comes back as 422 with a message safe to show. */
-    private function subdomainAction(callable $fn): JsonResponse
+    private function subdomainAction(callable $fn, ?Server $srv = null, ?string $event = null): JsonResponse
     {
         try {
             $result = $fn(app(\ServerSuite\Services\SubdomainService::class));
         } catch (\ServerSuite\Exceptions\SubdomainException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
+        }
+        if ($srv !== null && $event !== null) {
+            $this->audit($srv, $event, is_string($result) ? ['fqdn' => $result] : []);
         }
 
         return response()->json(['data' => ['ok' => true, 'fqdn' => is_string($result) ? $result : null]]);
@@ -1142,6 +1168,12 @@ class ModManagerController extends Controller
     protected function resolveServer(string $serverUuid): Server
     {
         return Server::query()->where('uuid', $serverUuid)->firstOrFail();
+    }
+
+    /** Write a Server Suite action to the server's Activity tab (#19). Never fails the request. */
+    protected function audit(Server $server, string $event, array $properties = []): void
+    {
+        \ServerSuite\Support\SuiteActivity::log($server, 'server:serversuite.' . $event, array_filter($properties, fn ($v) => $v !== null));
     }
 
     /**
