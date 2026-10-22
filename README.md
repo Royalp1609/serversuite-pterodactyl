@@ -107,6 +107,10 @@ are hidden (the server checks every request too).
 | Versions | `startup.read` | switching version or loader needs `startup.update`, `startup.docker-image`, `settings.reinstall` and `backup.create`; the reset needs `settings.reinstall` + `file.delete` |
 | Subdomains | `subdomains.read` | `subdomains.manage` (claim, release, re-point, status cards, own domain and its token) |
 
+Every change made through Server Suite (mods installed, updated or removed,
+version and loader switches, resets, backups, subdomains) shows in the server's
+**Activity** tab, with who did it.
+
 Upgrading: subusers who already hold `backup.*` or `startup.*` permissions now
 see the Backups and Versions tabs.
 

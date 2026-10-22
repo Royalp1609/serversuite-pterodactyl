@@ -108,7 +108,7 @@ jobs:
           for c in serversuite:check-updates serversuite:rotate-backups serversuite:move-subdomains; do
             grep -q "^$c " "$RUNNER_TEMP/commands.txt" || { echo "::error::$c not registered"; exit 1; }
           done
-      - name: Server Suite permission groups are grantable (#17)
+      - name: Server Suite permission groups are grantable (#17), activity labels merge (#19)
         working-directory: ${{ env.PANEL }}
         run: |
           php -r '
@@ -120,6 +120,9 @@ jobs:
                 if (! in_array($p, $allowed, true)) { fwrite(STDERR, "::error::$p is not grantable\n"); exit(1); }
             }
             echo "permission groups ok\n";
+            $activity = app("translator")->getLoader()->load("en", "activity");
+            if (! isset($activity["server"]["serversuite"]["mod-removed"], $activity["server"]["file"])) { fwrite(STDERR, "::error::activity labels not merged with the panel ones\n"); exit(1); }
+            echo "activity labels ok\n";
           '
       - name: PHPStan against the panel source
         working-directory: ${{ env.PANEL }}
