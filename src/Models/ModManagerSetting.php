@@ -36,6 +36,7 @@ class ModManagerSetting extends Model
         'backup_schedule_hour',
         'backup_last_run_at',
         'subdomain_limit',
+        'pre_change_backup',
         'own_dns_zone',
         'own_dns_zone_id',
         'own_dns_token',

@@ -18,6 +18,7 @@ return [
             'loader-switch' => 'Started a loader switch',
             'reset' => 'Reset the server (:mode)',
             'config-saved' => 'Edited :file',
+            'pre-change-backup-set' => 'Set backups before mod changes to :mode',
             'properties-saved' => 'Changed server.properties: :changed',
             'world-reset' => 'Reset the world for a new seed',
             'backup-schedule-saved' => 'Changed the backup schedule',

@@ -26,6 +26,16 @@ Route::post('/admin/import-catalog', [ModManagerController::class, 'adminImportC
 Route::post('/admin/update-eggs', [ModManagerController::class, 'adminUpdateAllEggs'])
     ->name('extension.serversuite.admin-update-eggs');
 
+// Backup before mod changes (#24): the clearance a mod change needs.
+Route::get('/{server}/prechange', [ModManagerController::class, 'prechangeMode'])
+    ->name('extension.serversuite.prechange-mode');
+Route::post('/{server}/prechange/mode', [ModManagerController::class, 'prechangeSetMode'])
+    ->name('extension.serversuite.prechange-set-mode');
+Route::post('/{server}/prechange', [ModManagerController::class, 'prechange'])
+    ->name('extension.serversuite.prechange');
+Route::get('/{server}/prechange/{token}', [ModManagerController::class, 'prechangeState'])
+    ->where('token', '[a-f0-9]{32}')->name('extension.serversuite.prechange-state');
+
 // Configs (#21): browse /plugins, /config, ... and edit files (text or form).
 Route::get('/{server}/configs', [ModManagerController::class, 'configs'])
     ->name('extension.serversuite.configs');
