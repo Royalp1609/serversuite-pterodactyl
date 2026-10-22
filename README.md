@@ -111,7 +111,7 @@ is the same suite as a native Pelican plugin.
   on the public internet; the admin default may point at your own network.
   Needs the panel's queue worker and scheduler.
 
-### Network (Velocity, server tab)
+### Velocity (server tab)
 - On a **Velocity** server, put your other servers behind it: tick them, name
   them, set the try order, **Apply**. That writes `velocity.toml` (`[servers]`,
   `try`, modern forwarding with the proxy's own `forwarding.secret`; sample

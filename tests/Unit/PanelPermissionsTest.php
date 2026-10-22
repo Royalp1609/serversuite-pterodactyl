@@ -74,7 +74,16 @@ it('lets owners do everything and subusers exactly what they hold', function () 
 it('hides each tab behind the permission its endpoints use', function () {
     $yml = file_get_contents(__DIR__ . '/../../extension/resources/scripts/components/Components.yml');
 
+    // Blueprint pastes Permission into routes.ts as-is, after its YAML parser
+    // drops the outer quotes, so the value must carry its own JS quotes:
+    // '"mods.*"' -> permission: "mods.*" (a bare mods.* fails the build).
     foreach (PanelPermissions::TABS as $tab => $perm) {
-        expect($yml)->toMatch("/Name: '{$tab}', Permission: '" . preg_quote($perm, '/') . "'/");
+        expect($yml)->toMatch("/Name: '{$tab}', Permission: '\"" . preg_quote($perm, '/') . "\"'/");
     }
+    expect(preg_match_all("/Permission: '[^\"]/", $yml))->toBe(0, 'a Permission without JS quotes');
+
+    // Pterodactyl's own routes match first, so a tab on one of their paths
+    // shows their page instead (our Velocity tab sat on /network).
+    preg_match_all("/Path: '([^']+)'/", $yml, $m);
+    expect(array_intersect($m[1], ['/', '/files', '/databases', '/schedules', '/users', '/backups', '/network', '/startup', '/settings', '/activity']))->toBe([]);
 });
