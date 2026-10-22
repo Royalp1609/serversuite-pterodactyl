@@ -92,6 +92,24 @@ follow [INSTALL.md](INSTALL.md). It covers a fresh install, updating, the steps
 to repeat **after every Pterodactyl upgrade** (the upgrade removes the backend's
 Composer entry), subdomain setup, and common errors.
 
+## Application API (billing)
+
+For billing systems such as Paymenter: the things they sell on top of a server.
+Uses Pterodactyl's application API keys (**Admin → Application API**); reads need
+**Servers: Read**, changes **Servers: Read & Write**. `{server}` is the panel
+server id, or `external:<id>` for the billing service id (the server's
+`external_id`). The same API as the Pelican plugin.
+
+| Method | Path | Body |
+|---|---|---|
+| GET | `/api/application/serversuite/servers/{server}` | — returns subdomains (allowance, used, `over_allowance`, names), loader/version, backup plan and next run |
+| PUT | `/api/application/serversuite/servers/{server}/subdomains` | `{"allowance": 2}` (0-100). Lowering it never removes subdomains; `over_allowance` says so |
+| PUT | `/api/application/serversuite/servers/{server}/backups` | `{"enabled": true, "interval_hours": 24, "hour": 4, "keep": 5}` |
+
+Writes are safe to repeat (the same request twice changes nothing), and real
+changes show in the server's Activity tab as the key's owner. Mods, modpacks
+and versions aren't sold, so they aren't in the API.
+
 ## Permissions
 
 Server Suite uses Pterodactyl's own subuser permissions. Owners and root admins

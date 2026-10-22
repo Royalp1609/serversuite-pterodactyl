@@ -189,6 +189,10 @@ class ModManagerServiceProvider extends ServiceProvider
     {
         $this->loadViewsFrom(__DIR__ . '/../../resources/views', 'serversuite');
         $this->loadRoutesFrom(__DIR__ . '/../../routes/status.php');
+        // Billing API (#38): needs the panel's api / application-api middleware.
+        if (class_exists('\\Pterodactyl\\Http\\Kernel')) {
+            $this->loadRoutesFrom(__DIR__ . '/../../routes/api.php');
+        }
     }
 
     // -------------------------------------------------------------------------
