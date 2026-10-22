@@ -1202,7 +1202,7 @@ class ModManagerController extends Controller
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
-        $clearance = $this->preChange($request, $srv);
+        $clearance = $this->requireClearance($request, $srv);
         if ($clearance instanceof JsonResponse) {
             return $clearance;
         }
