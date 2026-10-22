@@ -73,6 +73,115 @@ class FileDeliveryService
     }
 
     /**
+     * Pull any file into $directory and check it landed at $expectedSize
+     * (0 = size unknown). Used for modpack files (#23), which aren't ModVersions.
+     * A wrong-sized file is deleted. Returns the verification note.
+     *
+     * @throws DeliveryException
+     */
+    public function deliverFile(string $serverUuid, string $url, string $directory, string $filename, int $expectedSize): string
+    {
+        $this->daemon->pull($serverUuid, $url, $directory, $filename, true);
+
+        $entries = $this->daemon->listDirectory($serverUuid, $directory);
+        $match = null;
+        foreach ($entries as $entry) {
+            if (($entry['is_file'] ?? false) && ($entry['name'] ?? null) === $filename) {
+                $match = $entry;
+                break;
+            }
+        }
+        if ($match === null) {
+            throw DeliveryException::verificationFailed("file {$filename} not found after download");
+        }
+        if ($expectedSize > 0 && (int) $match['size'] !== $expectedSize) {
+            $this->safeDelete($serverUuid, $directory, $filename);
+            throw DeliveryException::verificationFailed("size mismatch: expected {$expectedSize} bytes, got {$match['size']}");
+        }
+
+        return $expectedSize > 0 ? "size verified ({$expectedSize} bytes)" : 'file present (no reference size)';
+    }
+
+    /**
+     * Move everything under $src into $dst, replacing files that exist and
+     * merging folders, all on Wings (nothing passes through the panel).
+     * Folders missing at the destination move in one rename. Returns the
+     * destination paths of the files it replaced or moved, relative to $dst.
+     *
+     * @return array<int, string>
+     *
+     * @throws DeliveryException
+     */
+    public function mergeInto(string $serverUuid, string $src, string $dst, int $depth = 0): array
+    {
+        if ($depth > 32) {
+            throw DeliveryException::daemonError("folders nested too deep under {$src}");
+        }
+
+        $join = fn (string $a, string $b) => rtrim($a, '/') . '/' . $b;
+        $srcEntries = $this->daemon->listDirectory($serverUuid, $src);
+        try {
+            $dstEntries = collect($this->daemon->listDirectory($serverUuid, $dst))->keyBy('name');
+        } catch (DeliveryException) {
+            $dstEntries = collect();   // destination folder doesn't exist yet
+        }
+
+        $moved = [];
+        foreach ($srcEntries as $e) {
+            $name = (string) $e['name'];
+            if ($name === '' || $name === '.' || $name === '..') {
+                continue;
+            }
+            $existing = $dstEntries->get($name);
+
+            if ($existing !== null && ! $e['is_file'] && ! $existing['is_file']) {
+                foreach ($this->mergeInto($serverUuid, $join($src, $name), $join($dst, $name), $depth + 1) as $p) {
+                    $moved[] = $name . '/' . $p;
+                }
+                continue;
+            }
+            if ($existing !== null) {
+                $this->daemon->deleteFiles($serverUuid, $dst, [$name]);
+            }
+            $this->daemon->rename($serverUuid, '/', ltrim($join($src, $name), '/'), ltrim($join($dst, $name), '/'));
+            $moved[] = $name;
+        }
+
+        return $moved;
+    }
+
+    /**
+     * Make everything under $dir readable: files 644, folders 755. Wings keeps
+     * an archive's permission bits when it unpacks, and zips made on Windows
+     * often carry 000, which leaves files the server can't read ("Permission
+     * denied" on a mod jar). One chmod call per folder.
+     *
+     * @throws DeliveryException
+     */
+    public function normalisePermissions(string $serverUuid, string $dir, int $depth = 0): void
+    {
+        if ($depth > 32) {
+            return;
+        }
+        $modes = [];
+        $subdirs = [];
+        foreach ($this->daemon->listDirectory($serverUuid, $dir) as $e) {
+            $name = (string) $e['name'];
+            if ($name === '' || $name === '.' || $name === '..') {
+                continue;
+            }
+            $modes[$name] = $e['is_file'] ? '644' : '755';
+            if (! $e['is_file']) {
+                $subdirs[] = rtrim($dir, '/') . '/' . $name;
+            }
+        }
+        $this->daemon->chmod($serverUuid, $dir, $modes);
+        foreach ($subdirs as $sub) {
+            $this->normalisePermissions($serverUuid, $sub, $depth + 1);
+        }
+    }
+
+    /**
      * Remove a delivered mod file from a server.
      *
      * @throws DeliveryException

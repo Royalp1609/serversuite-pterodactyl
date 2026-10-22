@@ -100,4 +100,28 @@ interface DaemonFileClient
      * @throws \ServerSuite\Exceptions\DeliveryException
      */
     public function rename(string $serverUuid, string $root, string $from, string $to): void;
+
+    /**
+     * Unpack an archive in place: $file (relative to $directory) is
+     * extracted into $directory by Wings (#23).
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function decompress(string $serverUuid, string $directory, string $file): void;
+
+    /**
+     * Create a folder (and its parents). An existing folder is not an error.
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function makeDirectory(string $serverUuid, string $path): void;
+
+    /**
+     * Set permissions on entries of one folder.
+     *
+     * @param array<string, string> $modes  name => octal mode, e.g. ['a.jar' => '644']
+     *
+     * @throws \ServerSuite\Exceptions\DeliveryException
+     */
+    public function chmod(string $serverUuid, string $directory, array $modes): void;
 }

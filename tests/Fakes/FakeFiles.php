@@ -75,4 +75,16 @@ class FakeFiles implements DaemonFileClient
         $this->put("{$dir}/{$to}", $this->files["{$dir}/{$from}"] ?? throw \ServerSuite\Exceptions\DeliveryException::daemonError("{$from} not found"));
         unset($this->files["{$dir}/{$from}"]);
     }
+
+    public function decompress(string $serverUuid, string $directory, string $file): void
+    {
+    }
+
+    public function makeDirectory(string $serverUuid, string $path): void
+    {
+    }
+
+    public function chmod(string $serverUuid, string $directory, array $modes): void
+    {
+    }
 }

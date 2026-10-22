@@ -94,6 +94,10 @@ final class PanelPermissions
         // with extra()).
         'properties' => ['file.read-content'], 'propertiesSave' => ['file.update'],
         'propertiesResetWorld' => ['file.delete', 'control.start'],
+        // Modpacks (#23). An install stops the server and replaces or removes
+        // mod files, so it needs those permissions as well.
+        'modpacks' => ['mods.read'], 'modpacksSearch' => ['mods.read'], 'modpackVersions' => ['mods.read'],
+        'modpackPreview' => ['mods.read'], 'modpackInstall' => ['mods.install', 'mods.remove', 'control.stop'],
         // Players (#27)
         'players' => ['players.read'], 'playersAdd' => ['players.manage'], 'playersRemove' => ['players.manage'],
         'playersWhitelist' => ['players.manage'],
@@ -109,7 +113,7 @@ final class PanelPermissions
     ];
 
     /** Tab => permission pattern Pterodactyl's router checks (Components.yml carries the same). */
-    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*', 'Notifications' => 'notifications.*', 'Network' => 'serversuite.network'];
+    public const TABS = ['Mods' => 'mods.*', 'Modpacks' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*', 'Notifications' => 'notifications.*', 'Network' => 'serversuite.network'];
 
     /** What a Properties save also needs, by what happens after it. */
     public const PROPERTIES_AFTER = [

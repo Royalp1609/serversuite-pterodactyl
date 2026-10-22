@@ -48,4 +48,16 @@ class PerServerFiles implements DaemonFileClient
     {
         $this->for($serverUuid)->rename($serverUuid, $root, $from, $to);
     }
+
+    public function decompress(string $serverUuid, string $directory, string $file): void
+    {
+    }
+
+    public function makeDirectory(string $serverUuid, string $path): void
+    {
+    }
+
+    public function chmod(string $serverUuid, string $directory, array $modes): void
+    {
+    }
 }

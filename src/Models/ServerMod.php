@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
  * @property string|null $install_path
  * @property array|null  $dependencies
  * @property int|null    $installed_by
+ * @property int|null    $modpack_id    set when a modpack installed it (#23)
  */
 class ServerMod extends Model
 {
@@ -42,6 +43,7 @@ class ServerMod extends Model
         'install_path',
         'dependencies',
         'installed_by',
+        'modpack_id',
         'disabled_at',
     ];
 

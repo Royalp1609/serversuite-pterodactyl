@@ -35,6 +35,19 @@ return [
     */
     'curseforge_api_key' => env('CURSEFORGE_API_KEY', ''),
 
+    // Modpacks (#23). The .mrpack is read on the panel to preview a pack;
+    // larger files are refused. Pack files themselves are fetched by Wings.
+    'modpacks' => [
+        'max_mrpack_bytes' => (int) env('MOD_MANAGER_MODPACK_MAX_BYTES', 268435456),
+    ],
+
+    // How long the panel waits for Wings to download one file (seconds).
+    // Wings fetches the file before answering, so this must cover the
+    // biggest mod or .mrpack at the node's download speed.
+    'delivery' => [
+        'pull_timeout' => (int) env('MOD_MANAGER_PULL_TIMEOUT', 600),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Repository Base URLs

@@ -51,9 +51,17 @@ class ReconciliationService
         $mods       = ServerMod::forServer($server->uuid)->get();
         $byFilename = $mods->keyBy('target_filename');
 
+        // Files a modpack put here are tracked by the pack, not one by one (#23).
+        $packFiles = [];
+        foreach ((array) (\ServerSuite\Models\Modpack::forServer($server->uuid)?->files ?? []) as $f) {
+            if ('/' . ltrim(dirname('/' . $f['path']), '/') === '/' . ltrim($dir, '/')) {
+                $packFiles[basename($f['path'])] = true;
+            }
+        }
+
         $untracked = [];
         foreach ($diskFiles as $name => $size) {
-            if ($byFilename->has($name)) {
+            if ($byFilename->has($name) || isset($packFiles[$name])) {
                 continue;
             }
             $untracked[] = [
