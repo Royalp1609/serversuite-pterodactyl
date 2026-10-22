@@ -77,6 +77,15 @@ is the same suite as a native Pelican plugin.
   folders are deleted only once it's offline (plugins and configs stay), then
   it starts again.
 
+### Players (server tab)
+- The **whitelist**, **operators**, **banned players** and **banned IPs** as
+  lists. Add players by name (the UUID comes from Mojang, or is the offline
+  UUID when `online-mode=false`). While the server runs, changes go in as
+  console commands and apply at once; while it's stopped, the files are edited.
+- Turn the whitelist on or off, and see who's online.
+- Everything bound for the console is checked first (names, IPs, one-line
+  ban reasons).
+
 ### Subdomains (server tab)
 - Claim `name.domain` on a domain the panel admin offers, or on the server
   owner's **own Cloudflare domain**. Players join with just the name: an A
@@ -154,6 +163,7 @@ are hidden (the server checks every request too).
 | Backups | `backup.read` | `backup.create` (back up now, rename), `backup.delete` (delete, lock), `backup.restore`, `backup.download`; the schedule needs `backup.create` + `backup.delete` (rotation deletes the oldest) |
 | Versions | `startup.read` | switching version or loader needs `startup.update`, `startup.docker-image`, `settings.reinstall` and `backup.create`; the reset needs `settings.reinstall` + `file.delete` |
 | Properties | `file.read-content` | `file.update`; **Save and restart** also needs `control.restart`; resetting the world after a seed change needs `file.delete`, `control.stop` and `control.start` |
+| Players | `players.read` | `players.manage` (add and remove on the whitelist, operators and bans; whitelist on/off) |
 | Subdomains | `subdomains.read` | `subdomains.manage` (claim, release, re-point, status cards, own domain and its token) |
 
 Every change made through Server Suite (mods installed, updated or removed,

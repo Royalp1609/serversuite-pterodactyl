@@ -64,6 +64,16 @@ Route::post('/{server}/properties', [ModManagerController::class, 'propertiesSav
 Route::post('/{server}/properties/reset-world', [ModManagerController::class, 'propertiesResetWorld'])
     ->name('extension.serversuite.properties-reset-world');
 
+// Players (#27): whitelist, ops and bans.
+Route::get('/{server}/players', [ModManagerController::class, 'players'])
+    ->name('extension.serversuite.players');
+Route::post('/{server}/players', [ModManagerController::class, 'playersAdd'])
+    ->name('extension.serversuite.players-add');
+Route::post('/{server}/players/remove', [ModManagerController::class, 'playersRemove'])
+    ->name('extension.serversuite.players-remove');
+Route::post('/{server}/players/whitelist', [ModManagerController::class, 'playersWhitelist'])
+    ->name('extension.serversuite.players-whitelist');
+
 // Subdomains (#14). Admin routes first so /admin isn't taken as a {server}.
 Route::post('/admin/domains', [ModManagerController::class, 'adminAddDomain'])
     ->name('extension.serversuite.admin-add-domain');

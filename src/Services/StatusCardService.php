@@ -126,7 +126,7 @@ class StatusCardService
      *
      * @return array{0: ?string, 1: ?int}
      */
-    private function target(string $uuid): array
+    public function target(string $uuid): array
     {
         if (! class_exists(self::SERVER_MODEL)) {
             return [null, null];
