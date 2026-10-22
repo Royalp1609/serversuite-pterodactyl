@@ -54,6 +54,12 @@ Route::post('/{server}/crossplay/install', [ModManagerController::class, 'crossp
 Route::post('/{server}/crossplay/configure', [ModManagerController::class, 'crossplayConfigure'])
     ->name('extension.serversuite.crossplay-configure');
 
+// Velocity networks (#30): the owner's servers behind a Velocity proxy.
+Route::get('/{server}/network', [ModManagerController::class, 'network'])
+    ->name('extension.serversuite.network');
+Route::post('/{server}/network', [ModManagerController::class, 'networkApply'])
+    ->name('extension.serversuite.network-apply');
+
 // Configs (#21): browse /plugins, /config, ... and edit files (text or form).
 Route::get('/{server}/configs', [ModManagerController::class, 'configs'])
     ->name('extension.serversuite.configs');

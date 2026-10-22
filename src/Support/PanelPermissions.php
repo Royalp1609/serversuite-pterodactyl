@@ -83,6 +83,9 @@ final class PanelPermissions
         'crashDisable' => ['mods.remove'], 'crashEnable' => ['mods.install'],
         // Bedrock crossplay (#28)
         'crossplay' => ['mods.read'], 'crossplayInstall' => ['mods.install'], 'crossplayConfigure' => ['mods.install'],
+        // Velocity networks (#30): writes to every server in the network, so
+        // only their owner (or a root admin): the 'owner' pseudo-permission.
+        'network' => ['owner'], 'networkApply' => ['owner'],
         // Configs (#21): Pterodactyl's own file permissions, as its File Manager uses
         'configs' => ['file.read'], 'configsOpen' => ['file.read-content'], 'configsRender' => ['file.read-content'],
         'configsSave' => ['file.update'],
@@ -106,7 +109,7 @@ final class PanelPermissions
     ];
 
     /** Tab => permission pattern Pterodactyl's router checks (Components.yml carries the same). */
-    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*', 'Notifications' => 'notifications.*'];
+    public const TABS = ['Mods' => 'mods.*', 'Backups' => 'backup.*', 'Versions' => 'startup.*', 'Subdomains' => 'subdomains.*', 'Properties' => 'file.read-content', 'Players' => 'players.*', 'Notifications' => 'notifications.*', 'Network' => 'serversuite.network'];
 
     /** What a Properties save also needs, by what happens after it. */
     public const PROPERTIES_AFTER = [
@@ -126,12 +129,18 @@ final class PanelPermissions
             return false;
         }
         foreach (self::ENDPOINTS[$endpoint] as $permission) {
-            if (! $user->can($permission, $server)) {
+            if ($permission === 'owner' ? ! self::isOwner($user, $server) : ! $user->can($permission, $server)) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /** The server's owner or a root admin (never a subuser, whatever they hold). */
+    public static function isOwner(?object $user, object $server): bool
+    {
+        return $user !== null && ((bool) ($user->root_admin ?? false) || (int) ($server->owner_id ?? -1) === (int) ($user->id ?? -2));
     }
 
     /** Whether $user holds every one of $permissions on $server. @param list<string> $permissions */

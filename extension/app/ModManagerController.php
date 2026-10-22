@@ -1244,6 +1244,46 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Velocity networks (#30)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/network: on a proxy, the owner's servers; on a backend, its network */
+    public function network(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $svc = app(\ServerSuite\Services\NetworkService::class);
+        if (! \ServerSuite\Services\NetworkService::isProxy($srv)) {
+            $m = $svc->membership($srv->uuid);
+
+            return response()->json(['data' => ['proxy' => false, 'member' => $m ? ['proxy' => $m['proxy']] : null]]);
+        }
+
+        return response()->json(['data' => ['proxy' => true, 'candidates' => $svc->candidates($srv)]]);
+    }
+
+    /** POST /{server}/network { backends: [{uuid, name}] in try order } */
+    public function networkApply(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate(['backends' => ['present', 'array', 'max:50'], 'backends.*.uuid' => ['required', 'string'], 'backends.*.name' => ['required', 'string', 'max:32']]);
+        $backends = [];
+        foreach ($data['backends'] as $b) {
+            $backends[(string) $b['uuid']] = (string) $b['name'];
+        }
+
+        try {
+            $results = app(\ServerSuite\Services\NetworkService::class)->save($srv, $backends);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $this->audit($srv, 'network-applied', ['backends' => implode(', ', array_values($backends))]);
+
+        return response()->json(['data' => ['results' => $results]]);
+    }
+
+    // -------------------------------------------------------------------------
     // Configs (#21)
     // -------------------------------------------------------------------------
 

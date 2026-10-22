@@ -111,6 +111,16 @@ is the same suite as a native Pelican plugin.
   on the public internet; the admin default may point at your own network.
   Needs the panel's queue worker and scheduler.
 
+### Network (Velocity, server tab)
+- On a **Velocity** server, put your other servers behind it: tick them, name
+  them, set the try order, **Apply**. That writes `velocity.toml` (`[servers]`,
+  `try`, modern forwarding with the proxy's own `forwarding.secret`; sample
+  forced hosts naming servers you don't have are dropped, since Velocity won't
+  start with them) and, on each backend, the forwarding secret and
+  `online-mode=false` (Paper/Purpur/Folia via `paper-global.yml`, Fabric/Quilt
+  via FabricProxy-Lite). Each server reports what changed or what's left to do;
+  taking a server out sets it back. Owner and root admins only.
+
 ### Subdomains (server tab)
 - Claim `name.domain` on a domain the panel admin offers, or on the server
   owner's **own Cloudflare domain**. Players join with just the name: an A
