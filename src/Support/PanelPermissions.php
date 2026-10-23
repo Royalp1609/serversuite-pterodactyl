@@ -69,6 +69,8 @@ final class PanelPermissions
         'backupsCreate' => ['backup.create'], 'backupsRename' => ['backup.create'],
         'backupsLock' => ['backup.delete'], 'backupsDelete' => ['backup.delete'],
         'backupsDownload' => ['backup.download'], 'backupsRestore' => ['backup.restore'],
+        // After a restore (#60): the Mods tab's banner
+        'restoreSync' => ['mods.read'], 'restoreSyncDismiss' => ['mods.read'],
         // Versions
         'serverVersions' => ['startup.read'], 'serverStatus' => ['startup.read'], 'loaders' => ['startup.read'],
         'serverVersionPreflight' => ['startup.read'],

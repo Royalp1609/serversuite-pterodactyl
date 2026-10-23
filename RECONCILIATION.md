@@ -72,3 +72,30 @@ ONLY to identification.
   RepositoryContract).
 - The only user-visible consequence of not having it is that manually-added
   files (like the test JEI jar) stay untracked — cosmetic only.
+
+## After a backup restore (#60)
+
+Restoring a backup used to leave the mod list describing the server as it
+was before the restore. Now:
+
+- Every backup Server Suite takes (pre-change, pre-modpack, pre-switch, Back
+  up now, rotation) saves the mod list with it: the `server_mods` rows, the
+  modpack and the loader settings (`server_suite_backup_mod_lists`, keyed by
+  backup UUID). The list is deleted with its backup. Lists whose backup was
+  deleted elsewhere are pruned at the next backup.
+- A finished restore is noticed however it was started: the Server model's
+  `status` goes from `restoring_backup` to null, and the hook queues
+  `SyncAfterRestoreJob`. The job takes the backup and the "delete all files
+  first" flag from our Backups tab, or from the panel's activity log
+  (`server:backup.restore`). It does nothing if the restore failed.
+- **With a saved list**, the list, the modpack and the settings are put back.
+  Without "delete all files first", mods added after the backup keep their
+  rows, because their files are still there. Rows whose file is gone are then
+  forgotten.
+- **Without one** (an older backup, or one taken outside Server Suite), only
+  the clear cases are fixed: rows whose file is gone are forgotten, and
+  untracked jars with an exact hash match are adopted. Everything else stays
+  in Reconcile.
+- Pending updates are cleared so they're recomputed, crash help points at the
+  restore, and one Activity entry is written. The Mods tab shows a banner
+  saying what changed, with a link to Reconcile for jars still untracked.
