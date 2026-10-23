@@ -14,10 +14,11 @@ use ServerSuite\Modpacks\MrpackIndex;
 use ServerSuite\Support\RepositoryManager;
 
 /**
- * Modrinth modpacks (#23): find a pack, preview what installing (or updating
- * to) a version would do on this server, and start the queued install.
+ * Modpacks (#23) from Modrinth (.mrpack) or CurseForge (manifest.json; needs
+ * the panel's CurseForge API key): find a pack, preview what installing (or
+ * updating to) a version would do on this server, and start the queued install.
  *
- * The preview downloads the .mrpack to the panel once (cached) to read its
+ * The preview downloads the pack to the panel once (cached) to read its
  * index; the install itself has Wings fetch everything (ModpackInstaller).
  * A pack for another loader or Minecraft version switches the server first
  * (stage 2): wipe, change egg with the pack's loader version, reinstall. That
@@ -39,14 +40,33 @@ class ModpackService
         'neoforge' => 'NEOFORGE_VERSION',
     ];
 
-    public function driver(): ModrinthDriver
+    public const SOURCES = ['modrinth' => 'Modrinth', 'curseforge' => 'CurseForge'];
+
+    public function driver(string $source = 'modrinth'): ModrinthDriver|\ServerSuite\Drivers\CurseForgeDriver
     {
-        $driver = $this->repositories->driver('modrinth');
-        if (! $driver instanceof ModrinthDriver || ! $driver->isAvailable()) {
-            throw new ModpackException('Modrinth is turned off on this panel.');
+        if (! isset(self::SOURCES[$source])) {
+            throw new ModpackException('Unknown modpack source.');
+        }
+        $driver = $this->repositories->driver($source);
+        if (! ($driver instanceof ModrinthDriver || $driver instanceof \ServerSuite\Drivers\CurseForgeDriver) || ! $driver->isAvailable()) {
+            throw new ModpackException($source === 'curseforge'
+                ? 'CurseForge needs an API key on this panel (CURSEFORGE_API_KEY, or the admin setting).'
+                : 'Modrinth is turned off on this panel.');
         }
 
         return $driver;
+    }
+
+    /** @return array<string, string> sources this panel can use, key => label */
+    public function sources(): array
+    {
+        return array_filter(self::SOURCES, function ($label, $key) {
+            try {
+                return $this->repositories->driver($key)->isAvailable();
+            } catch (\Throwable) {
+                return false;
+            }
+        }, ARRAY_FILTER_USE_BOTH);
     }
 
     /** Loaders a Modrinth pack can target; plugin servers (Paper etc.) have no packs. */
@@ -64,12 +84,13 @@ class ModpackService
      *
      * @return array<int, array<string, mixed>>
      */
-    public function search(object $server, string $query, int $offset = 0, int $limit = 24, ?string $sort = null, bool $anyVersion = false): array
+    public function search(object $server, string $query, int $offset = 0, int $limit = 24, ?string $sort = null, bool $anyVersion = false, string $source = 'modrinth'): array
     {
         $ctx = $this->serverContext($server);
-        [$loader, $mc] = $anyVersion ? [self::LOADERS, null] : [$ctx['loader'], $ctx['minecraft']];
+        // CurseForge filters on one loader only, so "any version" there means no loader filter.
+        [$loader, $mc] = $anyVersion ? [$source === 'curseforge' ? null : self::LOADERS, null] : [$ctx['loader'], $ctx['minecraft']];
 
-        return array_map(fn ($r) => $r->toArray(), $this->driver()->searchModpacks(trim($query), $limit, $offset, $sort, $loader, $mc));
+        return array_map(fn ($r) => $r->toArray(), $this->driver($source)->searchModpacks(trim($query), $limit, $offset, $sort, $loader, $mc));
     }
 
     /** The panel's egg for a loader slug, among the loader eggs the Versions tab offers (#36). */
@@ -84,11 +105,11 @@ class ModpackService
      *
      * @return array<int, array<string, mixed>>
      */
-    public function versions(string $projectId, ?object $server = null): array
+    public function versions(string $projectId, ?object $server = null, string $source = 'modrinth'): array
     {
         $ctx = $server ? $this->serverContext($server) : ['loader' => null, 'minecraft' => null];
         $out = [];
-        foreach ($this->driver()->modpackVersions($projectId) as $v) {
+        foreach ($this->driver($source)->modpackVersions($projectId) as $v) {
             if ($v['mrpack'] === null) {
                 continue;
             }
@@ -152,7 +173,7 @@ class ModpackService
             'error'     => $pack->error,
             'target'    => ['name' => $pack->target['name'] ?? null, 'version_number' => $pack->target['version_number'] ?? null],
             'installed' => $pack->hasInstalledPack() ? [
-                'project_id' => $pack->project_id, 'name' => $pack->name, 'version_number' => $pack->version_number,
+                'project_id' => $pack->project_id, 'source' => $pack->source ?: 'modrinth', 'name' => $pack->name, 'version_number' => $pack->version_number,
                 'icon_url' => $pack->icon_url, 'minecraft' => $pack->minecraft, 'loader' => $pack->loader,
                 'at' => $pack->installed_at?->toIso8601String(),
             ] : null,
@@ -166,16 +187,19 @@ class ModpackService
      *
      * @throws ModpackException
      */
-    public function preview(object $server, string $projectId, string $versionId, bool $canSwitch = false): array
+    public function preview(object $server, string $projectId, string $versionId, bool $canSwitch = false, string $source = 'modrinth'): array
     {
-        $driver = $this->driver();
-        $version = $driver->modpackVersion($versionId);
-        if ($version === null || $version['project_id'] !== $projectId || $version['mrpack'] === null) {
+        $driver = $this->driver($source);
+        $version = $source === 'curseforge' ? $driver->modpackVersion($versionId, $projectId) : $driver->modpackVersion($versionId);
+        if ($version === null || $version['project_id'] !== $projectId) {
             throw new ModpackException('That modpack version was not found.');
+        }
+        if ($version['mrpack'] === null) {
+            throw new ModpackException('This pack version can\'t be downloaded by other apps (its author turned that off).');
         }
         $project = $driver->get($projectId);
 
-        [$index, $overrides] = $this->readPack($version['mrpack']);
+        [$index, $overrides] = $this->readPack($version['mrpack'], $source);
         $context = $this->serverContext($server);
         $current = Modpack::forServer($server->uuid);
 
@@ -219,13 +243,14 @@ class ModpackService
             if ($prev !== null && ($prev['sha1'] ?? null) === $f['sha1']) {
                 $unchanged[] = ['path' => $f['path'], 'sha1' => $f['sha1'], 'size' => $f['size'], 'kind' => 'download'];
             } else {
-                $install[] = ['path' => $f['path'], 'url' => $f['url'], 'size' => $f['size'], 'sha1' => $f['sha1']];
+                $install[] = ['path' => $f['path'], 'url' => $f['url'], 'size' => $f['size'], 'sha1' => $f['sha1']]
+                    + (isset($f['curseforge']) ? ['curseforge' => $f['curseforge']] : []);
             }
         }
 
         // Name the mods (one lookup for the whole pack) so the manifest can
         // track them and installed copies outside the pack get replaced.
-        $known = $this->identify($driver, $install);
+        $known = $source === 'curseforge' ? $this->identifyCurseForge($driver, $install) : $this->identify($driver, $install);
         $replace = [];
         foreach ($install as &$item) {
             if (isset($known[$item['sha1']])) {
@@ -235,7 +260,7 @@ class ModpackService
         unset($item);
         $packProjects = array_filter(array_column(array_column($install, 'mod'), 'project_id'));
         if ($packProjects !== [] && $switch === null) {
-            $replace = ServerMod::forServer($server->uuid)->where('source', 'modrinth')
+            $replace = ServerMod::forServer($server->uuid)->where('source', $source)
                 ->whereIn('source_id', $packProjects)->whereNull('modpack_id')->get()
                 ->map(fn (ServerMod $m) => ['dir' => (string) ($m->install_path ?: '/mods'), 'file' => (string) $m->target_filename, 'name' => $m->mod_name])
                 ->filter(fn ($r) => $r['file'] !== '' && ! in_array(ltrim($r['dir'] . '/' . $r['file'], '/'), array_column($install, 'path'), true))
@@ -263,7 +288,8 @@ class ModpackService
                 'project_id' => $projectId,
                 'name'       => $project?->name ?? $index->name,
                 'icon_url'   => $project?->iconUrl,
-                'page_url'   => $project ? 'https://modrinth.com/modpack/' . $project->slug : null,
+                'page_url'   => $project ? ($source === 'curseforge' ? $project->pageUrl : 'https://modrinth.com/modpack/' . $project->slug) : null,
+                'source'     => $source,
             ],
             'version' => [
                 'id'             => $version['id'],
@@ -292,6 +318,9 @@ class ModpackService
             'remove'         => $remove,
             'backups'        => $backupLimit === 0 ? 'disabled' : 'yes',
             'plan' => [
+                'source'        => $source,
+                'index_file'    => $index->indexFile,
+                'override_dirs' => $index->overrideDirs,
                 'index_sha1' => $index->sha1,
                 'install'    => $install,
                 'unchanged'  => $unchanged,
@@ -309,9 +338,9 @@ class ModpackService
      *
      * @throws ModpackException
      */
-    public function start(object $server, string $projectId, string $versionId, int $userId, bool $canSwitch = false, bool $wipeConfirmed = false): Modpack
+    public function start(object $server, string $projectId, string $versionId, int $userId, bool $canSwitch = false, bool $wipeConfirmed = false, string $source = 'modrinth'): Modpack
     {
-        $p = $this->preview($server, $projectId, $versionId, $canSwitch);
+        $p = $this->preview($server, $projectId, $versionId, $canSwitch, $source);
         if ($p['blockers'] !== []) {
             throw new ModpackException($p['blockers'][0]);
         }
@@ -319,8 +348,9 @@ class ModpackService
             throw new ModpackException('Installing this pack switches the server and deletes everything on it. Confirm that first.');
         }
 
-        $pack = Modpack::forServer($server->uuid) ?? new Modpack(['server_uuid' => $server->uuid, 'source' => 'modrinth']);
+        $pack = Modpack::forServer($server->uuid) ?? new Modpack(['server_uuid' => $server->uuid]);
         $pack->fill([
+            'source'         => $source,
             'status'         => Modpack::STATUS_INSTALLING,
             'phase'          => 'stopping',
             'target'         => [
@@ -353,28 +383,36 @@ class ModpackService
      *
      * @throws ModpackException
      */
-    public function readPack(array $mrpack): array
+    public function readPack(array $mrpack, string $source = 'modrinth'): array
     {
-        if (! MrpackIndex::allowedUrl($mrpack['url'])) {
-            throw new ModpackException('The modpack file is not hosted on Modrinth.');
+        $curseforge = $source === 'curseforge';
+        if (! MrpackIndex::allowedUrl($mrpack['url'], $curseforge ? MrpackIndex::CURSEFORGE_HOSTS : null)) {
+            throw new ModpackException($curseforge ? 'The modpack file is not hosted on CurseForge.' : 'The modpack file is not hosted on Modrinth.');
         }
         $max = (int) config('serversuite.modpacks.max_mrpack_bytes', 268435456);
         if ($mrpack['size'] > $max) {
             throw new ModpackException('The modpack file is larger than this panel allows (' . intdiv($max, 1048576) . ' MB).');
         }
 
-        $key = 'serversuite.mrpack.' . ($mrpack['sha1'] ?: sha1($mrpack['url']));
+        $key = 'serversuite.mrpack.' . $source . '.' . ($mrpack['sha1'] ?: sha1($mrpack['url']));
         $cached = Cache::get($key);
         if (! is_array($cached)) {
-            $cached = $this->download($mrpack, $max);
+            $cached = $this->download($mrpack, $max, $curseforge);
             Cache::put($key, $cached, now()->addDay());
         }
 
-        return [MrpackIndex::parse($cached['index']), $cached['overrides']];
+        if (! $curseforge) {
+            return [MrpackIndex::parse($cached['index']), $cached['overrides']];
+        }
+
+        // CurseForge: resolve the manifest's file ids (download URLs, names, hashes).
+        $ids = array_column((array) (json_decode($cached['index'], true)['files'] ?? []), 'fileID');
+
+        return [MrpackIndex::fromCurseForge($cached['index'], $this->driver('curseforge')->filesByIds($ids)), $cached['overrides']];
     }
 
     /** @return array{index: string, overrides: string[]} */
-    private function download(array $mrpack, int $max): array
+    private function download(array $mrpack, int $max, bool $curseforge = false): array
     {
         $tmp = tempnam(sys_get_temp_dir(), 'ssmrpack');
         try {
@@ -397,17 +435,21 @@ class ModpackService
             if ($zip->open($tmp) !== true) {
                 throw new ModpackException('The modpack file is not a valid .mrpack archive.');
             }
-            $index = $zip->getFromName('modrinth.index.json');
+            $indexName = $curseforge ? 'manifest.json' : 'modrinth.index.json';
+            $index = $zip->getFromName($indexName);
             if ($index === false) {
                 $zip->close();
-                throw new ModpackException('The modpack has no modrinth.index.json.');
+                throw new ModpackException("The modpack has no {$indexName}.");
             }
+            $dirs = $curseforge
+                ? [trim((string) (json_decode($index, true)['overrides'] ?? 'overrides'), '/') . '/']
+                : ['overrides/', 'server-overrides/'];
 
             // Files the overrides folders will place (server-overrides win).
             $overrides = [];
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $name = (string) $zip->getNameIndex($i);
-                foreach (['overrides/', 'server-overrides/'] as $prefix) {
+                foreach ($dirs as $prefix) {
                     if (str_starts_with($name, $prefix) && ! str_ends_with($name, '/')) {
                         $rel = substr($name, strlen($prefix));
                         if (MrpackIndex::safePath($rel)) {
@@ -449,5 +491,37 @@ class ModpackService
             'version_number' => $hit['version']->versionNumber,
             'dependencies'   => $hit['version']->dependencies,
         ], $found);
+    }
+
+    /**
+     * CurseForge: the pack already names each file's project; one request
+     * for the project names, keyed by sha1 like identify().
+     */
+    private function identifyCurseForge(\ServerSuite\Drivers\CurseForgeDriver $driver, array $files): array
+    {
+        $cf = array_filter($files, fn ($f) => isset($f['curseforge']));
+        try {
+            $mods = $driver->modsByIds(array_column(array_column($cf, 'curseforge'), 'project_id'));
+        } catch (\Throwable) {
+            $mods = [];
+        }
+
+        $out = [];
+        foreach ($cf as $f) {
+            $c = $f['curseforge'];
+            $m = $mods[$c['project_id']] ?? null;
+            $out[$f['sha1']] = [
+                'project_id'     => $c['project_id'],
+                'name'           => $m?->name ?? $c['name'],
+                'slug'           => $m?->slug ?? $c['project_id'],
+                'icon_url'       => $m?->iconUrl,
+                'page_url'       => $m?->pageUrl,
+                'version_id'     => $c['file_id'],
+                'version_number' => $c['name'],
+                'dependencies'   => [],
+            ];
+        }
+
+        return $out;
     }
 }

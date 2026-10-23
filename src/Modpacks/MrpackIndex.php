@@ -5,8 +5,10 @@ namespace ServerSuite\Modpacks;
 use ServerSuite\Exceptions\ModpackException;
 
 /**
- * A parsed and checked Modrinth .mrpack index (modrinth.index.json,
- * format 1), #23. See https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack
+ * A parsed and checked modpack index (#23): a Modrinth .mrpack
+ * (modrinth.index.json, format 1; parse()) or a CurseForge pack
+ * (manifest.json with files resolved through the API; fromCurseForge()).
+ * See https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack
  *
  * Pure: no I/O. It is the safety boundary between a pack (untrusted input)
  * and Wings, so every file is classified here:
@@ -19,6 +21,9 @@ final class MrpackIndex
 {
     /** Hosts the format allows downloads from (the Modrinth launcher enforces the same). */
     public const ALLOWED_HOSTS = ['cdn.modrinth.com', 'github.com', 'raw.githubusercontent.com', 'gitlab.com'];
+
+    /** CurseForge's CDN. */
+    public const CURSEFORGE_HOSTS = ['edge.forgecdn.net', 'mediafilez.forgecdn.net'];
 
     /** Pack dependency key -> the plugin's loader slug. */
     private const LOADERS = [
@@ -42,6 +47,75 @@ final class MrpackIndex
         public readonly string $indexFile = 'modrinth.index.json',
         public readonly array $overrideDirs = ['overrides', 'server-overrides'],
     ) {}
+
+    /**
+     * A CurseForge pack: manifest.json plus its files as returned by
+     * POST /v1/mods/files (file id => data). Jars go to mods/; resource and
+     * shader packs (zips) are client-side and skipped. Files whose author
+     * turned off third-party downloads have no URL and are listed as blocked.
+     *
+     * @param array<string, array> $files
+     *
+     * @throws ModpackException
+     */
+    public static function fromCurseForge(string $json, array $files): self
+    {
+        try {
+            $data = json_decode($json, true, 64, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new ModpackException('The modpack manifest (manifest.json) is not valid JSON.');
+        }
+        if (! is_array($data) || ($data['manifestType'] ?? null) !== 'minecraftModpack') {
+            throw new ModpackException('This is not a CurseForge Minecraft modpack.');
+        }
+
+        $minecraft = (string) ($data['minecraft']['version'] ?? '');
+        if ($minecraft === '') {
+            throw new ModpackException('The modpack does not say which Minecraft version it needs.');
+        }
+        $loader = $loaderVersion = null;
+        $loaders = (array) ($data['minecraft']['modLoaders'] ?? []);
+        $primary = collect($loaders)->firstWhere('primary', true) ?? ($loaders[0] ?? null);
+        if ($primary && preg_match('/^(forge|neoforge|fabric|quilt)-(.+)$/', (string) ($primary['id'] ?? ''), $m)) {
+            [$loader, $loaderVersion] = [$m[1], $m[2]];
+            // CurseForge writes NeoForge 1.20.1 as "neoforge-1.20.1-47.x"; keep the version only.
+            $loaderVersion = preg_replace('/^' . preg_quote($minecraft, '/') . '-/', '', $loaderVersion);
+        }
+
+        $entries = [];
+        foreach ((array) ($data['files'] ?? []) as $ref) {
+            $id = (string) ($ref['fileID'] ?? '');
+            $f = $files[$id] ?? null;
+            $name = (string) ($f['fileName'] ?? "{$id}.jar");
+            $entry = [
+                'path' => 'mods/' . $name, 'sha1' => $f ? (string) (\ServerSuite\Drivers\CurseForgeDriver::sha1Of($f) ?? '') : '',
+                'sha512' => null, 'size' => (int) ($f['fileLength'] ?? 0), 'url' => null, 'action' => 'install', 'reason' => null,
+                'curseforge' => ['project_id' => (string) ($ref['projectID'] ?? ''), 'file_id' => $id, 'name' => (string) ($f['displayName'] ?? $name)],
+            ];
+            $url = (string) ($f['downloadUrl'] ?? '');
+            $entries[] = match (true) {
+                $f === null => ['action' => 'invalid', 'reason' => 'not found on CurseForge'] + $entry,
+                ($ref['required'] ?? true) === false => ['action' => 'client_only', 'reason' => 'optional in the pack'] + $entry,
+                ! str_ends_with(strtolower($name), '.jar') => ['action' => 'client_only', 'reason' => 'resource or shader pack (client-side)'] + $entry,
+                ! self::safePath('mods/' . $name) || ! preg_match('/^[0-9a-f]{40}$/', $entry['sha1']) => ['action' => 'invalid', 'reason' => 'unsafe file name or no SHA-1'] + $entry,
+                $url === '' => ['action' => 'blocked', 'reason' => 'the author does not allow downloads by other apps; get it from curseforge.com by hand'] + $entry,
+                ! self::allowedUrl($url, self::CURSEFORGE_HOSTS) => ['action' => 'blocked', 'reason' => 'not hosted on CurseForge\'s CDN'] + $entry,
+                default => ['url' => $url] + $entry,
+            };
+        }
+
+        $overrides = trim((string) ($data['overrides'] ?? 'overrides'), '/') ?: 'overrides';
+        if (! self::safePath($overrides)) {
+            throw new ModpackException('The modpack names an unsafe overrides folder.');
+        }
+
+        return new self(
+            name: mb_substr((string) ($data['name'] ?? 'Modpack'), 0, 120),
+            versionId: mb_substr((string) ($data['version'] ?? ''), 0, 120),
+            minecraft: $minecraft, loader: $loader, loaderVersion: $loaderVersion,
+            files: $entries, sha1: sha1($json), indexFile: 'manifest.json', overrideDirs: [$overrides],
+        );
+    }
 
     /** @throws ModpackException */
     public static function parse(string $json): self

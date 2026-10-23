@@ -31,6 +31,9 @@ class CurseForgeDriver extends AbstractDriver
     /** classId for Minecraft mods */
     private const CLASS_MODS = 6;
 
+    /** classId for Minecraft modpacks (#23) */
+    private const CLASS_MODPACKS = 4471;
+
     /** Cache TTL in seconds — longer than Modrinth because of the daily quota */
     private const CACHE_TTL = 900; // 15 minutes
 
@@ -131,6 +134,147 @@ class CurseForgeDriver extends AbstractDriver
                 ->map(fn (array $mod) => $this->modToModResult($mod))
                 ->all();
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Modpacks (#23 stage 3)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @param string|string[]|null $loader one loader (CurseForge filters on one), or null
+     * @return ModResult[]
+     */
+    public function searchModpacks(string $query, int $limit = 24, int $offset = 0, ?string $sort = null, string|array|null $loader = null, ?string $gameVersion = null): array
+    {
+        if (! $this->isAvailable()) {
+            throw RepositoryException::unavailable($this->key());
+        }
+        $params = [
+            'gameId' => self::GAME_ID, 'classId' => self::CLASS_MODPACKS, 'searchFilter' => $query,
+            'pageSize' => min($limit, 50), 'index' => max(0, $offset), 'sortOrder' => 'desc',
+            // 2 popularity, 3 last updated, 6 total downloads, 11 released
+            'sortField' => ['downloads' => 6, 'updated' => 3, 'newest' => 11][$sort] ?? 2,
+        ];
+        if (is_string($loader) && isset(self::LOADER_TYPE[$loader])) {
+            $params['modLoaderType'] = self::LOADER_TYPE[$loader];
+        }
+        if ($gameVersion) {
+            $params['gameVersion'] = $gameVersion;
+        }
+
+        return Cache::remember('serversuite.curseforge.packs.' . md5(json_encode($params)), self::CACHE_TTL, function () use ($params) {
+            $res = $this->http()->get('/mods/search', $params);
+            if (! $res->successful()) {
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
+            }
+
+            return collect($res->json('data', []))->map(fn (array $m) => $this->modToModResult($m))->all();
+        });
+    }
+
+    /**
+     * A pack's client-pack files (server packs left out), newest first, in
+     * the same shape as ModrinthDriver::modpackVersions ('mrpack' = the
+     * pack archive).
+     */
+    public function modpackVersions(string $projectId): array
+    {
+        return Cache::remember('serversuite.curseforge.packfiles.' . $projectId, self::CACHE_TTL, function () use ($projectId) {
+            $res = $this->http()->get('/mods/' . rawurlencode($projectId) . '/files', ['pageSize' => 50]);
+            if (! $res->successful()) {
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
+            }
+
+            return collect($res->json('data', []))
+                ->reject(fn ($f) => ! empty($f['isServerPack']))
+                ->sortByDesc(fn ($f) => $f['fileDate'] ?? '')
+                ->map(fn ($f) => $this->packFile($f))->values()->all();
+        });
+    }
+
+    public function modpackVersion(string $fileId, string $projectId): ?array
+    {
+        $res = $this->http()->get('/mods/' . rawurlencode($projectId) . '/files/' . rawurlencode($fileId));
+        $f = $res->successful() ? $res->json('data') : null;
+
+        return is_array($f) && ! empty($f['id']) ? $this->packFile($f) + ['project_id' => (string) ($f['modId'] ?? $projectId)] : null;
+    }
+
+    /**
+     * Files by id, in one request.
+     *
+     * @param array<int, int|string> $fileIds
+     * @return array<string, array> file id => CurseForge file data
+     */
+    public function filesByIds(array $fileIds): array
+    {
+        $out = [];
+        foreach (array_chunk(array_values(array_unique(array_map('intval', $fileIds))), 500) as $chunk) {
+            $res = $this->http()->post('/mods/files', ['fileIds' => $chunk]);
+            if (! $res->successful()) {
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
+            }
+            foreach ((array) $res->json('data', []) as $f) {
+                $out[(string) $f['id']] = $f;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Projects by id, in one request.
+     *
+     * @param array<int, int|string> $modIds
+     * @return array<string, ModResult>
+     */
+    public function modsByIds(array $modIds): array
+    {
+        $out = [];
+        foreach (array_chunk(array_values(array_unique(array_map('intval', $modIds))), 500) as $chunk) {
+            $res = $this->http()->post('/mods', ['modIds' => $chunk]);
+            foreach ($res->successful() ? (array) $res->json('data', []) : [] as $m) {
+                $out[(string) $m['id']] = $this->modToModResult($m);
+            }
+        }
+
+        return $out;
+    }
+
+    /** SHA-1 of a CurseForge file's hashes list, or null. */
+    public static function sha1Of(array $file): ?string
+    {
+        foreach ((array) ($file['hashes'] ?? []) as $h) {
+            if ((int) ($h['algo'] ?? 0) === 1 && ! empty($h['value'])) {
+                return strtolower((string) $h['value']);
+            }
+        }
+
+        return null;
+    }
+
+    private function packFile(array $f): array
+    {
+        $loaders = $games = [];
+        $loaderNames = array_map('strtolower', array_keys(self::LOADER_TYPE));
+        foreach ((array) ($f['gameVersions'] ?? []) as $v) {
+            in_array(strtolower($v), $loaderNames, true) ? $loaders[] = strtolower($v) : $games[] = $v;
+        }
+
+        return [
+            'id'             => (string) $f['id'],
+            'version_number' => (string) ($f['displayName'] ?? $f['fileName'] ?? $f['id']),
+            'name'           => (string) ($f['displayName'] ?? ''),
+            'game_versions'  => $games,
+            'loaders'        => $loaders,
+            'channel'        => self::RELEASE_TYPE[$f['releaseType'] ?? 1] ?? 'release',
+            'published_at'   => $f['fileDate'] ?? null,
+            'server_pack_id' => isset($f['serverPackFileId']) ? (string) $f['serverPackFileId'] : null,
+            'mrpack'         => empty($f['downloadUrl']) ? null : [
+                'url' => (string) $f['downloadUrl'], 'size' => (int) ($f['fileLength'] ?? 0),
+                'sha1' => self::sha1Of($f), 'filename' => (string) ($f['fileName'] ?? 'pack.zip'),
+            ],
+        ];
     }
 
     // -------------------------------------------------------------------------
