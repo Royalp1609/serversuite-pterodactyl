@@ -100,6 +100,7 @@ final class PanelPermissions
         // mod files, so it needs those permissions as well.
         'modpacks' => ['mods.read'], 'modpacksSearch' => ['mods.read'], 'modpackVersions' => ['mods.read'],
         'modpackPreview' => ['mods.read'], 'modpackInstall' => ['mods.install', 'mods.remove', 'control.stop'],
+        'modpackRemove' => ['mods.remove', 'control.stop'],
         // Players (#27)
         'players' => ['players.read'], 'playersAdd' => ['players.manage'], 'playersRemove' => ['players.manage'],
         'playersWhitelist' => ['players.manage'],

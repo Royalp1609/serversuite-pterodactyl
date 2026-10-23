@@ -112,7 +112,7 @@ interface Status {
     done: number; total: number; failed: number;
     failures: Array<{ path: string; reason: string }>;
     error: string | null;
-    target: { name: string | null; version_number: string | null };
+    target: { name: string | null; version_number: string | null; action?: 'install' | 'remove' };
     installed: { project_id: string; source: Source; name: string; version_number: string; icon_url: string | null; minecraft: string | null; loader: string | null; at: string | null } | null;
 }
 interface Hit { id: string; name: string; author: string; description: string; downloads: number; icon_url: string | null; page_url: string | null }
@@ -147,6 +147,7 @@ const PHASES: Record<string, string> = {
     stopping: 'Stopping the server', backing_up: 'Taking a backup',
     switching: 'Switching the server', reinstalling: 'Reinstalling the server', staging: 'Downloading the pack',
     files: 'Downloading files', overrides: "Applying the pack's configs", finishing: 'Finishing',
+    removing: "Removing the pack's files",
 };
 
 export default () => {
@@ -168,6 +169,8 @@ export default () => {
     const [canSwitch, setCanSwitch] = useState(false);
     const [anyVersion, setAnyVersion] = useState(false);
     const [sources, setSources] = useState<Partial<Record<Source, string>>>({});
+    const [removeOpen, setRemoveOpen] = useState(false);
+    const [removeConfigs, setRemoveConfigs] = useState(false);
     const [source, setSource] = useState<Source>('modrinth');
     const [busy, setBusy] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -188,9 +191,11 @@ export default () => {
                 setSources(d.sources || {});
                 const nowRunning = d.status?.status === 'installing';
                 if (wasRunning.current && !nowRunning) {
-                    setNotice(d.status?.status === 'installed'
-                        ? "Modpack installed. Start the server from the console when you're ready."
-                        : null);
+                    setNotice(d.status === null
+                        ? "Modpack removed. Your own mods and the worlds are still there; start the server from the console when you're ready."
+                        : d.status?.status === 'installed'
+                            ? "Modpack installed. Start the server from the console when you're ready."
+                            : null);
                 }
                 wasRunning.current = nowRunning;
             })
@@ -272,6 +277,20 @@ export default () => {
             .finally(() => setBusy(null));
     };
 
+    const remove = () => {
+        setBusy('remove');
+        setError(null);
+        http.post(`${base}/remove`, { confirmed: true, configs: removeConfigs })
+            .then((res) => {
+                setStatus(res.data.data);
+                wasRunning.current = true;
+                setRemoveOpen(false);
+                setNotice('Removing the modpack. The server is stopped and backed up first. You can leave this page.');
+            })
+            .catch((e) => setError(errorOf(e, 'Could not remove the modpack.')))
+            .finally(() => setBusy(null));
+    };
+
     if (supported === null) {
         return (
             <Wrapper>
@@ -308,20 +327,22 @@ export default () => {
                     {running && (
                         <>
                             <div className="flex items-center gap-2 mb-2">
-                                <h3 className="font-semibold text-white">Installing {s.target.name} {s.target.version_number}</h3>
+                                <h3 className="font-semibold text-white">{s.target.action === 'remove' ? 'Removing' : 'Installing'} {s.target.name} {s.target.version_number}</h3>
                                 <Chip style={{ marginLeft: 'auto' }}>{PHASES[s.phase || ''] || 'Working'}</Chip>
                             </div>
                             <Bar><div style={{ width: `${['files', 'overrides', 'finishing'].includes(s.phase || '') ? pct : 0}%` }} /></Bar>
                             <p className="text-xs text-neutral-400 mt-2">
-                                {s.done} of {s.total} files{s.failed > 0 ? ` (${s.failed} failed)` : ''}. The server stays stopped until the install finishes. You can leave this page.
+                                {s.target.action === 'remove'
+                                    ? 'The server stays stopped. You can leave this page.'
+                                    : `${s.done} of ${s.total} files${s.failed > 0 ? ` (${s.failed} failed)` : ''}. The server stays stopped until the install finishes. You can leave this page.`}
                             </p>
                         </>
                     )}
                     {s.status === 'failed' && (
                         <>
-                            <h3 className="font-semibold text-white mb-2">The last modpack install failed</h3>
+                            <h3 className="font-semibold text-white mb-2">{s.target.action === 'remove' ? 'Removing the modpack failed' : 'The last modpack install failed'}</h3>
                             <Bad>{s.error}</Bad>
-                            <p className="text-xs text-neutral-400">If files were already changed, the "Pre-modpack" backup on the Backups tab has the server as it was.</p>
+                            <p className="text-xs text-neutral-400">If files were already changed, the "{s.target.action === 'remove' ? 'Pre-remove' : 'Pre-modpack'}" backup on the Backups tab has the server as it was.</p>
                         </>
                     )}
                     {s.installed && !running && (
@@ -336,6 +357,26 @@ export default () => {
                             <GhostButton style={{ marginLeft: 'auto' }} onClick={() => s.installed && open({ id: s.installed.project_id, name: s.installed.name, icon: s.installed.icon_url, url: null }, sources[s.installed.source] ? s.installed.source : source)}>
                                 Versions and updates
                             </GhostButton>
+                            <Can action={['mods.remove', 'control.stop']}>
+                                <GhostButton onClick={() => { setRemoveOpen(!removeOpen); setRemoveConfigs(false); }}>Remove modpack</GhostButton>
+                            </Can>
+                        </div>
+                    )}
+                    {s.installed && !running && removeOpen && (
+                        <div className="mt-4 rounded-lg p-3" style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+                            <p className="text-sm text-neutral-200">
+                                Remove {s.installed.name} {s.installed.version_number}? The server is stopped, a &quot;Pre-remove&quot; backup is taken, then
+                                every file the pack installed is deleted (its mods, resource packs and other downloads). Mods you added yourself and your
+                                worlds stay.
+                            </p>
+                            <label className="flex items-center gap-2 mt-3 text-sm text-neutral-300 cursor-pointer">
+                                <input type="checkbox" checked={removeConfigs} onChange={(e) => setRemoveConfigs(e.currentTarget.checked)} />
+                                Also delete the pack&apos;s config files (including any you changed)
+                            </label>
+                            <div className="flex gap-2 mt-3">
+                                <PrimaryButton style={{ background: 'rgb(220, 38, 38)' }} disabled={busy !== null} onClick={remove}>Remove modpack</PrimaryButton>
+                                <GhostButton onClick={() => setRemoveOpen(false)}>Cancel</GhostButton>
+                            </div>
                         </div>
                     )}
                     {!running && s.failed > 0 && (

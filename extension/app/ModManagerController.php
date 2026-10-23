@@ -1638,6 +1638,27 @@ class ModManagerController extends Controller
         return $res->getStatusCode() === 200 ? $res->setStatusCode(202) : $res;
     }
 
+    /** POST /{server}/modpacks/remove { confirmed, configs? } : stop, back up, delete the pack's files (queued) */
+    public function modpackRemove(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate([
+            'confirmed' => ['required', 'accepted'],
+            'configs'   => ['nullable', 'boolean'],
+        ]);
+
+        try {
+            $svc = app(\ServerSuite\Services\ModpackService::class);
+            $pack = $svc->remove($srv, (int) $request->user()->id, ! empty($data['configs']));
+            $this->audit($srv, 'modpack-remove-started', ['pack' => $pack->name, 'version' => $pack->version_number]);
+
+            return response()->json(['data' => $svc->status($srv)], 202);
+        } catch (\ServerSuite\Exceptions\ModpackException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+    }
+
     /** Validation for a modpack request's source (#23 stage 3). */
     private const MODPACK_SOURCE = ['nullable', 'string', 'in:modrinth,curseforge'];
 
