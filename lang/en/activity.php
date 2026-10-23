@@ -9,6 +9,8 @@ return [
     'server' => [
         'serversuite' => [
             'mod-installed' => 'Installed :mod (:source) with Server Suite',
+            'mods-installed' => 'Installed :count mods from the install queue (:mods)',
+            'mods-removed' => 'Removed :count mods (:mods)',
             'mod-updated' => 'Updated :mod to :version',
             'mods-updated-all' => 'Updated all mods',
             'mod-removed' => 'Removed :mod',

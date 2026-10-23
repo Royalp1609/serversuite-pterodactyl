@@ -186,6 +186,13 @@ Route::post('/{server}/plan', [ModManagerController::class, 'plan'])
 // Write endpoints
 Route::post('/{server}/install', [ModManagerController::class, 'install'])
     ->name('extension.serversuite.install');
+// Bulk remove: several mods behind one pre-change backup.
+Route::post('/{server}/mods/remove-batch', [ModManagerController::class, 'removeBatch'])
+    ->name('extension.serversuite.remove-batch');
+
+// The install queue: several mods behind one pre-change backup.
+Route::post('/{server}/install-batch', [ModManagerController::class, 'installBatch'])
+    ->name('extension.serversuite.install-batch');
 
 Route::get('/{server}/tasks/{batch}', [ModManagerController::class, 'tasks'])
     ->name('extension.serversuite.tasks');

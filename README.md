@@ -24,10 +24,15 @@ is the same suite as a native Pelican plugin.
   loader and Minecraft-version filters pre-filled from the server.
 - **Install with dependencies**: required libraries are resolved and installed
   for you; larger plans run as queued jobs with live progress.
+- **Install queue**: add several mods to the queue (each at the version you
+  pick), then install them all at once: one backup, one batch, and a library
+  two of them need is installed once.
 - Files are downloaded **by Wings straight to the server**; nothing large passes
   through the panel.
-- **Manage**: see installed mods with icons and update badges, update one or
-  all, and remove with warnings when something depends on a mod.
+- **Manage**: installed mods as a list with icons and update badges; update
+  one or all, and remove with warnings when something depends on a mod. Tick
+  several to **remove them together** (one backup; libraries nothing needs
+  afterwards are offered too, including ones the selected mods shared).
 - **Scheduled update checks** (admin-tunable, optional auto-apply).
 - **Reconcile**: find jars on disk the suite doesn't know about (identified by
   hash on Modrinth) and records whose file has gone, then adopt or forget them.
@@ -39,8 +44,8 @@ is the same suite as a native Pelican plugin.
   editor** switches to the raw file. A save is refused if the server rewrote the
   file since you opened it. Up to 512 KiB.
 - **Backup before changes** (on the Manage view: Ask, Always or Never; default
-  Ask): before mods are installed, updated or removed, or a config is saved,
-  Server Suite takes a "Pre-mod-change" backup and runs the change only once it
+  Ask, as an in-panel dialog): before mods are installed, updated or removed,
+  or a config is saved, Server Suite takes a "Pre-mod-change" backup and runs the change only once it
   has finished (a backup from the last 30 minutes is reused). The backup's name
   goes in the Activity entry, so you know what to restore. The server enforces
   it, not just the tab.

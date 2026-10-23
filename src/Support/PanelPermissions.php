@@ -59,7 +59,7 @@ final class PanelPermissions
         'gameVersions' => ['mods.read'], 'details' => ['mods.read'], 'installed' => ['mods.read'],
         'repositories' => ['mods.read'], 'search' => ['mods.read'], 'versions' => ['mods.read'],
         'tasks' => ['mods.read'], 'reconcile' => ['mods.read'],
-        'plan' => ['mods.install'], 'install' => ['mods.install'],
+        'plan' => ['mods.install'], 'install' => ['mods.install'], 'installBatch' => ['mods.install'], 'removeBatch' => ['mods.remove'],
         'update' => ['mods.update'], 'updateAll' => ['mods.update'],
         'destroy' => ['mods.remove'],
         'reconcileAdopt' => ['mods.configure'], 'reconcileForget' => ['mods.configure'],

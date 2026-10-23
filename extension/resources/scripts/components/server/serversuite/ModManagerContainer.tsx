@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Can from '@/components/elements/Can';
 import ConfigsPanel from './ConfigsPanel';
 import { getClearance } from './prechange';
+import { BackupChoice, BackupPromptHost } from './BackupPrompt';
 import CrashCard from './CrashCard';
 import CrossplayCard from './CrossplayCard';
 import { ServerContext } from '@/state/server';
@@ -139,6 +140,10 @@ interface ModVersion {
     game_versions: string[]; file_size?: number; downloads?: number; channel?: string;
     published_at?: string | null; download_url?: string;
 }
+/** A mod waiting in the install queue, at the version picked for it. */
+interface QueueItem {
+    source: string; id: string; name: string; icon_url?: string | null; version_id: string; version_number: string;
+}
 interface PlanItem {
     source: string; mod_id: string; mod_name: string; version_number: string;
     status: 'install' | 'satisfied' | 'conflict' | 'manual';
@@ -220,6 +225,13 @@ export default () => {
     const [searchError, setSearchError] = useState<string | null>(null);
 
     const [selected, setSelected] = useState<ModResult | null>(null);
+    // Install queue: several mods, one backup, one batch.
+    const [queue, setQueue] = useState<QueueItem[]>([]);
+    const queueLoaded = useRef<string | null>(null);
+    // "Take a backup first" in the Install / Remove dialogs and the queue (Ask mode).
+    const [backupFirst, setBackupFirst] = useState(true);
+    const [queueState, setQueueState] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
+    const [queueMessage, setQueueMessage] = useState('');
     const [versions, setVersions] = useState<ModVersion[]>([]);
     const [chosenVersion, setChosenVersion] = useState('');
     const [loadingVersions, setLoadingVersions] = useState(false);
@@ -242,6 +254,14 @@ export default () => {
     // Removal modal
     const [removeTarget, setRemoveTarget] = useState<InstalledMod | null>(null);
     const [removeDependents, setRemoveDependents] = useState<{ id: number; mod_name: string }[]>([]);
+    // Bulk remove: ticked rows on the Installed list, then one dialog for all of them.
+    const [picked, setPicked] = useState<Record<number, boolean>>({});
+    const [bulkOpen, setBulkOpen] = useState(false);
+    const [bulkDependents, setBulkDependents] = useState<{ id: number; mod_name: string; needs: string[] }[]>([]);
+    const [bulkOrphans, setBulkOrphans] = useState<{ id: number; mod_name: string; installed_version?: string | null }[]>([]);
+    const [bulkChecked, setBulkChecked] = useState<Record<number, boolean>>({});
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const [bulkMessage, setBulkMessage] = useState<string | null>(null);
     const [removeOrphans, setRemoveOrphans] = useState<{ id: number; mod_name: string; installed_version?: string | null }[]>([]);
     const [checkedOrphans, setCheckedOrphans] = useState<Record<number, boolean>>({});
     const [removeBusy, setRemoveBusy] = useState(false);
@@ -372,14 +392,14 @@ export default () => {
         if (!selected || !chosenVersion) return;
         setInstalling(true); setInstallState('working'); setInstallMessage('Installing…');
         try {
-            const clearance = await getClearance(base, `install ${selected.name || 'this mod'}`, (t) => t && setInstallMessage(t));
+            const clearance = await getClearance(base, `install ${selected.name || 'this mod'}`, (t) => t && setInstallMessage(t), backupFirst ? 'backup' : 'skip');
             setInstallMessage('Installing…');
             const res = await http.post(`${base}/install`, {
                 source: selected.source, mod_id: selected.id, version_id: chosenVersion, clearance,
             });
             const result = res.data.data;
             if (result.mode === 'queued' && result.batch_id) {
-                await pollBatch(result.batch_id);
+                await pollBatch(result.batch_id, (s, m) => { setInstallState(s); setInstallMessage(m); });
             } else {
                 setInstallState('done'); setInstallMessage('Installed successfully.');
                 loadInstalled();
@@ -390,21 +410,73 @@ export default () => {
         } finally { setInstalling(false); }
     };
 
-    const pollBatch = async (batch: string) => {
-        for (let i = 0; i < 60; i++) {
+    type Report = (state: 'working' | 'done' | 'error', message: string) => void;
+    const pollBatch = async (batch: string, report: Report, tries = 60) => {
+        for (let i = 0; i < tries; i++) {
             await new Promise(r => setTimeout(r, 1500));
             try {
                 const res = await http.get(`${base}/tasks/${batch}`);
                 const meta = res.data.meta;
-                setInstallMessage(`Installing… ${meta.succeeded}/${meta.total} complete`);
+                report('working', `Installing… ${meta.succeeded}/${meta.total} complete`);
                 if (meta.complete) {
-                    if (meta.failed > 0) { setInstallState('error'); setInstallMessage(`${meta.failed} of ${meta.total} failed.`); }
-                    else { setInstallState('done'); setInstallMessage(`Installed ${meta.succeeded} mod(s) successfully.`); loadInstalled(); }
+                    if (meta.failed > 0) report('error', `${meta.failed} of ${meta.total} failed.`);
+                    else { report('done', `Installed ${meta.succeeded} mod(s) successfully.`); loadInstalled(); }
                     return;
                 }
             } catch { /* tolerate transient errors */ }
         }
-        setInstallState('error'); setInstallMessage('Timed out waiting for install to finish.');
+        report('error', 'Timed out waiting for install to finish.');
+    };
+
+    // The queue survives leaving the tab: kept in this browser, per server.
+    const queueKey = uuid ? `serversuite.queue.${uuid}` : null;
+    useEffect(() => {
+        if (!queueKey) return;
+        try {
+            const saved = JSON.parse(window.localStorage.getItem(queueKey) || '[]');
+            setQueue(Array.isArray(saved) ? saved : []);
+        } catch { setQueue([]); }
+        queueLoaded.current = queueKey;
+    }, [queueKey]);
+    useEffect(() => {
+        if (!queueKey || queueLoaded.current !== queueKey) return;   // not before it's been read
+        try {
+            if (queue.length > 0) window.localStorage.setItem(queueKey, JSON.stringify(queue));
+            else window.localStorage.removeItem(queueKey);
+        } catch { /* storage blocked: the queue just won't survive a reload */ }
+    }, [queue, queueKey]);
+    const queuedFor = (source: string, id: string) => queue.find((q) => q.source === source && q.id === id);
+
+    /** Put the open mod in the queue at the chosen version (replacing it if it's already there). */
+    const addToQueue = () => {
+        const v = versions.find((x) => x.version_id === chosenVersion);
+        if (!selected || !v) return;
+        const item: QueueItem = { source: selected.source, id: selected.id, name: selected.name, icon_url: selected.icon_url, version_id: v.version_id, version_number: v.version_number };
+        setQueue((q) => [...q.filter((x) => !(x.source === item.source && x.id === item.id)), item]);
+        setQueueState('idle');
+        closeModal();
+    };
+
+    const installQueue = async () => {
+        if (queue.length === 0) return;
+        const n = queue.length;
+        setQueueState('working'); setQueueMessage('Planning…');
+        try {
+            const clearance = await getClearance(base, `install ${n} mod${n === 1 ? '' : 's'}`, (t) => t && setQueueMessage(t), backupFirst ? 'backup' : 'skip');
+            setQueueMessage('Installing…');
+            const res = await http.post(`${base}/install-batch`, {
+                items: queue.map((q) => ({ source: q.source, mod_id: q.id, version_id: q.version_id })), clearance,
+            });
+            const result = res.data.data;
+            if (result.mode === 'queued' && result.batch_id) {
+                await pollBatch(result.batch_id, (s, m) => { setQueueState(s); setQueueMessage(m); if (s === 'done') setQueue([]); }, 60 + 40 * n);
+            } else {
+                setQueueState('done'); setQueueMessage('Nothing to install: everything in the queue is already there.'); setQueue([]);
+            }
+        } catch (e: any) {
+            setQueueState('error');
+            setQueueMessage(e?.response?.data?.error || e?.response?.data?.message || e.message || 'Install failed');
+        }
     };
 
     const closeModal = () => { setSelected(null); setPlan(null); setInstallState('idle'); };
@@ -520,7 +592,7 @@ export default () => {
     useEffect(() => { if (uuid) loadInstalled(); }, [uuid]);
     useEffect(() => { if (tab === 'manage') loadInstalled(); }, [tab, loadInstalled]);
     useEffect(() => {
-        if (uuid && tab === 'manage') http.get(`${base}/prechange`).then((res) => setPreChangeMode(res.data.data.mode)).catch(() => undefined);
+        if (uuid) http.get(`${base}/prechange`).then((res) => setPreChangeMode(res.data.data.mode)).catch(() => undefined);
     }, [uuid, tab]);
     const savePreChangeMode = (mode: string) => {
         setPreChangeMode(mode);
@@ -578,7 +650,7 @@ export default () => {
         const orphanIds = removeOrphans.filter(o => checkedOrphans[o.id]).map(o => o.id);
 
         try {
-            const clearance = await getClearance(base, `remove ${removeTarget.mod_name}`, (t) => setRemoveError(t));
+            const clearance = await getClearance(base, `remove ${removeTarget.mod_name}`, (t) => setRemoveError(t), backupFirst ? 'backup' : 'skip');
             setRemoveError(null);
             // Remove the target first (force if it has dependents the user accepted).
             await http.delete(`${base}/mods/${removeTarget.id}`, { data: { force, clearance } });
@@ -604,6 +676,46 @@ export default () => {
     };
 
     const toggleOrphan = (id: number) => setCheckedOrphans(s => ({ ...s, [id]: !s[id] }));
+
+    // ---- Bulk remove ----
+    const pickedIds = installed.filter((m) => picked[m.id]).map((m) => m.id);
+    const pickedMods = installed.filter((m) => picked[m.id]);
+
+    const openBulkRemove = async () => {
+        if (pickedIds.length === 0) return;
+        setBulkOpen(true); setBulkBusy(true); setBulkMessage(null);
+        setBulkDependents([]); setBulkOrphans([]); setBulkChecked({});
+        try {
+            const d = (await http.post(`${base}/mods/remove-batch`, { ids: pickedIds, probe: true })).data.data;
+            setBulkDependents(d.dependents || []);
+            setBulkOrphans(d.orphans || []);
+            setBulkChecked(Object.fromEntries((d.orphans || []).map((o: any) => [o.id, true])));
+        } catch (e: any) {
+            setBulkMessage(e?.response?.data?.error || e?.response?.data?.message || 'Could not check what depends on these mods.');
+        } finally { setBulkBusy(false); }
+    };
+
+    const executeBulkRemove = async () => {
+        const orphans = bulkOrphans.filter((o) => bulkChecked[o.id]).map((o) => o.id);
+        const n = pickedIds.length + orphans.length;
+        setBulkBusy(true); setBulkMessage(null);
+        try {
+            const clearance = await getClearance(base, `remove ${n} mod${n === 1 ? '' : 's'}`, (t) => setBulkMessage(t), backupFirst ? 'backup' : 'skip');
+            setBulkMessage(null);
+            const res = await http.post(`${base}/mods/remove-batch`, { ids: pickedIds, orphans, force: bulkDependents.length > 0, clearance }, { validateStatus: (s) => s === 200 || s === 207 });
+            const removed = new Set<number>(res.data.data.removed || []);
+            setInstalled((list) => list.filter((m) => !removed.has(m.id)));
+            setPicked({});
+            const failed = res.data.data.failed || [];
+            if (failed.length > 0) {
+                setBulkMessage(`Removed ${removed.size}; ${failed.length} failed: ${failed.map((f: any) => `${f.mod_name} (${f.error})`).join(', ')}`);
+            } else {
+                setBulkOpen(false);
+            }
+        } catch (e: any) {
+            setBulkMessage(e?.response?.data?.error || e?.response?.data?.message || e.message || 'Remove failed');
+        } finally { setBulkBusy(false); }
+    };
 
     // ---- Reconcile ----
     const openReconcile = async () => {
@@ -790,26 +902,56 @@ export default () => {
                         </p>
                     )}
 
-                    {!loadingInstalled && filteredInstalled.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                            {filteredInstalled.map(mod => {
-                                const busy = rowBusy[mod.id];
-                                const highlighted = highlightId === mod.id;
-                                return (
-                                    <Card key={mod.id} style={highlighted ? { borderColor: 'rgb(99,102,241)', boxShadow: '0 0 0 2px rgba(99,102,241,0.4)' } : undefined}>
-                                        <div className="flex gap-3 mb-3">
+                    {!loadingInstalled && filteredInstalled.length > 0 && (() => {
+                        const allPicked = filteredInstalled.every((m) => picked[m.id]);
+                        return (
+                            <Panel style={{ padding: 0, overflow: 'hidden' }}>
+                                <div className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: pickedIds.length ? 'rgba(99,102,241,0.08)' : undefined }}>
+                                    <Can action={'mods.remove'}>
+                                        <input type="checkbox" checked={allPicked} title={allPicked ? 'Untick all' : 'Tick all shown'}
+                                            onChange={() => setPicked((p) => {
+                                                const next = { ...p };
+                                                filteredInstalled.forEach((m) => { next[m.id] = !allPicked; });
+                                                return next;
+                                            })} />
+                                    </Can>
+                                    {pickedIds.length > 0 ? (
+                                        <>
+                                            <span className="text-sm text-white font-medium">{pickedIds.length} selected</span>
+                                            <GhostButton onClick={() => setPicked({})}>Clear</GhostButton>
+                                            <Can action={'mods.remove'}>
+                                                <PrimaryButton onClick={openBulkRemove} style={{ marginLeft: 'auto', background: 'rgb(139,92,246)' }}>
+                                                    <FontAwesomeIcon icon={faTrash} /> Remove {pickedIds.length}
+                                                </PrimaryButton>
+                                            </Can>
+                                        </>
+                                    ) : (
+                                        <span className="text-xs text-neutral-400 uppercase tracking-wide">Mod</span>
+                                    )}
+                                </div>
+                                {filteredInstalled.map((mod) => {
+                                    const busy = rowBusy[mod.id];
+                                    const highlighted = highlightId === mod.id;
+                                    return (
+                                        <div key={mod.id} className="flex items-center gap-3 px-4 py-2"
+                                            style={{
+                                                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                                                background: highlighted ? 'rgba(99,102,241,0.15)' : picked[mod.id] ? 'rgba(99,102,241,0.06)' : undefined,
+                                            }}>
+                                            <Can action={'mods.remove'}>
+                                                <input type="checkbox" checked={!!picked[mod.id]} onChange={() => setPicked((p) => ({ ...p, [mod.id]: !p[mod.id] }))} />
+                                            </Can>
                                             {mod.icon_url ? (
-                                                <img src={mod.icon_url} alt={mod.mod_name}
-                                                    className="w-12 h-12 rounded-lg object-cover flex-shrink-0 bg-neutral-800"
+                                                <img src={mod.icon_url} alt="" className="w-8 h-8 rounded-md object-cover flex-shrink-0 bg-neutral-800"
                                                     onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                                             ) : (
-                                                <div className="w-12 h-12 rounded-lg bg-neutral-800 flex items-center justify-center flex-shrink-0">
-                                                    <FontAwesomeIcon icon={faCube} className="text-indigo-400" />
+                                                <div className="w-8 h-8 rounded-md bg-neutral-800 flex items-center justify-center flex-shrink-0">
+                                                    <FontAwesomeIcon icon={faCube} className="text-indigo-400 text-sm" />
                                                 </div>
                                             )}
-                                            <div className="min-w-0">
-                                                <h3 className="text-base font-bold text-white truncate">{mod.mod_name}</h3>
-                                                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-sm font-semibold text-white truncate">{mod.mod_name}</span>
                                                     {mod.installed_version && <Badge>{mod.installed_version}</Badge>}
                                                     {mod.from_modpack && <Badge title="Installed by the modpack; updating the pack updates it">modpack</Badge>}
                                                     {mod.disabled && (
@@ -829,33 +971,69 @@ export default () => {
                                                         </span>
                                                     )}
                                                 </div>
+                                                <span className="text-xs text-neutral-500">{mod.source === 'manual' ? 'added by hand' : mod.source}{mod.target_filename ? ` · ${mod.target_filename}` : ''}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                {mod.source !== 'manual' && (
+                                                    <Can action={'mods.update'}><GhostButton onClick={() => updateMod(mod)} disabled={!!busy} title="Update">
+                                                        <FontAwesomeIcon icon={busy === 'update' ? faSpinner : faSync} spin={busy === 'update'} />
+                                                    </GhostButton></Can>
+                                                )}
+                                                {mod.source !== 'manual' && (
+                                                    <GhostButton onClick={() => openDetails(mod.source, mod.source_id)} disabled={!!busy} title="Details">
+                                                        <FontAwesomeIcon icon={faInfoCircle} />
+                                                    </GhostButton>
+                                                )}
+                                                <Can action={'mods.remove'}><GhostButton onClick={() => openRemove(mod)} disabled={!!busy} title="Remove" style={{ color: 'rgb(196,181,253)' }}>
+                                                    <FontAwesomeIcon icon={faTrash} />
+                                                </GhostButton></Can>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2 mt-auto">
-                                            {mod.source !== 'manual' && (
-                                                <Can action={'mods.update'}><GhostButton onClick={() => updateMod(mod)} disabled={!!busy}>
-                                                    <FontAwesomeIcon icon={busy === 'update' ? faSpinner : faSync} spin={busy === 'update'} /> Update
-                                                </GhostButton></Can>
-                                            )}
-                                            {mod.source !== 'manual' && (
-                                            <GhostButton onClick={() => openDetails(mod.source, mod.source_id)} disabled={!!busy}>
-                                                <FontAwesomeIcon icon={faInfoCircle} />
-                                            </GhostButton>
-                                            )}
-                                            <Can action={'mods.remove'}><PrimaryButton onClick={() => openRemove(mod)} disabled={!!busy} style={{ marginLeft: 'auto', background: 'rgb(139,92,246)' }}>
-                                                <FontAwesomeIcon icon={faTrash} /> Remove
-                                            </PrimaryButton></Can>
-                                        </div>
-                                    </Card>
-                                );
-                            })}
-                        </div>
-                    )}
+                                    );
+                                })}
+                            </Panel>
+                        );
+                    })()}
                 </>
             )}
 
             {tab === 'browse' && (
                 <>
+                    {(queue.length > 0 || queueState !== 'idle') && (
+                        <Panel>
+                            <div className="flex flex-wrap items-center gap-3 mb-3">
+                                <h3 className="text-base font-bold text-white">Install queue</h3>
+                                <span className="text-xs text-neutral-400">{queue.length} mod{queue.length === 1 ? '' : 's'} · one backup for all of them</span>
+                                <div className="flex gap-2" style={{ marginLeft: 'auto' }}>
+                                    {queue.length > 0 && queueState !== 'working' && <GhostButton onClick={() => { setQueue([]); setQueueState('idle'); }}>Clear</GhostButton>}
+                                    {queue.length > 0 && (
+                                        <Can action={'mods.install'}>
+                                            <PrimaryButton onClick={installQueue} disabled={queueState === 'working'}>
+                                                <FontAwesomeIcon icon={queueState === 'working' ? faSpinner : faDownload} spin={queueState === 'working'} /> Install {queue.length} mod{queue.length === 1 ? '' : 's'}
+                                            </PrimaryButton>
+                                        </Can>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                {queue.map((q) => (
+                                    <div key={`${q.source}:${q.id}`} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: 'rgba(15,23,42,0.4)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        {q.icon_url ? <img src={q.icon_url} alt="" className="w-8 h-8 rounded-md object-cover" /> : <FontAwesomeIcon icon={faCube} className="text-indigo-400" />}
+                                        <span className="text-sm text-white truncate">{q.name}</span>
+                                        <Badge>{q.version_number}</Badge>
+                                        {queueState !== 'working' && (
+                                            <button className="text-xs text-neutral-400 hover:text-red-400" style={{ marginLeft: 'auto' }}
+                                                onClick={() => setQueue((all) => all.filter((x) => x !== q))}>Remove</button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            {queue.length > 0 && queueState !== 'working' && <BackupChoice mode={preChangeMode} value={backupFirst} onChange={setBackupFirst} />}
+                            {queueState === 'working' && <p className="text-indigo-300 text-sm mt-3"><FontAwesomeIcon icon={faSpinner} spin /> {queueMessage}</p>}
+                            {queueState === 'done' && <p className="text-emerald-400 text-sm mt-3"><FontAwesomeIcon icon={faCheckCircle} /> {queueMessage}</p>}
+                            {queueState === 'error' && <p className="text-red-400 text-sm mt-3"><FontAwesomeIcon icon={faTimesCircle} /> {queueMessage}</p>}
+                        </Panel>
+                    )}
                     <Panel>
                         <div className="flex flex-wrap gap-4 items-end">
                             <div className="flex flex-col gap-1">
@@ -1000,6 +1178,15 @@ export default () => {
                                                     </div>
                                                 );
                                             }
+                                            const q = queuedFor(mod.source, mod.id);
+                                            if (q) {
+                                                return (
+                                                    <GhostButton onClick={() => openInstall(mod)} style={{ marginLeft: 'auto', color: 'rgb(52,211,153)', borderColor: 'rgba(16,185,129,0.4)' }}
+                                                        title="In the install queue; click to change the version or install it now">
+                                                        <FontAwesomeIcon icon={faCheckCircle} /> Queued · {q.version_number}
+                                                    </GhostButton>
+                                                );
+                                            }
                                             return (
                                                 <Can action={'mods.install'}><PrimaryButton onClick={() => openInstall(mod)} style={{ marginLeft: 'auto' }}>
                                                     <FontAwesomeIcon icon={faDownload} /> Install
@@ -1112,6 +1299,51 @@ export default () => {
                 </div>
             )}
 
+            {bulkOpen && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <Panel style={{ maxWidth: '32rem', width: '100%', margin: 0 }}>
+                        <div className="flex items-center justify-between mb-3">
+                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                <FontAwesomeIcon icon={faTrash} className="text-violet-400" /> Remove {pickedMods.length} mod{pickedMods.length === 1 ? '' : 's'}
+                            </h2>
+                            <button onClick={() => setBulkOpen(false)} disabled={bulkBusy} className="text-neutral-400 hover:text-white"><FontAwesomeIcon icon={faTimes} /></button>
+                        </div>
+                        <div className="text-sm text-neutral-300 mb-3" style={{ maxHeight: '10rem', overflowY: 'auto' }}>
+                            {pickedMods.map((m) => <div key={m.id}>{m.mod_name} <span className="text-neutral-500 text-xs">{m.installed_version}</span></div>)}
+                        </div>
+                        <p className="text-xs text-neutral-400 mb-3">Their files are deleted from the server.</p>
+                        {bulkDependents.length > 0 && (
+                            <div className="rounded-lg p-3 mb-3 text-sm" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: 'rgb(251,191,36)' }}>
+                                <p className="font-medium mb-1"><FontAwesomeIcon icon={faExclamationTriangle} /> Still needed by mods you&apos;re keeping:</p>
+                                {bulkDependents.map((d) => <div key={d.id}>{d.mod_name} needs {d.needs.join(', ')}</div>)}
+                                <p className="text-xs mt-1" style={{ color: 'rgb(203,213,225)' }}>Those may fail to load. Untick these mods, or remove anyway.</p>
+                            </div>
+                        )}
+                        {bulkOrphans.length > 0 && (
+                            <div className="rounded-lg p-3 mb-3" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                                <p className="text-sm font-medium mb-2" style={{ color: 'rgb(165,180,252)' }}><FontAwesomeIcon icon={faPuzzlePiece} /> Nothing will need these afterwards:</p>
+                                {bulkOrphans.map((o) => (
+                                    <label key={o.id} className="flex items-center gap-2 text-sm text-neutral-200 py-0.5 cursor-pointer">
+                                        <input type="checkbox" checked={!!bulkChecked[o.id]} onChange={() => setBulkChecked((s) => ({ ...s, [o.id]: !s[o.id] }))} />
+                                        {o.mod_name} {o.installed_version && <span className="text-neutral-500 text-xs">({o.installed_version})</span>}
+                                    </label>
+                                ))}
+                                <p className="text-xs text-neutral-400 mt-1">Ticked ones are removed too.</p>
+                            </div>
+                        )}
+                        <BackupChoice mode={preChangeMode} value={backupFirst} onChange={setBackupFirst} />
+                        {bulkMessage && <p className="text-sm mt-3" style={{ color: 'rgb(165,180,252)' }}>{bulkBusy && <FontAwesomeIcon icon={faSpinner} spin />} {bulkMessage}</p>}
+                        <div className="flex justify-end gap-3 mt-4">
+                            <GhostButton onClick={() => setBulkOpen(false)} disabled={bulkBusy}>Cancel</GhostButton>
+                            <PrimaryButton onClick={executeBulkRemove} disabled={bulkBusy} style={{ background: 'rgb(139,92,246)' }}>
+                                <FontAwesomeIcon icon={bulkBusy ? faSpinner : faTrash} spin={bulkBusy} />
+                                {` ${bulkDependents.length > 0 ? 'Remove anyway' : 'Remove'} (${pickedMods.length + bulkOrphans.filter((o) => bulkChecked[o.id]).length})`}
+                            </PrimaryButton>
+                        </div>
+                    </Panel>
+                </div>
+            )}
+
             {removeTarget && (
                 <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
                     <Panel className="max-w-lg w-full" style={{ background: 'rgba(17,24,39,0.98)', marginBottom: 0 }}>
@@ -1169,8 +1401,9 @@ export default () => {
                             </div>
                         )}
 
+                        <BackupChoice mode={preChangeMode} value={backupFirst} onChange={setBackupFirst} />
                         {removeError && (
-                            <p className="text-red-400 text-sm mb-3"><FontAwesomeIcon icon={faTimesCircle} /> {removeError}</p>
+                            <p className="text-red-400 text-sm mb-3 mt-3"><FontAwesomeIcon icon={faTimesCircle} /> {removeError}</p>
                         )}
 
                         <div className="flex justify-end gap-3 mt-4 flex-wrap">
@@ -1473,12 +1706,32 @@ export default () => {
                             </div>
                         )}
 
+                        {installState !== 'done' && <BackupChoice mode={preChangeMode} value={backupFirst} onChange={setBackupFirst} />}
                         {installState === 'working' && <p className="text-indigo-300 text-sm mt-4"><FontAwesomeIcon icon={faSpinner} spin /> {installMessage}</p>}
                         {installState === 'done' && <p className="text-emerald-400 text-sm mt-4"><FontAwesomeIcon icon={faCheckCircle} /> {installMessage}</p>}
                         {installState === 'error' && <p className="text-red-400 text-sm mt-4"><FontAwesomeIcon icon={faTimesCircle} /> {installMessage}</p>}
 
                         <div className="flex justify-end gap-3 mt-6">
                             <GhostButton onClick={closeModal}>{installState === 'done' ? 'Close' : 'Cancel'}</GhostButton>
+                            {installState !== 'done' && (
+                                (() => {
+                                    const q = selected ? queuedFor(selected.source, selected.id) : undefined;
+                                    if (q && q.version_id === chosenVersion) {
+                                        return (
+                                            <GhostButton onClick={() => { setQueue((all) => all.filter((x) => x !== q)); }}
+                                                title="Click to take it out of the queue" style={{ color: 'rgb(52,211,153)', borderColor: 'rgba(16,185,129,0.4)' }}>
+                                                <FontAwesomeIcon icon={faCheckCircle} /> Queued · {q.version_number}
+                                            </GhostButton>
+                                        );
+                                    }
+                                    return (
+                                        <GhostButton onClick={addToQueue} disabled={installing || loadingVersions || versions.length === 0 || !chosenVersion}
+                                            title="Queue it with others: they install together after one backup">
+                                            {q ? `Queue this version instead of ${q.version_number}` : `Add to queue${queue.length > 0 ? ` (${queue.length})` : ''}`}
+                                        </GhostButton>
+                                    );
+                                })()
+                            )}
                             {installState !== 'done' && (
                                 <PrimaryButton onClick={doInstall} disabled={installing || loadingVersions || versions.length === 0 || !chosenVersion}>
                                     <FontAwesomeIcon icon={installing ? faSpinner : faDownload} spin={installing} /> Install
@@ -1488,6 +1741,7 @@ export default () => {
                     </Panel>
                 </div>
             )}
+            <BackupPromptHost />
         </div>
     );
 };
