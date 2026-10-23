@@ -1,4 +1,6 @@
 Navigation:
+  SubNavigation:
+    BeforeSubNavigation: 'server/serversuite/Sidebar'
   Routes:
     - { Name: 'Mods', Permission: '"mods.*"', Path: '/mod-manager', Type: 'server', Component: 'server/serversuite/ModManagerContainer', AdminOnly: 'false' }
     - { Name: 'Modpacks', Permission: '"mods.*"', Path: '/modpacks', Type: 'server', Component: 'server/serversuite/ModpacksContainer', AdminOnly: 'false' }
