@@ -95,6 +95,8 @@ Route::post('/{server}/modpacks/preview', [ModManagerController::class, 'modpack
     ->name('extension.serversuite.modpack-preview');
 Route::post('/{server}/modpacks/install', [ModManagerController::class, 'modpackInstall'])
     ->name('extension.serversuite.modpack-install');
+Route::post('/{server}/modpacks/remove', [ModManagerController::class, 'modpackRemove'])
+    ->name('extension.serversuite.modpack-remove');
 
 // Players (#27): whitelist, ops and bans.
 Route::get('/{server}/players', [ModManagerController::class, 'players'])

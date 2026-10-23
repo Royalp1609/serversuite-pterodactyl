@@ -656,3 +656,61 @@ it('forgets the installed pack when the server is wiped, but not mid-install', f
     expect(Modpack::forServer('srv-mp'))->toBeNull()
         ->and(ServerMod::forServer('srv-mp')->count())->toBe(0);
 });
+
+// --- removing a pack ------------------------------------------------------
+
+it("removes a pack: its files and mods go, the owner's mods and world stay", function () {
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+    $this->wings->put('/mods/mine.jar', 'mine');
+    $this->wings->put('/world/level.dat', 'world');
+    ServerMod::query()->create(['server_uuid' => 'srv-mp', 'source' => 'modrinth', 'source_id' => 'MINE', 'mod_name' => 'Mine', 'installed_version' => '1', 'target_filename' => 'mine.jar', 'install_path' => '/mods']);
+    $this->power = 'running';
+    $this->backupNames = [];
+
+    mpSvc()->remove($this->server, 1);
+    expect(mpSvc()->status($this->server)['target']['action'])->toBe('remove');
+    $pack = Modpack::forServer('srv-mp');
+    for ($i = 0; $i < 20 && $pack->fresh()?->isRunning(); $i++) {
+        (new InstallModpackJob($pack->id))->handle(app(ModpackInstaller::class));
+    }
+
+    $f = $this->wings->files;
+    expect(Modpack::forServer('srv-mp'))->toBeNull()
+        ->and(mpSvc()->status($this->server))->toBeNull()
+        ->and($this->backupNames)->toBe(["Pre-remove \u{2192} Test Pack v1"])
+        ->and($f)->not->toHaveKey('/mods/a.jar')
+        ->and($f)->not->toHaveKey('/mods/b.jar')
+        ->and($f)->not->toHaveKey('/config/c.json')
+        ->and($f)->not->toHaveKey('/mods/extra.jar', "a jar from the pack's overrides is a mod too")
+        ->and($f['/config/a.toml'])->toBe('server value', 'configs stay unless asked')
+        ->and($f['/mods/mine.jar'])->toBe('mine')
+        ->and($f['/world/level.dat'])->toBe('world')
+        ->and(ServerMod::forServer('srv-mp')->pluck('source_id')->all())->toBe(['MINE']);
+    $this->ops->shouldHaveReceived('power')->with('srv-mp', 'stop');
+});
+
+it('removes the pack\'s configs too when asked', function () {
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+
+    mpSvc()->remove($this->server, 1, true);
+    $pack = Modpack::forServer('srv-mp');
+    for ($i = 0; $i < 20 && $pack->fresh()?->isRunning(); $i++) {
+        (new InstallModpackJob($pack->id))->handle(app(ModpackInstaller::class));
+    }
+
+    expect($this->wings->files)->not->toHaveKey('/config/a.toml');
+});
+
+it("won't remove a pack that isn't there or is still installing", function () {
+    expect(fn () => mpSvc()->remove($this->server, 1))->toThrow(ModpackException::class, 'no modpack');
+
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+    Modpack::forServer('srv-mp')->forceFill(['status' => Modpack::STATUS_INSTALLING])->save();
+    expect(fn () => mpSvc()->remove($this->server, 1))->toThrow(ModpackException::class, 'running');
+});

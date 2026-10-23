@@ -146,9 +146,10 @@ export default () => {
                 : packRunning && stage === 'starting' ? 'Reinstall finished' : 'Reinstalling the server';
 
     return createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(2, 6, 23, 0.94)', overflowY: 'auto' }}>
-            <div className="max-w-2xl mx-auto px-4 py-12 flex flex-col items-center text-center">
-                <img src={image} alt="" style={{ width: '100%', maxWidth: '18rem', height: 'auto' }} className="mb-8" />
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(2, 6, 23, 0.94)', overflowY: 'auto', display: 'flex' }}>
+            {/* margin: auto centres it both ways and still scrolls when it's taller than the screen */}
+            <div className="w-full max-w-xl px-4 py-10 flex flex-col items-center text-center" style={{ margin: 'auto' }}>
+                <img src={image} alt="" style={{ width: '100%', maxWidth: '16rem', height: 'auto' }} className="mb-6" />
                 <h2 className="text-2xl font-bold text-white mb-1">{title}</h2>
                 <p className="text-sm text-neutral-400 mb-6">
                     {stage === 'failed'
@@ -180,7 +181,7 @@ export default () => {
                 )}
 
                 {stage === 'starting' && !packRunning && (
-                    <div className="text-sm text-neutral-300 mb-4">
+                    <div className="text-sm text-neutral-300 mb-4 w-full">
                         {idle ? (
                             <>
                                 The install finished, but nothing has started the server.{' '}

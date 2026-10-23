@@ -29,6 +29,10 @@ use ServerSuite\Support\SuiteActivity;
  *   overrides  - merge overrides/ then server-overrides/ into the server
  *   finishing  - record the pack and its mods, remove the staging folder
  *
+ * Removing a pack (plan action "remove") runs stopping -> backing_up
+ * ("Pre-remove") -> removing: delete the files the pack installed, forget
+ * its mods and the pack itself.
+ *
  * The server is left stopped; the owner starts it when ready.
  */
 class ModpackInstaller
@@ -61,9 +65,12 @@ class ModpackInstaller
                 'files'      => $this->files($pack, $started),
                 'overrides'  => $this->overrides($pack),
                 'finishing'  => $this->finishing($pack),
+                'removing'   => $this->removing($pack),
                 default      => throw new ModpackException("Unknown install phase {$pack->phase}."),
             };
-            $pack->save();
+            if ($pack->exists) {   // removing() deletes the row when it's done
+                $pack->save();
+            }
 
             if ($delay !== 0 || microtime(true) - $started > self::BUDGET) {
                 return $pack->isRunning() ? max(0, (int) $delay) : null;
@@ -117,7 +124,7 @@ class ModpackInstaller
         }
 
         if (empty($state['backup_uuid'])) {
-            $name = "Pre-modpack \u{2192} " . ($pack->target['name'] ?? 'pack') . ' ' . ($pack->target['version_number'] ?? '');
+            $name = ($this->isRemoval($pack) ? "Pre-remove \u{2192} " : "Pre-modpack \u{2192} ") . ($pack->target['name'] ?? 'pack') . ' ' . ($pack->target['version_number'] ?? '');
             $res = $this->rotation->backupNow($pack->server_uuid, mb_substr($name, 0, 180));
 
             if ($res->isRotated() && $res->created !== null) {
@@ -162,7 +169,61 @@ class ModpackInstaller
 
     private function afterBackup(Modpack $pack): string
     {
+        if ($this->isRemoval($pack)) {
+            return 'removing';
+        }
+
         return empty($pack->plan['switch']) ? 'staging' : 'switching';
+    }
+
+    private function isRemoval(Modpack $pack): bool
+    {
+        return ($pack->plan['action'] ?? 'install') === 'remove';
+    }
+
+    /**
+     * Remove the installed pack: the files it downloaded and its mod jars
+     * (overrides included), plus its other override files (configs) when
+     * asked. Files added by hand and the worlds stay. Then the pack's mods
+     * and the pack itself are forgotten.
+     */
+    private function removing(Modpack $pack): ?int
+    {
+        $uuid = $pack->server_uuid;
+        $withConfigs = ! empty($pack->plan['remove_overrides']);
+
+        $byDir = [];
+        foreach ((array) ($pack->files ?? []) as $f) {
+            $path = (string) ($f['path'] ?? '');
+            $isJar = str_ends_with(strtolower($path), '.jar');
+            if ($path === '' || (($f['kind'] ?? 'download') !== 'download' && ! $isJar && ! $withConfigs)) {
+                continue;
+            }
+            $byDir['/' . ltrim(dirname('/' . $path), '/')][] = basename($path);
+        }
+        $removed = 0;
+        foreach ($byDir as $dir => $names) {
+            try {
+                $this->daemon->deleteFiles($uuid, $dir, array_values(array_unique($names)));
+                $removed += count($names);
+            } catch (\Throwable $e) {
+                Log::warning("[Server Suite] modpack remove: could not delete files in {$dir}: {$e->getMessage()}");
+            }
+        }
+        $pack->progress_done = $removed;
+
+        $mods = ServerMod::forServer($uuid)->where('modpack_id', $pack->id)->delete();
+
+        app(CrashHelpService::class)->recordChange($uuid, 'remove modpack ' . ($pack->name ?? ''),
+            ! empty($pack->state['backup_uuid']) ? ['uuid' => $pack->state['backup_uuid'], 'name' => 'Pre-remove backup'] : null);
+        SuiteActivity::logFor($uuid, 'server:serversuite.modpack-removed', [
+            'pack' => $pack->name, 'version' => $pack->version_number, 'files' => $removed, 'mods' => $mods,
+        ]);
+
+        $pack->status = 'removed';   // ends step()'s loop
+        $pack->delete();
+
+        return null;
     }
 
     /**

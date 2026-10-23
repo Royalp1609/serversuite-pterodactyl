@@ -171,7 +171,7 @@ class ModpackService
             'failures'  => array_slice($pack->failures ?? [], 0, 50),
             'failed'    => count($pack->failures ?? []),
             'error'     => $pack->error,
-            'target'    => ['name' => $pack->target['name'] ?? null, 'version_number' => $pack->target['version_number'] ?? null],
+            'target'    => ['name' => $pack->target['name'] ?? null, 'version_number' => $pack->target['version_number'] ?? null, 'action' => $pack->plan['action'] ?? 'install'],
             'installed' => $pack->hasInstalledPack() ? [
                 'project_id' => $pack->project_id, 'source' => $pack->source ?: 'modrinth', 'name' => $pack->name, 'version_number' => $pack->version_number,
                 'icon_url' => $pack->icon_url, 'minecraft' => $pack->minecraft, 'loader' => $pack->loader,
@@ -365,6 +365,49 @@ class ModpackService
             'progress_total' => count($p['plan']['install']),
             'failures'       => [],
             'state'          => ['backups' => $p['backups']],
+            'error'          => null,
+            'requested_by'   => $userId,
+            'started_at'     => now(),
+            'finished_at'    => null,
+        ])->save();
+
+        InstallModpackJob::dispatch($pack->id);
+
+        return $pack;
+    }
+
+    /**
+     * Queue removing the installed pack: stop the server, take a "Pre-remove"
+     * backup (unless backups are off), delete the pack's files and forget it
+     * (ModpackInstaller, phase removing). Configs stay unless $withConfigs.
+     *
+     * @throws ModpackException
+     */
+    public function remove(object $server, int $userId, bool $withConfigs = false): Modpack
+    {
+        $pack = Modpack::forServer($server->uuid);
+        if ($pack === null || ! $pack->hasInstalledPack()) {
+            throw new ModpackException('This server has no modpack installed.');
+        }
+        if ($pack->isRunning()) {
+            throw new ModpackException('A modpack install is running on this server; wait for it to finish.');
+        }
+
+        $backupLimit = null;
+        try {
+            $backupLimit = app(\ServerSuite\Contracts\PanelServerOps::class)->serverBackupLimit($server->uuid);
+        } catch (\Throwable) {
+        }
+
+        $pack->forceFill([
+            'status'         => Modpack::STATUS_INSTALLING,
+            'phase'          => 'stopping',
+            'target'         => ['name' => $pack->name, 'version_number' => $pack->version_number],
+            'plan'           => ['action' => 'remove', 'remove_overrides' => $withConfigs],
+            'progress_done'  => 0,
+            'progress_total' => count((array) ($pack->files ?? [])),
+            'failures'       => [],
+            'state'          => ['backups' => $backupLimit === 0 ? 'disabled' : 'yes'],
             'error'          => null,
             'requested_by'   => $userId,
             'started_at'     => now(),
