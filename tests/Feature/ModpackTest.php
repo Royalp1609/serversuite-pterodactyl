@@ -557,3 +557,39 @@ it('fails the install, keeping the backup as the way back, when the reinstall fa
         ->and($pack->error)->toContain('reinstall onto Fabric failed')
         ->and($this->wings->files)->not->toHaveKey('/mods/a.jar');
 });
+
+// --- regressions from the test panel (2026-10-23) ------------------------
+
+it("merges overrides into the existing mods and config folders, keeping the pack's jars", function () {
+    // Vanilla Perfected ships overrides/mods/.panorama/... next to its jar downloads.
+    mpPublish($this, 'v1', ['mods/a.jar' => ['mod' => 'MODA']], [
+        'overrides/mods/.panorama/p1/panorama_name.txt' => 'p1',
+        'overrides/config/x.json' => 'x',
+    ]);
+    $this->wings->put('/config/existing.toml', 'mine');
+
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    $pack = mpRun();
+
+    $f = $this->wings->files;
+    expect($pack->status)->toBe(Modpack::STATUS_INSTALLED, (string) $pack->error)
+        ->and($f['/mods/a.jar'])->toBe('jar:mods/a.jar:v1')
+        ->and($f['/mods/.panorama/p1/panorama_name.txt'])->toBe('p1')
+        ->and($f['/config/existing.toml'])->toBe('mine')
+        ->and($f['/config/x.json'])->toBe('x');
+});
+
+it("installing the same version again puts back the pack's files that went missing", function () {
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+    unset($this->wings->files['/mods/a.jar']);
+
+    $p = mpSvc()->preview($this->server, 'PACK', 'v1');
+    expect(array_column($p['plan']['install'], 'path'))->toBe(['mods/a.jar'])
+        ->and($p['counts']['unchanged'])->toBe(2);
+
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+    expect($this->wings->files['/mods/a.jar'])->toBe('jar:mods/a.jar:v1');
+});

@@ -71,8 +71,12 @@ class PterodactylDaemonFileClient implements DaemonFileClient
             throw DeliveryException::daemonError($e->getMessage(), $e);
         }
 
-        // getDirectory returns the daemon's JSON: { "data": [ { "attributes": {...} } ] }
-        // or, depending on version, a bare list. Normalise both shapes.
+        // getDirectory returns Wings' JSON as is: a bare list of
+        // {name, size, file, directory, modified, mode, ...}. The client API's
+        // shape ({data: [{attributes: {is_file, modified_at}}]}) is accepted
+        // too. Reading the wrong key once made every folder a "file": modpack
+        // overrides then replaced /mods and /config wholesale and chmod'ed
+        // folders 644, and Configs and crash help lost folders and file times.
         $entries = $raw['data'] ?? $raw;
 
         $out = [];
@@ -86,8 +90,8 @@ class PterodactylDaemonFileClient implements DaemonFileClient
             $out[] = [
                 'name'        => (string) $attr['name'],
                 'size'        => (int) ($attr['size'] ?? 0),
-                'is_file'     => (bool) ($attr['is_file'] ?? true),
-                'modified_at' => $attr['modified_at'] ?? null,
+                'is_file'     => (bool) ($attr['is_file'] ?? $attr['file'] ?? ! ($attr['directory'] ?? false)),
+                'modified_at' => $attr['modified_at'] ?? $attr['modified'] ?? null,
             ];
         }
 
