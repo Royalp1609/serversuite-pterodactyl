@@ -14,8 +14,9 @@ import styled from 'styled-components/macro';
  * job on the panel (ModpackInstaller): stop the server, "Pre-modpack"
  * backup, Wings fetches the pack and every file, then the pack's configs.
  * Only Fabric, Quilt, Forge and NeoForge servers can take a pack; others
- * get a note instead. The server must already run the pack's loader and
- * Minecraft version (the review says what to switch to).
+ * get a note instead. A pack for another loader or Minecraft version
+ * switches the server first (wipe, new egg, reinstall); that needs the
+ * Versions tab's switch permissions and a second confirmation.
  */
 
 const Wrapper = styled.div`${tw`p-6 max-w-7xl mx-auto`};`;  // same page margins as the Mods tab
@@ -121,6 +122,7 @@ interface Preview {
     version: { id: string; version_number: string };
     requires: { loader: string | null; loader_version: string | null; minecraft: string };
     blockers: string[];
+    switch: { egg_name: string; from: Context } | null;
     current: { name: string; version_number: string; same_pack: boolean } | null;
     counts: { install: number; unchanged: number; remove: number; replace: number; overrides: number; skipped: number };
     download_bytes: number;
@@ -141,7 +143,8 @@ const bytes = (n: number) => {
     return `${i ? n.toFixed(1) : n} ${units[i]}`;
 };
 const PHASES: Record<string, string> = {
-    stopping: 'Stopping the server', backing_up: 'Taking a backup', staging: 'Downloading the pack',
+    stopping: 'Stopping the server', backing_up: 'Taking a backup',
+    switching: 'Switching the server', reinstalling: 'Reinstalling the server', staging: 'Downloading the pack',
     files: 'Downloading files', overrides: "Applying the pack's configs", finishing: 'Finishing',
 };
 
@@ -160,6 +163,9 @@ export default () => {
     const [versions, setVersions] = useState<Version[]>([]);
     const [preview, setPreview] = useState<Preview | null>(null);
     const [confirmed, setConfirmed] = useState(false);
+    const [wipeConfirmed, setWipeConfirmed] = useState(false);
+    const [canSwitch, setCanSwitch] = useState(false);
+    const [anyVersion, setAnyVersion] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
@@ -175,6 +181,7 @@ export default () => {
                 setSupported(d.supported);
                 setContext(d.context);
                 setStatus(d.status);
+                setCanSwitch(!!d.can_switch);
                 const nowRunning = d.status?.status === 'installing';
                 if (wasRunning.current && !nowRunning) {
                     setNotice(d.status?.status === 'installed'
@@ -199,7 +206,7 @@ export default () => {
     const search = useCallback((offset: number) => {
         if (!uuid) return;
         setBusy('search');
-        http.get(`${base}/search`, { params: { query, sort, offset } })
+        http.get(`${base}/search`, { params: { query, sort, offset, any_version: anyVersion ? 1 : 0 } })
             .then((res) => {
                 const hits: Hit[] = res.data.data;
                 setResults((cur) => (offset > 0 ? [...cur, ...hits] : hits));
@@ -207,7 +214,7 @@ export default () => {
             })
             .catch((e) => { if (offset === 0) setResults([]); setHasMore(false); setError(errorOf(e, 'Could not search modpacks.')); })
             .finally(() => setBusy(null));
-    }, [base, uuid, query, sort]);
+    }, [base, uuid, query, sort, anyVersion]);
 
     useEffect(() => {
         if (!supported) return;
@@ -219,6 +226,7 @@ export default () => {
         setPack(p);
         setPreview(null);
         setConfirmed(false);
+        setWipeConfirmed(false);
         setVersions([]);
         setError(null);
         setBusy('versions');
@@ -228,27 +236,32 @@ export default () => {
             .finally(() => setBusy(null));
     };
 
+    /** Versions for another loader or Minecraft version can be reviewed by someone who can switch the server. */
+    const reviewable = (v: Version) => v.compatible || canSwitch;
+
     const review = (v: Version) => {
-        if (!pack || !v.compatible) return;
+        if (!pack || !reviewable(v)) return;
         setBusy(`review-${v.id}`);
         setError(null);
         http.post(`${base}/preview`, { project_id: pack.id, version_id: v.id })
-            .then((res) => { setPreview(res.data.data); setConfirmed(false); })
+            .then((res) => { setPreview(res.data.data); setConfirmed(false); setWipeConfirmed(false); })
             .catch((e) => setError(errorOf(e, 'Could not read the modpack.')))
             .finally(() => setBusy(null));
     };
 
     const install = () => {
-        if (!pack || !preview || !confirmed) return;
+        if (!pack || !preview || !confirmed || (preview.switch && !wipeConfirmed)) return;
         setBusy('install');
         setError(null);
-        http.post(`${base}/install`, { project_id: pack.id, version_id: preview.version.id, confirmed: true })
+        http.post(`${base}/install`, { project_id: pack.id, version_id: preview.version.id, confirmed: true, wipe_confirmed: !!preview.switch && wipeConfirmed })
             .then((res) => {
                 setStatus(res.data.data);
                 wasRunning.current = true;
                 setPack(null);
                 setPreview(null);
-                setNotice('Install started. The server is stopped and backed up first. You can leave this page; the install carries on.');
+                setNotice(preview.switch
+                    ? 'Install started. The server is stopped, backed up, switched and reinstalled first. You can leave this page; the install carries on.'
+                    : 'Install started. The server is stopped and backed up first. You can leave this page; the install carries on.');
             })
             .catch((e) => setError(errorOf(e, 'Could not start the install.')))
             .finally(() => setBusy(null));
@@ -353,19 +366,21 @@ export default () => {
                                         {v.channel !== 'release' && <Chip>{v.channel}</Chip>}
                                         <span className="text-xs text-neutral-400">{v.loaders.map(ucfirst).join(', ')} · {v.game_versions.slice(0, 3).join(', ')}</span>
                                         {s?.installed?.project_id === pack.id && s.installed.version_number === v.version_number && <Chip green>installed</Chip>}
-                                        {v.compatible ? (
-                                            <GhostButton style={{ marginLeft: 'auto' }} disabled={busy !== null} onClick={() => review(v)}>
-                                                {busy === `review-${v.id}` ? <><FontAwesomeIcon icon={faSpinner} spin /> Reading the pack…</> : 'Review'}
+                                        {!v.compatible && <span className="text-xs text-neutral-400" style={{ marginLeft: 'auto' }}>{v.reason}</span>}
+                                        {reviewable(v) && (
+                                            <GhostButton style={v.compatible ? { marginLeft: 'auto' } : undefined} disabled={busy !== null} onClick={() => review(v)}>
+                                                {busy === `review-${v.id}` ? <><FontAwesomeIcon icon={faSpinner} spin /> Reading the pack…</> : v.compatible ? 'Review' : 'Review (switches the server)'}
                                             </GhostButton>
-                                        ) : (
-                                            <span className="text-xs text-neutral-400" style={{ marginLeft: 'auto' }}>{v.reason}</span>
                                         )}
                                     </Row>
                                 ))}
                                 {versions.length === 0 && busy !== 'versions' && <p className="text-sm text-neutral-400">No versions with a server-installable .mrpack file.</p>}
                             </div>
                             {versions.length > 0 && !versions.some((v) => v.compatible) && (
-                                <p className="text-xs text-neutral-400 mt-2">None of this pack&apos;s versions are for {ucfirst(context.loader)} {context.minecraft}.</p>
+                                <p className="text-xs text-neutral-400 mt-2">
+                                    None of this pack&apos;s versions are for {ucfirst(context.loader)} {context.minecraft}.
+                                    {canSwitch ? ' Installing one switches the server to its loader and version.' : ''}
+                                </p>
                             )}
                         </>
                     ) : (
@@ -373,8 +388,10 @@ export default () => {
                             preview={preview}
                             confirmed={confirmed}
                             setConfirmed={setConfirmed}
+                            wipeConfirmed={wipeConfirmed}
+                            setWipeConfirmed={setWipeConfirmed}
                             busy={busy === 'install' || running}
-                            onBack={() => { setPreview(null); setConfirmed(false); }}
+                            onBack={() => { setPreview(null); setConfirmed(false); setWipeConfirmed(false); }}
                             onInstall={install}
                         />
                     )}
@@ -390,6 +407,12 @@ export default () => {
                             <option value="updated">Recently updated</option>
                             <option value="newest">Newest</option>
                         </Select>
+                        {canSwitch && (
+                            <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+                                <input type="checkbox" checked={anyVersion} onChange={(e) => setAnyVersion(e.currentTarget.checked)} />
+                                Other versions too
+                            </label>
+                        )}
                         {busy === 'search' && <FontAwesomeIcon icon={faSpinner} spin className="text-neutral-400" />}
                     </div>
                     <Grid>
@@ -411,7 +434,11 @@ export default () => {
                         </div>
                     )}
                     <p className="text-xs text-neutral-500 mt-4">
-                        Showing server packs for this server: {ucfirst(context.loader)} {context.minecraft}. For packs on another Minecraft version or loader, change it on the Versions tab first.
+                        {anyVersion
+                            ? `Showing server packs for every mod loader and Minecraft version. A pack for something other than ${ucfirst(context.loader)} ${context.minecraft} switches the server, which deletes everything on it.`
+                            : canSwitch
+                                ? `Showing server packs for this server: ${ucfirst(context.loader)} ${context.minecraft}. Tick "Other versions too" for packs on another Minecraft version or loader; installing one switches the server.`
+                                : `Showing server packs for this server: ${ucfirst(context.loader)} ${context.minecraft}. For packs on another Minecraft version or loader, the server has to be switched, which needs the Versions tab's permissions.`}
                     </p>
                 </Panel>
             )}
@@ -419,8 +446,9 @@ export default () => {
     );
 };
 
-const ReviewPanel = ({ preview: p, confirmed, setConfirmed, busy, onBack, onInstall }: {
-    preview: Preview; confirmed: boolean; setConfirmed: (v: boolean) => void; busy: boolean; onBack: () => void; onInstall: () => void;
+const ReviewPanel = ({ preview: p, confirmed, setConfirmed, wipeConfirmed, setWipeConfirmed, busy, onBack, onInstall }: {
+    preview: Preview; confirmed: boolean; setConfirmed: (v: boolean) => void; wipeConfirmed: boolean; setWipeConfirmed: (v: boolean) => void;
+    busy: boolean; onBack: () => void; onInstall: () => void;
 }) => {
     const c = p.counts;
 
@@ -434,7 +462,16 @@ const ReviewPanel = ({ preview: p, confirmed, setConfirmed, busy, onBack, onInst
 
             {p.blockers.map((b) => <Bad key={b}>{b}</Bad>)}
 
-            {p.current && (
+            {p.switch && (
+                <Bad>
+                    <strong>This switches the server:</strong> {ucfirst(p.switch.from.loader) || 'unknown loader'} {p.switch.from.minecraft || ''} &rarr;{' '}
+                    {ucfirst(p.requires.loader)} {p.requires.minecraft}{p.requires.loader_version ? `, loader ${p.requires.loader_version}` : ''} ({p.switch.egg_name} egg).
+                    {' '}Everything on the server is deleted first (worlds, configs, mods and plugins; only eula.txt is kept), then it is reinstalled and the pack goes on.
+                    The &quot;Pre-modpack&quot; backup is the way back.
+                </Bad>
+            )}
+
+            {p.current && !p.switch && (
                 <p className="text-sm text-neutral-300 mb-2">
                     {p.current.same_pack
                         ? `Updates ${p.current.name} from ${p.current.version_number} to ${p.version.version_number}.`
@@ -451,7 +488,7 @@ const ReviewPanel = ({ preview: p, confirmed, setConfirmed, busy, onBack, onInst
                 {c.remove > 0 && <li>Removes {plural(c.remove, 'file')} the previous pack version had.</li>}
                 {c.replace > 0 && <li>Replaces your own copies of {p.replace.map((r) => r.name).join(', ')} with the pack&apos;s.</li>}
                 {c.skipped > 0 && <li>Skips {plural(c.skipped, 'file')} that don&apos;t belong on a server (details below).</li>}
-                <li>Mods you added yourself stay installed.</li>
+                {!p.switch && <li>Mods you added yourself stay installed.</li>}
                 <li>
                     The server is stopped first and left stopped.{' '}
                     {p.backups === 'disabled'
@@ -477,7 +514,13 @@ const ReviewPanel = ({ preview: p, confirmed, setConfirmed, busy, onBack, onInst
                         <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.currentTarget.checked)} />
                         I understand the server will be stopped while the pack installs.
                     </label>
-                    <PrimaryButton className="mt-3" disabled={!confirmed || busy} onClick={onInstall}>
+                    {p.switch && (
+                        <label className="flex items-center gap-2 mt-2 text-sm cursor-pointer" style={{ color: 'rgb(248, 113, 113)' }}>
+                            <input type="checkbox" checked={wipeConfirmed} onChange={(e) => setWipeConfirmed(e.currentTarget.checked)} />
+                            I understand everything on the server is deleted, including its worlds.
+                        </label>
+                    )}
+                    <PrimaryButton className="mt-3" disabled={!confirmed || (!!p.switch && !wipeConfirmed) || busy} onClick={onInstall}>
                         {busy && <FontAwesomeIcon icon={faSpinner} spin />}
                         {p.current?.same_pack ? 'Update modpack' : 'Install modpack'}
                     </PrimaryButton>
