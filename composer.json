@@ -2,7 +2,7 @@
     "name": "pterodactyl-serversuite/serversuite",
     "description": "A mod management plugin for Pterodactyl and Pelican panels.",
     "type": "library",
-    "version": "0.17.3",
+    "version": "0.17.4",
     "license": "MIT",
     "authors": [
         {

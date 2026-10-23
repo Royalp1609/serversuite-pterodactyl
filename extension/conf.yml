@@ -2,7 +2,7 @@ info:
   name: "Server Suite"
   identifier: "serversuite"
   description: "A suite of server management modules for Pterodactyl: mod management (Modrinth, CurseForge, Hangar) and automated backup rotation, with more modules to come."
-  version: "0.17.3"
+  version: "0.17.4"
   target: "beta-2026-08"
   author: "You"
   icon: 'resources/icon.png'
