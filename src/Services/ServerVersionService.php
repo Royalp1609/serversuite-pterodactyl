@@ -214,11 +214,12 @@ class ServerVersionService
     }
 
     /**
-     * Pick the Docker image for a target version from the egg's ALLOWED list.
-     * Keeps the current image when it already satisfies the band (no needless
-     * churn on upgrades); otherwise picks the most modern allowed image still
-     * inside the band. Flags when nothing allowed fits (a hard blocker — the
-     * egg would need that image added).
+     * Pick the Docker image for a target version from the egg's ALLOWED list:
+     * the lowest Java inside the band, which is the Java Mojang ships for that
+     * version. Mods pin it: Cobblemon for 1.21.1 refuses to load on Java 25
+     * ("requires version 21"), seen on the test panel when a newer image was
+     * kept. The current image stays only when it is already that Java. Flags
+     * when nothing allowed fits (a hard blocker: the egg needs that image).
      *
      * @param  array<string,string> $allowed  label => image (egg docker_images)
      * @return array{resolved:?string,current:?string,current_java:?int,required:array{0:int,1:int},change:bool,allowed:bool,note:string}
@@ -230,13 +231,7 @@ class ServerVersionService
 
         $currentJava = $javaOf($currentImage);
 
-        if ($currentJava !== null && $currentJava >= $min && $currentJava <= $max) {
-            return ['resolved' => $currentImage, 'current' => $currentImage, 'current_java' => $currentJava,
-                    'required' => $band, 'change' => false, 'allowed' => true,
-                    'note' => "Current image (Java {$currentJava}) is compatible — no image change."];
-        }
-
-        // Candidate allowed images whose Java falls inside the band, most modern first.
+        // Candidate allowed images whose Java falls inside the band.
         $candidates = [];
         foreach ($allowed as $img) {
             $j = $javaOf($img);
@@ -251,8 +246,13 @@ class ServerVersionService
                     'note' => "This version needs Java {$min}" . ($max < 99 ? "–{$max}" : "+") . ", which isn't in the egg's allowed image list. Add a matching yolks image to the egg, or pick another version."];
         }
 
-        krsort($candidates);
+        ksort($candidates);
         $java = array_key_first($candidates);
+        if ($currentJava === $java) {
+            return ['resolved' => $currentImage, 'current' => $currentImage, 'current_java' => $currentJava,
+                    'required' => $band, 'change' => false, 'allowed' => true,
+                    'note' => "Current image (Java {$currentJava}) is the one for this version — no image change."];
+        }
 
         return ['resolved' => $candidates[$java], 'current' => $currentImage, 'current_java' => $currentJava,
                 'required' => $band, 'change' => true, 'allowed' => true,
