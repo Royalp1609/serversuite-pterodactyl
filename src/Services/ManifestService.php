@@ -68,6 +68,13 @@ class ManifestService
             $this->remove($mod);
         }
 
+        // The installed modpack's files went with them (#23). Not while an
+        // install runs: a modpack's own loader switch wipes the server too.
+        $pack = \ServerSuite\Models\Modpack::forServer($serverUuid);
+        if ($pack !== null && ! $pack->isRunning()) {
+            $pack->delete();
+        }
+
         return $mods->count();
     }
 

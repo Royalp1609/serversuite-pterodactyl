@@ -284,6 +284,7 @@ class ModpackInstaller
             $pack->progress_done++;
             $pack->failures = $failures;
             $pack->mergeState(['dirs' => $made]);
+            $pack->save();   // the tab polls this: "12 of 62 files"
 
             if (microtime(true) - $started > self::BUDGET) {
                 return 0;   // step() hands over to a fresh job

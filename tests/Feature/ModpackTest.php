@@ -612,3 +612,47 @@ it("waits out the panel's backup throttle instead of failing the install", funct
         ->and($calls)->toBe(2)
         ->and($pack->state['backup_attempts'])->toBe(1);
 });
+
+it('saves the file count as it goes, so the tab can show it', function () {
+    mpV1($this);
+    $seen = [];
+    $wings = new class extends FakeWings {
+        public ?\Closure $onPull = null;
+
+        public function pull(string $serverUuid, string $url, string $directory, ?string $filename = null, bool $foreground = true): void
+        {
+            ($this->onPull)?->__invoke();
+            parent::pull($serverUuid, $url, $directory, $filename, $foreground);
+        }
+    };
+    $wings->remote = $this->wings->remote;
+    $wings->onPull = function () use (&$seen) {
+        $p = Modpack::forServer('srv-mp');   // a fresh read, as the tab's poll does
+        if ($p?->phase === 'files') {
+            $seen[] = $p->progress_done;
+        }
+    };
+    $this->wings = $wings;
+    app()->instance(DaemonFileClient::class, $wings);
+
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+
+    expect($seen)->toBe([0, 1, 2]);
+});
+
+it('forgets the installed pack when the server is wiped, but not mid-install', function () {
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+
+    $pack = Modpack::forServer('srv-mp');
+    $pack->forceFill(['status' => Modpack::STATUS_INSTALLING])->save();
+    app(\ServerSuite\Services\ManifestService::class)->clearAll('srv-mp');
+    expect(Modpack::forServer('srv-mp'))->not->toBeNull('a running install switches the server itself');
+
+    $pack->forceFill(['status' => Modpack::STATUS_INSTALLED])->save();
+    app(\ServerSuite\Services\ManifestService::class)->clearAll('srv-mp');
+    expect(Modpack::forServer('srv-mp'))->toBeNull()
+        ->and(ServerMod::forServer('srv-mp')->count())->toBe(0);
+});
