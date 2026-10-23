@@ -125,7 +125,9 @@ class ModpackInstaller
 
                 return 10;
             }
-            if ($res->isFailed() && $res->reason === 'throttled' && ($state['backup_attempts'] ?? 0) < 10) {
+            // The panel's backup rate limit, or a backup already running: wait and try again.
+            // (The rotation service reports both as skipped, not failed.)
+            if (in_array($res->reason, ['throttled', 'backup_in_progress'], true) && ($state['backup_attempts'] ?? 0) < 10) {
                 $pack->mergeState(['backup_attempts' => ($state['backup_attempts'] ?? 0) + 1]);
 
                 return 60;

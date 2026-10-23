@@ -593,3 +593,22 @@ it("installing the same version again puts back the pack's files that went missi
     mpRun();
     expect($this->wings->files['/mods/a.jar'])->toBe('jar:mods/a.jar:v1');
 });
+
+it("waits out the panel's backup throttle instead of failing the install", function () {
+    // Seen on the test panel: a loader switch's backup a minute earlier hit
+    // the throttle, and the install failed at once.
+    mpV1($this);
+    $calls = 0;
+    $this->rotation->shouldReceive('backupNow')->andReturnUsing(function (string $uuid, string $name) use (&$calls) {
+        return ++$calls === 1
+            ? RotationResult::skipped('throttled')
+            : RotationResult::rotated(new BackupRef('b-1', $name, 0, false, false), [], 5);
+    });
+
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    $pack = mpRun();
+
+    expect($pack->status)->toBe(Modpack::STATUS_INSTALLED, (string) $pack->error)
+        ->and($calls)->toBe(2)
+        ->and($pack->state['backup_attempts'])->toBe(1);
+});
