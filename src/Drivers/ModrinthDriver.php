@@ -140,6 +140,133 @@ class ModrinthDriver extends AbstractDriver
     }
 
     // -------------------------------------------------------------------------
+    // Modpacks (#23)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Search modpacks that can run on a server (server_side required or
+     * optional; client-only packs are left out).
+     *
+     * @param string|string[]|null $loader one loader, or any of several
+     *
+     * @return ModResult[]
+     */
+    public function searchModpacks(string $query, int $limit = 24, int $offset = 0, ?string $sort = null, string|array|null $loader = null, ?string $gameVersion = null): array
+    {
+        $facets = [['project_type:modpack'], ['server_side:required', 'server_side:optional']];
+        if ($loader) {
+            $facets[] = array_map(fn ($l) => "categories:{$l}", (array) $loader);
+        }
+        if ($gameVersion) {
+            $facets[] = ["versions:{$gameVersion}"];
+        }
+        $index = in_array($sort, ['downloads', 'follows', 'newest', 'updated'], true) ? $sort : 'relevance';
+        $key = 'serversuite.modrinth.packs.' . md5($query . '|' . $limit . '|' . $offset . '|' . $index . '|' . implode(',', (array) $loader) . '|' . $gameVersion);
+
+        return Cache::remember($key, self::CACHE_TTL, function () use ($query, $facets, $limit, $offset, $index) {
+            $res = $this->http()->get('/search', [
+                'query' => $query, 'facets' => json_encode($facets),
+                'limit' => min($limit, 100), 'offset' => max($offset, 0), 'index' => $index,
+            ]);
+            if (! $res->successful()) {
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
+            }
+
+            return collect($res->json('hits', []))->map(fn (array $hit) => $this->hitToModResult($hit, 'modpack'))->all();
+        });
+    }
+
+    /**
+     * A modpack's versions, newest first, each with its .mrpack file.
+     *
+     * @return array<int, array{id: string, version_number: string, name: string, game_versions: string[], loaders: string[], channel: string, published_at: ?string, mrpack: ?array{url: string, size: int, sha1: ?string, filename: string}}>
+     */
+    public function modpackVersions(string $projectId): array
+    {
+        return Cache::remember('serversuite.modrinth.packversions.' . md5($projectId), self::CACHE_TTL, function () use ($projectId) {
+            $res = $this->http()->get('/project/' . rawurlencode($projectId) . '/version');
+            if (! $res->successful()) {
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
+            }
+
+            return collect((array) $res->json())->map(fn (array $v) => $this->packVersion($v))->values()->all();
+        });
+    }
+
+    /** One modpack version by id, or null. */
+    public function modpackVersion(string $versionId): ?array
+    {
+        $res = $this->http()->get('/version/' . rawurlencode($versionId));
+
+        return $res->successful() && is_array($res->json()) ? ($this->packVersion($res->json()) + ['project_id' => (string) $res->json('project_id')]) : null;
+    }
+
+    /**
+     * Identify files by SHA-1 in two requests (version_files, then projects).
+     *
+     * @param string[] $sha1s
+     * @return array<string, array{mod: ModResult, version: ModVersion}>  keyed by sha1
+     */
+    public function identifyFiles(array $sha1s): array
+    {
+        $sha1s = array_values(array_unique(array_filter($sha1s)));
+        if ($sha1s === []) {
+            return [];
+        }
+
+        $versions = [];
+        foreach (array_chunk($sha1s, 500) as $chunk) {
+            $res = $this->http()->post('/version_files', ['hashes' => $chunk, 'algorithm' => 'sha1']);
+            if ($res->successful()) {
+                $versions += (array) $res->json();
+            }
+        }
+
+        $projects = [];
+        $ids = array_values(array_unique(array_filter(array_column($versions, 'project_id'))));
+        foreach (array_chunk($ids, 100) as $chunk) {
+            $res = $this->http()->get('/projects', ['ids' => json_encode($chunk)]);
+            foreach ($res->successful() ? (array) $res->json() : [] as $p) {
+                $projects[$p['id']] = $this->projectToModResult($p);
+            }
+        }
+
+        $out = [];
+        foreach ($versions as $sha1 => $v) {
+            $mod = $projects[$v['project_id'] ?? ''] ?? null;
+            if ($mod !== null) {
+                $out[strtolower((string) $sha1)] = ['mod' => $mod, 'version' => $this->versionToModVersion($v)];
+            }
+        }
+
+        return $out;
+    }
+
+    /** @param array<string, mixed> $v */
+    private function packVersion(array $v): array
+    {
+        $files = (array) ($v['files'] ?? []);
+        $mrpack = collect($files)->first(fn ($f) => ($f['primary'] ?? false) && str_ends_with((string) ($f['filename'] ?? ''), '.mrpack'))
+            ?? collect($files)->first(fn ($f) => str_ends_with((string) ($f['filename'] ?? ''), '.mrpack'));
+
+        return [
+            'id'             => (string) $v['id'],
+            'version_number' => (string) ($v['version_number'] ?? ''),
+            'name'           => (string) ($v['name'] ?? ''),
+            'game_versions'  => (array) ($v['game_versions'] ?? []),
+            'loaders'        => (array) ($v['loaders'] ?? []),
+            'channel'        => in_array($v['version_type'] ?? '', ['beta', 'alpha'], true) ? $v['version_type'] : 'release',
+            'published_at'   => $v['date_published'] ?? null,
+            'mrpack'         => $mrpack ? [
+                'url'      => (string) $mrpack['url'],
+                'size'     => (int) ($mrpack['size'] ?? 0),
+                'sha1'     => isset($mrpack['hashes']['sha1']) ? strtolower((string) $mrpack['hashes']['sha1']) : null,
+                'filename' => (string) $mrpack['filename'],
+            ] : null,
+        ];
+    }
+
+    // -------------------------------------------------------------------------
     // Get a single project
     // -------------------------------------------------------------------------
 
@@ -259,7 +386,7 @@ class ModrinthDriver extends AbstractDriver
      * Map a /search hit to ModResult.
      * Search hits have a different shape from /project/{id} responses.
      */
-    private function hitToModResult(array $hit): ModResult
+    private function hitToModResult(array $hit, string $kind = 'mod'): ModResult
     {
         return new ModResult(
             source:       $this->key(),
@@ -270,7 +397,7 @@ class ModrinthDriver extends AbstractDriver
             author:       $hit['author'] ?? '',
             downloads:    (int) ($hit['downloads'] ?? 0),
             iconUrl:      $hit['icon_url'] ?? null,
-            pageUrl:      "https://modrinth.com/mod/{$hit['slug']}",
+            pageUrl:      "https://modrinth.com/{$kind}/{$hit['slug']}",
             loaders:      $this->extractLoaders($hit),
             gameVersions: $hit['versions'] ?? [],
             dependencies: [],  // not available in search results; fetched on get()

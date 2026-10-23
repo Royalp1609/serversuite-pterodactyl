@@ -57,6 +57,19 @@ is the same suite as a native Pelican plugin.
   27 October 2026) and GeyserMC's signaling; with a second allocation, older
   clients keep RakNet too. The card shows the address players join with.
 
+### Modpacks (server tab)
+- Install a whole **Modrinth modpack** (`.mrpack`) in one go, and update it
+  later as a pack. Only on Fabric, Quilt, Forge and NeoForge servers; search
+  shows packs with a build for the server's loader and Minecraft version.
+- Review first: what gets downloaded, which files are skipped (client-only, or
+  hosted somewhere the format doesn't allow), and what an update removes.
+- The server is stopped and a "Pre-modpack" backup is taken before anything
+  changes. Every file goes straight from its host to the server through Wings.
+  Runs on the panel's queue worker; progress shows on the tab.
+- Mods you added yourself stay; the pack's mods show a *modpack* badge.
+- The server must already run the pack's loader and Minecraft version (change
+  them on the **Versions** tab).
+
 ### Backups (server tab)
 - **Scheduled backups with rotation**: pick how often (6 hours to weekly) and
   optionally a **fixed hour** to run at. The oldest *unlocked* backup is removed
@@ -195,6 +208,7 @@ are hidden (the server checks every request too).
 |---|---|---|
 | Mods | `mods.read` | `mods.install`, `mods.update`, `mods.remove`; `mods.configure` to adopt or forget files found on disk |
 | Mods → Configs | `file.read-content` | `file.update` (the same file permissions as the File Manager) |
+| Modpacks | `mods.read` | installing or updating a pack needs `mods.install`, `mods.remove` and `control.stop` (it stops the server and replaces mod files) |
 | Backups | `backup.read` | `backup.create` (back up now, rename), `backup.delete` (delete, lock), `backup.restore`, `backup.download`; the schedule needs `backup.create` + `backup.delete` (rotation deletes the oldest) |
 | Versions | `startup.read` | switching version or loader needs `startup.update`, `startup.docker-image`, `settings.reinstall` and `backup.create`; the reset needs `settings.reinstall` + `file.delete` |
 | Properties | `file.read-content` | `file.update`; **Save and restart** also needs `control.restart`; resetting the world after a seed change needs `file.delete`, `control.stop` and `control.start` |

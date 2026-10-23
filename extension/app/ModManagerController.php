@@ -698,6 +698,7 @@ class ModManagerController extends Controller
             'has_update'        => $m->pendingUpdate !== null,
             'disabled'          => $m->disabled_at !== null,
             'available_version' => $m->pendingUpdate->available_version ?? null,
+            'from_modpack'      => $m->modpack_id !== null,
         ]);
 
         return response()->json(['data' => $mods]);
@@ -1409,6 +1410,104 @@ class ModManagerController extends Controller
         }
 
         return response()->json(['data' => $r]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Modpacks (#23): Modrinth .mrpack install and update
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/modpacks: whether packs fit this server, its loader/version, the pack and any running install */
+    public function modpacks(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $svc = app(\ServerSuite\Services\ModpackService::class);
+
+        return response()->json(['data' => [
+            'supported' => $svc->supports($srv),
+            'context'   => $svc->serverContext($srv),
+            'status'    => $svc->status($srv),
+        ]]);
+    }
+
+    /** GET /{server}/modpacks/search?query=&sort=&offset= : packs with a build for this server's loader and version */
+    public function modpacksSearch(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate([
+            'query'  => ['nullable', 'string', 'max:100'],
+            'sort'   => ['nullable', 'string', 'in:relevance,downloads,follows,newest,updated'],
+            'offset' => ['nullable', 'integer', 'min:0', 'max:10000'],
+        ]);
+
+        return $this->modpackCall($srv, fn ($svc) => $svc->search($srv, (string) ($data['query'] ?? ''), (int) ($data['offset'] ?? 0), 24, $data['sort'] ?? null));
+    }
+
+    /** GET /{server}/modpacks/{project}/versions : newest first, each marked compatible or not */
+    public function modpackVersions(Request $request, string $server, string $project): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        abort_unless(preg_match('/^[A-Za-z0-9_-]{1,64}$/', $project) === 1, 404);
+
+        return $this->modpackCall($srv, fn ($svc) => $svc->versions($project, $srv));
+    }
+
+    /** POST /{server}/modpacks/preview { project_id, version_id } : what installing would do */
+    public function modpackPreview(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate([
+            'project_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
+            'version_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
+        ]);
+
+        return $this->modpackCall($srv, function ($svc) use ($srv, $data) {
+            $p = $svc->preview($srv, $data['project_id'], $data['version_id']);
+            unset($p['plan']);   // stays on the server; start() rebuilds it
+
+            return $p;
+        });
+    }
+
+    /** POST /{server}/modpacks/install { project_id, version_id, confirmed } : stop, back up, install (queued) */
+    public function modpackInstall(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $data = $request->validate([
+            'project_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
+            'version_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
+            'confirmed'  => ['required', 'accepted'],
+        ]);
+
+        $res = $this->modpackCall($srv, function ($svc) use ($srv, $data, $request) {
+            $pack = $svc->start($srv, $data['project_id'], $data['version_id'], (int) $request->user()->id);
+            $this->audit($srv, 'modpack-started', ['pack' => $pack->target['name'] ?? null, 'version' => $pack->target['version_number'] ?? null]);
+
+            return $svc->status($srv);
+        });
+
+        return $res->getStatusCode() === 200 ? $res->setStatusCode(202) : $res;
+    }
+
+    /** Modpack endpoints only work on a server a pack can run on; refusals come back as 422. */
+    private function modpackCall(Server $srv, callable $fn): JsonResponse
+    {
+        $svc = app(\ServerSuite\Services\ModpackService::class);
+        if (! $svc->supports($srv)) {
+            return response()->json(['error' => 'Modpacks need a Fabric, Quilt, Forge or NeoForge server. Change the loader on the Versions tab first.'], 422);
+        }
+
+        try {
+            return response()->json(['data' => $fn($svc)]);
+        } catch (\ServerSuite\Exceptions\ModpackException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        } catch (\ServerSuite\Exceptions\RepositoryException $e) {
+            return response()->json(['error' => 'Modrinth did not answer: ' . $e->getMessage()], 502);
+        }
     }
 
     // -------------------------------------------------------------------------

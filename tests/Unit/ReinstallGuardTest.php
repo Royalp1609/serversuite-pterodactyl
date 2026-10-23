@@ -72,6 +72,18 @@ function recordingDaemon(): DaemonFileClient
         public function rename(string $serverUuid, string $root, string $from, string $to): void
         {
         }
+
+        public function decompress(string $serverUuid, string $directory, string $file): void
+        {
+        }
+
+        public function makeDirectory(string $serverUuid, string $path): void
+        {
+        }
+
+        public function chmod(string $serverUuid, string $directory, array $modes): void
+        {
+        }
     };
 }
 

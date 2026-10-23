@@ -78,6 +78,18 @@ Route::post('/{server}/properties', [ModManagerController::class, 'propertiesSav
 Route::post('/{server}/properties/reset-world', [ModManagerController::class, 'propertiesResetWorld'])
     ->name('extension.serversuite.properties-reset-world');
 
+// Modpacks (#23): Modrinth .mrpack install and update.
+Route::get('/{server}/modpacks', [ModManagerController::class, 'modpacks'])
+    ->name('extension.serversuite.modpacks');
+Route::get('/{server}/modpacks/search', [ModManagerController::class, 'modpacksSearch'])
+    ->name('extension.serversuite.modpacks-search');
+Route::get('/{server}/modpacks/{project}/versions', [ModManagerController::class, 'modpackVersions'])
+    ->name('extension.serversuite.modpack-versions');
+Route::post('/{server}/modpacks/preview', [ModManagerController::class, 'modpackPreview'])
+    ->name('extension.serversuite.modpack-preview');
+Route::post('/{server}/modpacks/install', [ModManagerController::class, 'modpackInstall'])
+    ->name('extension.serversuite.modpack-install');
+
 // Players (#27): whitelist, ops and bans.
 Route::get('/{server}/players', [ModManagerController::class, 'players'])
     ->name('extension.serversuite.players');

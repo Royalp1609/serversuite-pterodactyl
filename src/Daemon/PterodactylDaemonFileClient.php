@@ -15,6 +15,10 @@ use ServerSuite\Exceptions\DeliveryException;
  *   getDirectory(string $path): array
  *   deleteFiles(?string $root, array $files): ResponseInterface
  *   pull(string $url, ?string $directory, array $params = []): ResponseInterface
+ *     (we send the same request through getHttpClient() for a longer timeout)
+ *   decompressFile(?string $root, string $file): ResponseInterface
+ *   createDirectory(string $name, string $path): ResponseInterface
+ *   chmodFiles(?string $root, array $files): ResponseInterface
  *
  * We reference these classes by fully-qualified string and resolve via the
  * container, so this file can exist in the package without hard-importing
@@ -36,20 +40,22 @@ class PterodactylDaemonFileClient implements DaemonFileClient
     ): void {
         $repo = $this->repoForServer($serverUuid);
 
-        $params = [
-            'directory'  => $directory,
-            'foreground' => $foreground,
-        ];
-
-        if ($filename !== null) {
-            $params['filename'] = $filename;
-        }
+        // Same request as DaemonFileRepository::pull(), with its own timeout:
+        // a foreground pull holds the request open until Wings has the whole
+        // file, and the panel's default (GUZZLE_TIMEOUT, 15s) cut big files
+        // off mid-download (cURL error 28). Modpacks pull whole .mrpacks (#23).
+        $timeout = $foreground ? max(30, (int) config('serversuite.delivery.pull_timeout', 600)) : (int) config('pterodactyl.guzzle.timeout', 15);
 
         try {
-            // Pterodactyl's pull signature: pull(string $url, ?string $directory, array $params = [])
-            // We pass $directory both positionally and in params for cross-version safety;
-            // Wings reads the JSON body keys (url, directory, filename, foreground).
-            $repo->pull($url, $directory, $params);
+            $repo->getHttpClient()->post(sprintf('/api/servers/%s/files/pull', $serverUuid), [
+                'json' => array_filter([
+                    'url'        => $url,
+                    'root'       => $directory,
+                    'file_name'  => $filename,
+                    'foreground' => $foreground ?: null,
+                ], static fn ($v) => $v !== null),
+                'timeout' => $timeout,
+            ]);
         } catch (\Throwable $e) {
             throw DeliveryException::daemonError($e->getMessage(), $e);
         }
@@ -155,6 +161,47 @@ class PterodactylDaemonFileClient implements DaemonFileClient
             $this->repoForServer($serverUuid)->renameFiles($root, [['from' => $from, 'to' => $to]]);
         } catch (\Throwable $e) {
             throw DeliveryException::daemonError('rename failed: ' . $e->getMessage(), $e);
+        }
+    }
+
+    public function decompress(string $serverUuid, string $directory, string $file): void
+    {
+        try {
+            // Pterodactyl's client waits up to 15 minutes for big archives.
+            $this->repoForServer($serverUuid)->decompressFile($directory, $file);
+        } catch (\Throwable $e) {
+            throw DeliveryException::daemonError('decompress failed: ' . $e->getMessage(), $e);
+        }
+    }
+
+    public function makeDirectory(string $serverUuid, string $path): void
+    {
+        $path = '/' . trim($path, '/');
+        if ($path === '/') {
+            return;
+        }
+
+        try {
+            // Wings creates parents and doesn't mind an existing folder.
+            $this->repoForServer($serverUuid)->createDirectory(basename($path), dirname($path));
+        } catch (\Throwable $e) {
+            throw DeliveryException::daemonError('create-directory failed: ' . $e->getMessage(), $e);
+        }
+    }
+
+    public function chmod(string $serverUuid, string $directory, array $modes): void
+    {
+        if ($modes === []) {
+            return;
+        }
+
+        try {
+            $this->repoForServer($serverUuid)->chmodFiles($directory, array_map(
+                fn ($name, $mode) => ['file' => (string) $name, 'mode' => (string) $mode],
+                array_keys($modes), $modes,
+            ));
+        } catch (\Throwable $e) {
+            throw DeliveryException::daemonError('chmod failed: ' . $e->getMessage(), $e);
         }
     }
 
