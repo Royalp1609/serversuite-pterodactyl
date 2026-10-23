@@ -36,6 +36,7 @@ return [
             'backup-unlocked' => 'Unlocked a backup',
             'backup-deleted' => 'Deleted a backup',
             'backup-restored' => 'Restored a backup',
+            'mods-restored' => 'Restored backup :backup: mod list updated (:back back, :gone gone)',
             'backup-downloaded' => 'Downloaded a backup',
             'modpack-started' => 'Started installing the modpack :pack :version',
             'modpack-installed' => 'Installed the modpack :pack :version (:files files, :failed failed)',

@@ -129,6 +129,7 @@ class BackupRotationService
         } catch (BackupException $e) {
             return $this->handleCreateFailure($serverUuid, $name, $e, $evicted, $effectiveKeep);
         }
+        $this->saveModList($serverUuid, $created, $all);
 
         // ---- Phase C: post-create trim, at most one, only if we didn't evict ----
         if (empty($evicted)) {
@@ -186,6 +187,7 @@ class BackupRotationService
         } catch (BackupException $e2) {
             return RotationResult::failed('limit_reached_retry', $e2->getMessage(), $evicted);
         }
+        $this->saveModList($serverUuid, $created, $successful);
 
         return RotationResult::rotated($created, $evicted, $effectiveKeep);
     }
@@ -235,6 +237,7 @@ class BackupRotationService
     {
         try {
             $this->ops->deleteBackup($serverUuid, $victim->uuid);
+            app(RestoreSyncService::class)->forget($victim->uuid);
 
             return null;
         } catch (BackupException $e) {
@@ -243,6 +246,23 @@ class BackupRotationService
                 'locked'    => RotationResult::skipped('no_evictable_at_limit'),
                 default     => RotationResult::failed('evict_failed', $e->getMessage()),
             };
+        }
+    }
+
+    /**
+     * Save the mod list with the new backup, so restoring it can put the
+     * list back (#60), and drop lists whose backup is gone. Never fails the
+     * backup.
+     *
+     * @param BackupRef[] $known the server's backups before this one
+     */
+    private function saveModList(string $serverUuid, BackupRef $created, array $known): void
+    {
+        try {
+            $sync = app(RestoreSyncService::class);
+            $sync->snapshot($serverUuid, $created->uuid);
+            $sync->prune($serverUuid, array_merge([$created->uuid], array_map(fn (BackupRef $b) => $b->uuid, $known)));
+        } catch (\Throwable) {
         }
     }
 

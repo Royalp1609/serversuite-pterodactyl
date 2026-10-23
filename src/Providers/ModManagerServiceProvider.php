@@ -137,6 +137,18 @@ class ModManagerServiceProvider extends ServiceProvider
             });
         });
 
+        // A backup restore finished (#60): status goes from restoring_backup
+        // to null, however the restore was started.
+        $server::updated(function ($s) {
+            if (! $s->wasChanged('status') || $s->getOriginal('status') !== 'restoring_backup' || $s->status !== null) {
+                return;
+            }
+            $uuid = (string) $s->uuid;
+            DB::afterCommit(function () use ($uuid) {
+                \ServerSuite\Jobs\SyncAfterRestoreJob::dispatch($uuid)->delay(now()->addSeconds(10));
+            });
+        });
+
         $server::updated(function ($s) {
             if (! $s->wasChanged('allocation_id')) {
                 return;

@@ -36,6 +36,12 @@ Route::post('/{server}/prechange', [ModManagerController::class, 'prechange'])
 Route::get('/{server}/prechange/{token}', [ModManagerController::class, 'prechangeState'])
     ->where('token', '[a-f0-9]{32}')->name('extension.serversuite.prechange-state');
 
+// After a backup restore (#60): what changed in the mod list.
+Route::get('/{server}/restore-sync', [ModManagerController::class, 'restoreSync'])
+    ->name('extension.serversuite.restore-sync');
+Route::post('/{server}/restore-sync/dismiss', [ModManagerController::class, 'restoreSyncDismiss'])
+    ->name('extension.serversuite.restore-sync-dismiss');
+
 // Crash help (#25)
 Route::get('/{server}/crash', [ModManagerController::class, 'crash'])
     ->name('extension.serversuite.crash');

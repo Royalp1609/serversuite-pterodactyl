@@ -4,6 +4,7 @@ import ConfigsPanel from './ConfigsPanel';
 import { getClearance } from './prechange';
 import { BackupChoice, BackupPromptHost } from './BackupPrompt';
 import CrashCard from './CrashCard';
+import RestoreBanner from './RestoreBanner';
 import CrossplayCard from './CrossplayCard';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
@@ -879,6 +880,7 @@ export default () => {
                         </div>
                     </Panel>
 
+                    <RestoreBanner base={base} refreshKey={installed.length} onChanged={loadInstalled} onReconcile={openReconcile} />
                     <CrashCard base={base} refreshKey={installed.length} onChanged={loadInstalled} />
                     <CrossplayCard base={base} onChanged={loadInstalled} />
                     {preChangeStatus && (

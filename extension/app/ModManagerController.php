@@ -1084,6 +1084,7 @@ class ModManagerController extends Controller
         } catch (BackupException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
+        app(\ServerSuite\Services\RestoreSyncService::class)->forget($backup);
 
         $this->audit($srv, 'backup-deleted', ['backup' => $backup]);
         return response()->json(['data' => ['ok' => true]]);
@@ -1131,6 +1132,8 @@ class ModManagerController extends Controller
         } catch (BackupException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
+        // When Wings finishes, the mod list is brought back in line (#60).
+        app(\ServerSuite\Services\RestoreSyncService::class)->noteRestore($srv->uuid, $backup, (bool) ($data['truncate'] ?? false));
 
         // Re-align the server's version to the version stamped in the backup's
         // name, so the restored world matches the server's version settings.
@@ -1147,6 +1150,25 @@ class ModManagerController extends Controller
 
         $this->audit($srv, 'backup-restored', ['backup' => $backup, 'truncate' => (bool) ($data['truncate'] ?? false)]);
         return response()->json(['data' => ['ok' => true, 'aligned' => $aligned]]);
+    }
+
+    /** GET /{server}/restore-sync: what the last backup restore changed in the mod list (#60), or null */
+    public function restoreSync(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => app(\ServerSuite\Services\RestoreSyncService::class)->lastResult($srv->uuid)]);
+    }
+
+    /** POST /{server}/restore-sync/dismiss: hide the banner */
+    public function restoreSyncDismiss(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        app(\ServerSuite\Services\RestoreSyncService::class)->dismiss($srv->uuid);
+
+        return response()->json(['data' => ['ok' => true]]);
     }
 
     // -------------------------------------------------------------------------
