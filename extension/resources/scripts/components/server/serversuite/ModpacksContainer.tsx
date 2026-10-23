@@ -9,7 +9,7 @@ import styled from 'styled-components/macro';
 
 /*
  * Server Suite — Modpacks tab (#23).
- * Search Modrinth packs that fit this server, review a version, install it,
+ * Search Modrinth or CurseForge (with the panel's API key) packs that fit this server, review a version, install it,
  * follow the progress, and update it later. The install runs as a queued
  * job on the panel (ModpackInstaller): stop the server, "Pre-modpack"
  * backup, Wings fetches the pack and every file, then the pack's configs.
@@ -113,7 +113,7 @@ interface Status {
     failures: Array<{ path: string; reason: string }>;
     error: string | null;
     target: { name: string | null; version_number: string | null };
-    installed: { project_id: string; name: string; version_number: string; icon_url: string | null; minecraft: string | null; loader: string | null; at: string | null } | null;
+    installed: { project_id: string; source: Source; name: string; version_number: string; icon_url: string | null; minecraft: string | null; loader: string | null; at: string | null } | null;
 }
 interface Hit { id: string; name: string; author: string; description: string; downloads: number; icon_url: string | null; page_url: string | null }
 interface Version { id: string; version_number: string; channel: string; loaders: string[]; game_versions: string[]; compatible: boolean; reason: string | null }
@@ -131,6 +131,7 @@ interface Preview {
     backups: 'yes' | 'disabled';
 }
 interface Pack { id: string; name: string; icon: string | null; url: string | null }
+type Source = 'modrinth' | 'curseforge';
 
 const PAGE = 24;
 const errorOf = (e: any, fallback: string) => e?.response?.data?.error || e?.response?.data?.message || fallback;
@@ -166,6 +167,8 @@ export default () => {
     const [wipeConfirmed, setWipeConfirmed] = useState(false);
     const [canSwitch, setCanSwitch] = useState(false);
     const [anyVersion, setAnyVersion] = useState(false);
+    const [sources, setSources] = useState<Partial<Record<Source, string>>>({});
+    const [source, setSource] = useState<Source>('modrinth');
     const [busy, setBusy] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
@@ -182,6 +185,7 @@ export default () => {
                 setContext(d.context);
                 setStatus(d.status);
                 setCanSwitch(!!d.can_switch);
+                setSources(d.sources || {});
                 const nowRunning = d.status?.status === 'installing';
                 if (wasRunning.current && !nowRunning) {
                     setNotice(d.status?.status === 'installed'
@@ -206,7 +210,7 @@ export default () => {
     const search = useCallback((offset: number) => {
         if (!uuid) return;
         setBusy('search');
-        http.get(`${base}/search`, { params: { query, sort, offset, any_version: anyVersion ? 1 : 0 } })
+        http.get(`${base}/search`, { params: { query, sort, offset, any_version: anyVersion ? 1 : 0, source } })
             .then((res) => {
                 const hits: Hit[] = res.data.data;
                 setResults((cur) => (offset > 0 ? [...cur, ...hits] : hits));
@@ -214,7 +218,7 @@ export default () => {
             })
             .catch((e) => { if (offset === 0) setResults([]); setHasMore(false); setError(errorOf(e, 'Could not search modpacks.')); })
             .finally(() => setBusy(null));
-    }, [base, uuid, query, sort, anyVersion]);
+    }, [base, uuid, query, sort, anyVersion, source]);
 
     useEffect(() => {
         if (!supported) return;
@@ -222,7 +226,8 @@ export default () => {
         return () => clearTimeout(t);
     }, [supported, search]);
 
-    const open = (p: Pack) => {
+    const open = (p: Pack, from: Source = source) => {
+        setSource(from);
         setPack(p);
         setPreview(null);
         setConfirmed(false);
@@ -230,7 +235,7 @@ export default () => {
         setVersions([]);
         setError(null);
         setBusy('versions');
-        http.get(`${base}/${encodeURIComponent(p.id)}/versions`)
+        http.get(`${base}/${encodeURIComponent(p.id)}/versions`, { params: { source: from } })
             .then((res) => setVersions(res.data.data))
             .catch((e) => setError(errorOf(e, 'Could not load versions.')))
             .finally(() => setBusy(null));
@@ -243,7 +248,7 @@ export default () => {
         if (!pack || !reviewable(v)) return;
         setBusy(`review-${v.id}`);
         setError(null);
-        http.post(`${base}/preview`, { project_id: pack.id, version_id: v.id })
+        http.post(`${base}/preview`, { project_id: pack.id, version_id: v.id, source })
             .then((res) => { setPreview(res.data.data); setConfirmed(false); setWipeConfirmed(false); })
             .catch((e) => setError(errorOf(e, 'Could not read the modpack.')))
             .finally(() => setBusy(null));
@@ -253,7 +258,7 @@ export default () => {
         if (!pack || !preview || !confirmed || (preview.switch && !wipeConfirmed)) return;
         setBusy('install');
         setError(null);
-        http.post(`${base}/install`, { project_id: pack.id, version_id: preview.version.id, confirmed: true, wipe_confirmed: !!preview.switch && wipeConfirmed })
+        http.post(`${base}/install`, { project_id: pack.id, version_id: preview.version.id, confirmed: true, wipe_confirmed: !!preview.switch && wipeConfirmed, source })
             .then((res) => {
                 setStatus(res.data.data);
                 wasRunning.current = true;
@@ -328,7 +333,7 @@ export default () => {
                                     {ucfirst(s.installed.loader)} {s.installed.minecraft}{s.installed.at ? ` · installed ${new Date(s.installed.at).toLocaleString()}` : ''}
                                 </div>
                             </div>
-                            <GhostButton style={{ marginLeft: 'auto' }} onClick={() => s.installed && open({ id: s.installed.project_id, name: s.installed.name, icon: s.installed.icon_url, url: null })}>
+                            <GhostButton style={{ marginLeft: 'auto' }} onClick={() => s.installed && open({ id: s.installed.project_id, name: s.installed.name, icon: s.installed.icon_url, url: null }, sources[s.installed.source] ? s.installed.source : source)}>
                                 Versions and updates
                             </GhostButton>
                         </div>
@@ -351,7 +356,7 @@ export default () => {
                         {pack.icon ? <Icon src={pack.icon} alt="" /> : <NoIcon />}
                         <div>
                             <h3 className="font-semibold text-white">{pack.name}</h3>
-                            {pack.url && <a href={pack.url} target="_blank" rel="noopener noreferrer" className="text-xs text-neutral-400">View on Modrinth <FontAwesomeIcon icon={faExternalLinkAlt} /></a>}
+                            {pack.url && <a href={pack.url} target="_blank" rel="noopener noreferrer" className="text-xs text-neutral-400">View on {source === 'curseforge' ? 'CurseForge' : 'Modrinth'} <FontAwesomeIcon icon={faExternalLinkAlt} /></a>}
                         </div>
                         <GhostButton style={{ marginLeft: 'auto' }} onClick={() => { setPack(null); setPreview(null); }}><FontAwesomeIcon icon={faArrowLeft} /> Back</GhostButton>
                     </div>
@@ -374,7 +379,7 @@ export default () => {
                                         )}
                                     </Row>
                                 ))}
-                                {versions.length === 0 && busy !== 'versions' && <p className="text-sm text-neutral-400">No versions with a server-installable .mrpack file.</p>}
+                                {versions.length === 0 && busy !== 'versions' && <p className="text-sm text-neutral-400">No versions with a pack file other apps may download.</p>}
                             </div>
                             {versions.length > 0 && !versions.some((v) => v.compatible) && (
                                 <p className="text-xs text-neutral-400 mt-2">
@@ -399,7 +404,16 @@ export default () => {
             ) : (
                 <Panel>
                     <div className="flex flex-wrap items-center gap-2 mb-4">
-                        <Input value={query} placeholder="Search Modrinth modpacks…" onChange={(e) => setQuery(e.currentTarget.value)} />
+                        {Object.keys(sources).length > 1 && (
+                            <div className="flex gap-1">
+                                {(Object.keys(sources) as Source[]).map((k) => (
+                                    <GhostButton key={k} style={k === source ? { borderColor: 'rgb(99, 102, 241)', color: 'white' } : undefined} onClick={() => setSource(k)}>
+                                        {sources[k]}
+                                    </GhostButton>
+                                ))}
+                            </div>
+                        )}
+                        <Input value={query} placeholder={`Search ${sources[source] || 'Modrinth'} modpacks…`} onChange={(e) => setQuery(e.currentTarget.value)} />
                         <Select value={sort} onChange={(e) => setSort(e.currentTarget.value)}>
                             <option value="relevance">Relevance</option>
                             <option value="downloads">Downloads</option>
@@ -428,6 +442,9 @@ export default () => {
                         ))}
                     </Grid>
                     {results.length === 0 && busy !== 'search' && <p className="text-sm text-neutral-400">No modpacks found.</p>}
+                    {!sources.curseforge && (
+                        <p className="text-xs text-neutral-500 mt-4">CurseForge packs need a CurseForge API key on this panel; a panel admin can add one.</p>
+                    )}
                     {hasMore && (
                         <div className="mt-4 flex justify-center">
                             <GhostButton disabled={busy !== null} onClick={() => search(results.length)}>Load more</GhostButton>
@@ -487,7 +504,7 @@ const ReviewPanel = ({ preview: p, confirmed, setConfirmed, wipeConfirmed, setWi
                 {c.overrides > 0 && <li>Applies the pack&apos;s {plural(c.overrides, 'config file')} (overwriting files with the same name).</li>}
                 {c.remove > 0 && <li>Removes {plural(c.remove, 'file')} the previous pack version had.</li>}
                 {c.replace > 0 && <li>Replaces your own copies of {p.replace.map((r) => r.name).join(', ')} with the pack&apos;s.</li>}
-                {c.skipped > 0 && <li>Skips {plural(c.skipped, 'file')} that don&apos;t belong on a server (details below).</li>}
+                {c.skipped > 0 && <li>Skips {plural(c.skipped, 'file')} that don&apos;t belong on a server or can&apos;t be downloaded by other apps (details below).</li>}
                 {!p.switch && <li>Mods you added yourself stay installed.</li>}
                 <li>
                     The server is stopped first and left stopped.{' '}

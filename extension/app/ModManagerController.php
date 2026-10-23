@@ -1535,6 +1535,7 @@ class ModManagerController extends Controller
             'context'    => $svc->serverContext($srv),
             'status'     => $svc->status($srv),
             'can_switch' => $this->canSwitchForModpack($request, $srv),
+            'sources'    => $svc->sources(),
         ]]);
     }
 
@@ -1554,10 +1555,11 @@ class ModManagerController extends Controller
             'sort'   => ['nullable', 'string', 'in:relevance,downloads,follows,newest,updated'],
             'offset' => ['nullable', 'integer', 'min:0', 'max:10000'],
             'any_version' => ['nullable', 'boolean'],
+            'source' => self::MODPACK_SOURCE,
         ]);
         $any = ! empty($data['any_version']) && $this->canSwitchForModpack($request, $srv);
 
-        return $this->modpackCall($srv, fn ($svc) => $svc->search($srv, (string) ($data['query'] ?? ''), (int) ($data['offset'] ?? 0), 24, $data['sort'] ?? null, $any));
+        return $this->modpackCall($srv, fn ($svc) => $svc->search($srv, (string) ($data['query'] ?? ''), (int) ($data['offset'] ?? 0), 24, $data['sort'] ?? null, $any, $data['source'] ?? 'modrinth'));
     }
 
     /** GET /{server}/modpacks/{project}/versions : newest first, each marked compatible or not */
@@ -1566,8 +1568,9 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         abort_unless(preg_match('/^[A-Za-z0-9_-]{1,64}$/', $project) === 1, 404);
+        $data = $request->validate(['source' => self::MODPACK_SOURCE]);
 
-        return $this->modpackCall($srv, fn ($svc) => $svc->versions($project, $srv));
+        return $this->modpackCall($srv, fn ($svc) => $svc->versions($project, $srv, $data['source'] ?? 'modrinth'));
     }
 
     /** POST /{server}/modpacks/preview { project_id, version_id } : what installing would do */
@@ -1578,10 +1581,11 @@ class ModManagerController extends Controller
         $data = $request->validate([
             'project_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
             'version_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
+            'source'     => self::MODPACK_SOURCE,
         ]);
 
         return $this->modpackCall($srv, function ($svc) use ($srv, $data, $request) {
-            $p = $svc->preview($srv, $data['project_id'], $data['version_id'], $this->canSwitchForModpack($request, $srv));
+            $p = $svc->preview($srv, $data['project_id'], $data['version_id'], $this->canSwitchForModpack($request, $srv), $data['source'] ?? 'modrinth');
             unset($p['plan']);   // stays on the server; start() rebuilds it
 
             return $p;
@@ -1598,11 +1602,12 @@ class ModManagerController extends Controller
             'version_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
             'confirmed'  => ['required', 'accepted'],
             'wipe_confirmed' => ['nullable', 'boolean'],
+            'source'     => self::MODPACK_SOURCE,
         ]);
 
         $res = $this->modpackCall($srv, function ($svc) use ($srv, $data, $request) {
             $pack = $svc->start($srv, $data['project_id'], $data['version_id'], (int) $request->user()->id,
-                $this->canSwitchForModpack($request, $srv), ! empty($data['wipe_confirmed']));
+                $this->canSwitchForModpack($request, $srv), ! empty($data['wipe_confirmed']), $data['source'] ?? 'modrinth');
             $this->audit($srv, 'modpack-started', ['pack' => $pack->target['name'] ?? null, 'version' => $pack->target['version_number'] ?? null]);
 
             return $svc->status($srv);
@@ -1610,6 +1615,9 @@ class ModManagerController extends Controller
 
         return $res->getStatusCode() === 200 ? $res->setStatusCode(202) : $res;
     }
+
+    /** Validation for a modpack request's source (#23 stage 3). */
+    private const MODPACK_SOURCE = ['nullable', 'string', 'in:modrinth,curseforge'];
 
     /** Modpack endpoints only work on a server a pack can run on; refusals come back as 422. */
     private function modpackCall(Server $srv, callable $fn): JsonResponse
@@ -1624,7 +1632,7 @@ class ModManagerController extends Controller
         } catch (\ServerSuite\Exceptions\ModpackException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (\ServerSuite\Exceptions\RepositoryException $e) {
-            return response()->json(['error' => 'Modrinth did not answer: ' . $e->getMessage()], 502);
+            return response()->json(['error' => 'The modpack site did not answer: ' . $e->getMessage()], 502);
         }
     }
 

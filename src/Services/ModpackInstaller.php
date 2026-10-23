@@ -220,7 +220,7 @@ class ModpackInstaller
         $this->delivery->deliverFile($uuid, (string) $mrpack['url'], self::STAGING, 'pack.mrpack', (int) ($mrpack['size'] ?? 0));
         $this->daemon->decompress($uuid, self::STAGING, 'pack.mrpack');
 
-        $index = $this->daemon->readFile($uuid, self::STAGING . '/modrinth.index.json', 16 * 1048576);
+        $index = $this->daemon->readFile($uuid, self::STAGING . '/' . ($pack->plan['index_file'] ?? 'modrinth.index.json'), 16 * 1048576);
         if ($index === null || ! hash_equals((string) ($pack->plan['index_sha1'] ?? ''), sha1($index))) {
             throw new ModpackException('The modpack Wings downloaded is not the one you confirmed. Nothing was changed.');
         }
@@ -299,7 +299,7 @@ class ModpackInstaller
         $present = collect($this->daemon->listDirectory($uuid, self::STAGING))->pluck('name')->all();
 
         $placed = [];
-        foreach (['overrides', 'server-overrides'] as $folder) {
+        foreach ((array) ($pack->plan['override_dirs'] ?? ['overrides', 'server-overrides']) as $folder) {
             if (in_array($folder, $present, true)) {
                 // Zips made on Windows often carry mode 000; the server couldn't read them.
                 $this->delivery->normalisePermissions($uuid, self::STAGING . '/' . $folder);
@@ -373,7 +373,7 @@ class ModpackInstaller
                 continue;
             }
             ServerMod::query()->updateOrCreate(
-                ['server_uuid' => $pack->server_uuid, 'source' => 'modrinth', 'source_id' => $mod['project_id']],
+                ['server_uuid' => $pack->server_uuid, 'source' => $plan['source'] ?? 'modrinth', 'source_id' => $mod['project_id']],
                 [
                     'mod_name'          => $mod['name'],
                     'mod_slug'          => $mod['slug'],
