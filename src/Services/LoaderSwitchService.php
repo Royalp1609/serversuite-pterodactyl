@@ -59,19 +59,20 @@ class LoaderSwitchService
 
     /**
      * Pick an image from the target egg's list for the version's Java band.
-     * Highest in-band Java wins (newest JVM that still satisfies the version's
-     * ceiling); falls back to the first listed image if nothing parses.
+     * The lowest in-band Java wins: the one Mojang ships for that version,
+     * which mods pin (Cobblemon for 1.21.1 refuses Java 25). Falls back to the
+     * first listed image if nothing parses.
      */
     public function resolveEggImage(object $targetEgg, string $mcVersion): ?string
     {
         [$min, $max] = $this->versions->requiredJavaBand($mcVersion);
 
         $best = null;
-        $bestJava = -1;
+        $bestJava = PHP_INT_MAX;
         foreach ((array) $targetEgg->docker_images as $label => $ref) {
             if (preg_match('/java[_ ]?(\d+)/i', $ref . ' ' . $label, $m)) {
                 $j = (int) $m[1];
-                if ($j >= $min && $j <= $max && $j > $bestJava) {
+                if ($j >= $min && $j <= $max && $j < $bestJava) {
                     $bestJava = $j;
                     $best = $ref;
                 }

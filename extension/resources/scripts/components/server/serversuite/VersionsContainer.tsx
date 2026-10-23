@@ -149,7 +149,6 @@ export default () => {
     const [loaderCurrent, setLoaderCurrent] = useState<string | null>(null);
     const [loaderTarget, setLoaderTarget] = useState<{ egg_id: number; loader: string } | null>(null);
     const [loaderVersion, setLoaderVersion] = useState('');
-    const [loaderBackup, setLoaderBackup] = useState(true);
     const [loaderConfirm, setLoaderConfirm] = useState('');
     const [loaderPhase, setLoaderPhase] = useState<'idle' | 'working' | 'done' | 'failed'>('idle');
     const [loaderMsg, setLoaderMsg] = useState('');
@@ -308,7 +307,6 @@ export default () => {
         if (!l) { setLoaderTarget(null); setLoaderPhase('idle'); setLoaderMsg(''); return; }
         setLoaderTarget({ egg_id: l.egg_id, loader: l.loader });
         setLoaderVersion(currentVer || '');
-        setLoaderBackup(true);
         setLoaderConfirm('');
         setLoaderPhase('idle');
         setLoaderMsg('');
@@ -320,14 +318,13 @@ export default () => {
         const body = { egg_id: loaderTarget.egg_id, version: loaderVersion.trim() || undefined, confirm_name: loaderConfirm.trim() };
         try {
             setLoaderPhase('working');
-            if (loaderBackup) {
-                setLoaderMsg('Taking a safety backup…');
-                const { data: bud } = await http.post(`${base}/backups/create`, { name: `Pre-loader ${loaderTarget.loader}` });
-                const bu = bud?.data?.created?.uuid;
-                if (!bu) throw new Error(bud?.data?.message || 'Could not create the safety backup — aborting.');
-                setLoaderMsg('Backing up — waiting for it to complete…');
-                await pollBackup(bu);
-            }
+            // Always: the panel refuses a loader switch without a completed backup.
+            setLoaderMsg('Taking a safety backup…');
+            const { data: bud } = await http.post(`${base}/backups/create`, { name: `Pre-loader ${loaderTarget.loader}` });
+            const bu = bud?.data?.created?.uuid;
+            if (!bu) throw new Error(bud?.data?.message || 'Could not create the safety backup — aborting.');
+            setLoaderMsg('Backing up — waiting for it to complete…');
+            await pollBackup(bu);
             setLoaderMsg('Stopping the server…');
             let r = await http.post(`${base}/loader-switch`, body);
             if (r.data.data?.status === 'stopping') {
@@ -343,7 +340,7 @@ export default () => {
             load();
         } catch (e: any) {
             setLoaderPhase('failed');
-            setLoaderMsg(e?.response?.data?.error || e?.message || 'The loader switch failed. Your backup (if taken) is safe.');
+            setLoaderMsg(e?.response?.data?.error || e?.message || 'The loader switch failed. Your backup is safe.');
         }
     };
 
@@ -557,13 +554,9 @@ export default () => {
                                     <Note style={{ marginTop: 12, marginBottom: 2 }}>Minecraft version for the new loader:</Note>
                                     <NameInput value={loaderVersion} onChange={(e) => setLoaderVersion(e.target.value)} placeholder="e.g. 1.21.1" />
 
-                                    <ToggleRow>
-                                        <input type="checkbox" checked={loaderBackup} onChange={(e) => setLoaderBackup(e.target.checked)} style={{ marginTop: 3 }} />
-                                        <span>
-                                            <strong tw="text-neutral-100">Take a backup first (recommended)</strong>
-                                            <Note style={{ marginTop: 2 }}>Saves everything before wiping, so you can restore if this was a mistake.</Note>
-                                        </span>
-                                    </ToggleRow>
+                                    <Note style={{ marginTop: 12 }}>
+                                        A full backup named “Pre-loader {loaderTarget.loader}” is taken and confirmed complete before anything is wiped.
+                                    </Note>
 
                                     <Note style={{ marginTop: 12 }}>Type the server name <strong tw="text-neutral-100">{serverName}</strong> to confirm:</Note>
                                     <NameInput value={loaderConfirm} onChange={(e) => setLoaderConfirm(e.target.value)} placeholder={serverName} />

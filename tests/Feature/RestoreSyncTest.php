@@ -190,7 +190,7 @@ it('queues the sync when a restore finishes, however it was started', function (
     Queue::fake();
     $this->server->forceFill(['status' => 'installing'])->save();
     $this->server->forceFill(['status' => null])->save();
-    Queue::assertNothingPushed();
+    Queue::assertNotPushed(SyncAfterRestoreJob::class);
 });
 
 /** The panel's activity tables, and a restore logged the way its client API logs one. */

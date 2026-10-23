@@ -137,6 +137,18 @@ class ModManagerServiceProvider extends ServiceProvider
             });
         });
 
+        // An install or reinstall finished, however it was started: make
+        // sure the startup finds a jar (Forge 26.x leaves no server.jar).
+        $server::updated(function ($s) {
+            if (! $s->wasChanged('status') || $s->getOriginal('status') !== 'installing' || $s->status !== null) {
+                return;
+            }
+            $uuid = (string) $s->uuid;
+            DB::afterCommit(function () use ($uuid) {
+                \ServerSuite\Jobs\SyncAfterInstallJob::dispatch($uuid);
+            });
+        });
+
         // A backup restore finished (#60): status goes from restoring_backup
         // to null, however the restore was started.
         $server::updated(function ($s) {
