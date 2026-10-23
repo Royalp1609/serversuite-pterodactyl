@@ -48,7 +48,7 @@ class ModpackService
             throw new ModpackException('Unknown modpack source.');
         }
         $driver = $this->repositories->driver($source);
-        if (! $driver->isAvailable()) {
+        if (! ($driver instanceof ModrinthDriver || $driver instanceof \ServerSuite\Drivers\CurseForgeDriver) || ! $driver->isAvailable()) {
             throw new ModpackException($source === 'curseforge'
                 ? 'CurseForge needs an API key on this panel (CURSEFORGE_API_KEY, or the admin setting).'
                 : 'Modrinth is turned off on this panel.');
