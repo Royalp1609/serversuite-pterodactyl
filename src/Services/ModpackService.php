@@ -237,10 +237,12 @@ class ModpackService
         // What changes on disk. A switch wipes the server first, so then
         // it's a fresh install: nothing is unchanged, replaced or removed.
         $old = $switch ? collect() : collect($current?->files ?? [])->keyBy('path');
+        $onDisk = $this->filesOnDisk($server->uuid, $old->keys()->all());
         $install = $unchanged = [];
         foreach ($index->installable() as $f) {
             $prev = $old->get($f['path']);
-            if ($prev !== null && ($prev['sha1'] ?? null) === $f['sha1']) {
+            // Same file as installed, and still there (else installing again repairs it).
+            if ($prev !== null && ($prev['sha1'] ?? null) === $f['sha1'] && isset($onDisk[$f['path']])) {
                 $unchanged[] = ['path' => $f['path'], 'sha1' => $f['sha1'], 'size' => $f['size'], 'kind' => 'download'];
             } else {
                 $install[] = ['path' => $f['path'], 'url' => $f['url'], 'size' => $f['size'], 'sha1' => $f['sha1']]
@@ -464,6 +466,33 @@ class ModpackService
         } finally {
             @unlink($tmp);
         }
+    }
+
+    /**
+     * Which of these server paths exist, one listing per folder. A folder
+     * that can't be listed counts as empty.
+     *
+     * @param string[] $paths
+     * @return array<string, true>
+     */
+    private function filesOnDisk(string $serverUuid, array $paths): array
+    {
+        $daemon = app(\ServerSuite\Contracts\DaemonFileClient::class);
+        $found = [];
+        foreach (collect($paths)->groupBy(fn ($p) => '/' . ltrim(dirname('/' . $p), '/')) as $dir => $inDir) {
+            try {
+                $names = collect($daemon->listDirectory($serverUuid, (string) $dir))->where('is_file', true)->pluck('name')->all();
+            } catch (\Throwable) {
+                $names = [];
+            }
+            foreach ($inDir as $p) {
+                if (in_array(basename($p), $names, true)) {
+                    $found[$p] = true;
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**
