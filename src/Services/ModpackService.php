@@ -19,15 +19,25 @@ use ServerSuite\Support\RepositoryManager;
  *
  * The preview downloads the .mrpack to the panel once (cached) to read its
  * index; the install itself has Wings fetch everything (ModpackInstaller).
- * The server must already run the pack's loader and Minecraft version; the
- * preview says what to switch to otherwise (switching for you is a follow-up).
+ * A pack for another loader or Minecraft version switches the server first
+ * (stage 2): wipe, change egg with the pack's loader version, reinstall. That
+ * needs the Versions tab's switch permissions and a second confirmation.
  */
 class ModpackService
 {
     public function __construct(
         protected RepositoryManager $repositories,
         protected LoaderDetectionService $detection,
+        protected EggManagerService $eggs,
     ) {}
+
+    /** Egg variable that pins each loader's version (the pelican-eggs Minecraft eggs; Quilt's egg has none). */
+    private const LOADER_VERSION_VARS = [
+        'fabric'   => 'LOADER_VERSION',
+        'quilt'    => 'LOADER_VERSION',
+        'forge'    => 'FORGE_VERSION',
+        'neoforge' => 'NEOFORGE_VERSION',
+    ];
 
     public function driver(): ModrinthDriver
     {
@@ -49,15 +59,23 @@ class ModpackService
     }
 
     /**
-     * Packs with a build for the server's loader and Minecraft version.
+     * Packs with a build for the server's loader and Minecraft version, or
+     * with $anyVersion, packs for any loader a switch can reach.
      *
      * @return array<int, array<string, mixed>>
      */
-    public function search(object $server, string $query, int $offset = 0, int $limit = 24, ?string $sort = null): array
+    public function search(object $server, string $query, int $offset = 0, int $limit = 24, ?string $sort = null, bool $anyVersion = false): array
     {
         $ctx = $this->serverContext($server);
+        [$loader, $mc] = $anyVersion ? [self::LOADERS, null] : [$ctx['loader'], $ctx['minecraft']];
 
-        return array_map(fn ($r) => $r->toArray(), $this->driver()->searchModpacks(trim($query), $limit, $offset, $sort, $ctx['loader'], $ctx['minecraft']));
+        return array_map(fn ($r) => $r->toArray(), $this->driver()->searchModpacks(trim($query), $limit, $offset, $sort, $loader, $mc));
+    }
+
+    /** The panel's egg for a loader slug, among the loader eggs the Versions tab offers (#36). */
+    public function eggFor(string $loader): ?array
+    {
+        return collect($this->eggs->minecraftLoaders())->firstWhere('loader', $loader);
     }
 
     /**
@@ -148,7 +166,7 @@ class ModpackService
      *
      * @throws ModpackException
      */
-    public function preview(object $server, string $projectId, string $versionId): array
+    public function preview(object $server, string $projectId, string $versionId, bool $canSwitch = false): array
     {
         $driver = $this->driver();
         $version = $driver->modpackVersion($versionId);
@@ -162,21 +180,39 @@ class ModpackService
         $current = Modpack::forServer($server->uuid);
 
         $blockers = [];
+        $switch = null;
         if ($index->loader === null) {
             $blockers[] = 'This pack has no mod loader (Fabric, Quilt, Forge or NeoForge), so it can\'t run as a modded server.';
         } elseif ($context['loader'] !== $index->loader || $context['minecraft'] !== $index->minecraft) {
-            $blockers[] = sprintf(
-                'This pack needs %s %s; the server runs %s %s. Switch it on the Versions tab first, then come back.',
+            $needs = sprintf('This pack needs %s %s; the server runs %s %s.',
                 ucfirst($index->loader), $index->minecraft,
-                $context['loader'] ? ucfirst($context['loader']) : 'an unknown loader', $context['minecraft'] ?? '(unknown version)',
-            );
+                $context['loader'] ? ucfirst($context['loader']) : 'an unknown loader', $context['minecraft'] ?? '(unknown version)');
+            $egg = $canSwitch ? $this->eggFor($index->loader) : null;
+            if (! $canSwitch) {
+                $blockers[] = $needs . ' Switching the server needs the permissions to change its version (Startup, Docker image, Reinstall and Create backup).';
+            } elseif ($egg === null) {
+                $blockers[] = $needs . ' This panel has no ' . ucfirst($index->loader) . ' egg to switch to; ask a panel admin to add one.';
+            } elseif ($why = \ServerSuite\Support\ReinstallGuard::blocker($server)) {
+                $blockers[] = $needs . ' ' . $why;
+            } else {
+                // Stage 2: switch the server as part of the install.
+                $var = self::LOADER_VERSION_VARS[$index->loader] ?? null;
+                $value = $index->loader === 'forge' ? "{$index->minecraft}-{$index->loaderVersion}" : (string) $index->loaderVersion;
+                $switch = [
+                    'egg_id'   => (int) $egg['egg_id'],
+                    'egg_name' => (string) $egg['egg_name'],
+                    'from'     => $context,
+                    'env'      => $var && $index->loaderVersion ? [$var => $value] : [],
+                ];
+            }
         }
         if ($current?->isRunning()) {
             $blockers[] = 'A modpack install is already running on this server.';
         }
 
-        // What changes on disk.
-        $old = collect($current?->files ?? [])->keyBy('path');
+        // What changes on disk. A switch wipes the server first, so then
+        // it's a fresh install: nothing is unchanged, replaced or removed.
+        $old = $switch ? collect() : collect($current?->files ?? [])->keyBy('path');
         $install = $unchanged = [];
         foreach ($index->installable() as $f) {
             $prev = $old->get($f['path']);
@@ -198,7 +234,7 @@ class ModpackService
         }
         unset($item);
         $packProjects = array_filter(array_column(array_column($install, 'mod'), 'project_id'));
-        if ($packProjects !== []) {
+        if ($packProjects !== [] && $switch === null) {
             $replace = ServerMod::forServer($server->uuid)->where('source', 'modrinth')
                 ->whereIn('source_id', $packProjects)->whereNull('modpack_id')->get()
                 ->map(fn (ServerMod $m) => ['dir' => (string) ($m->install_path ?: '/mods'), 'file' => (string) $m->target_filename, 'name' => $m->mod_name])
@@ -217,6 +253,11 @@ class ModpackService
         } catch (\Throwable) {
         }
 
+        if ($switch !== null && $backupLimit === 0) {
+            $blockers[] = 'Switching the server needs a backup first, and this server has backups turned off.';
+            $switch = null;
+        }
+
         return [
             'pack' => [
                 'project_id' => $projectId,
@@ -232,6 +273,7 @@ class ModpackService
             'requires'  => ['loader' => $index->loader, 'loader_version' => $index->loaderVersion, 'minecraft' => $index->minecraft],
             'server'    => $context,
             'blockers'  => $blockers,
+            'switch'    => $switch === null ? null : ['egg_name' => $switch['egg_name'], 'from' => $switch['from']],
             'current'   => $current?->hasInstalledPack() ? [
                 'name' => $current->name, 'version_number' => $current->version_number,
                 'same_pack' => $current->project_id === $projectId,
@@ -256,6 +298,7 @@ class ModpackService
                 'remove'     => $remove,
                 'replace'    => $replace,
                 'overrides'  => $overrides,
+                'switch'     => $switch,
             ],
         ];
     }
@@ -266,11 +309,14 @@ class ModpackService
      *
      * @throws ModpackException
      */
-    public function start(object $server, string $projectId, string $versionId, int $userId): Modpack
+    public function start(object $server, string $projectId, string $versionId, int $userId, bool $canSwitch = false, bool $wipeConfirmed = false): Modpack
     {
-        $p = $this->preview($server, $projectId, $versionId);
+        $p = $this->preview($server, $projectId, $versionId, $canSwitch);
         if ($p['blockers'] !== []) {
             throw new ModpackException($p['blockers'][0]);
+        }
+        if ($p['switch'] !== null && ! $wipeConfirmed) {
+            throw new ModpackException('Installing this pack switches the server and deletes everything on it. Confirm that first.');
         }
 
         $pack = Modpack::forServer($server->uuid) ?? new Modpack(['server_uuid' => $server->uuid, 'source' => 'modrinth']);

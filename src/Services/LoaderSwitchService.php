@@ -100,8 +100,10 @@ class LoaderSwitchService
      * point wipe + egg-swap + reinstall runs.
      *
      * @param string|null $mcVersion  target MC version, or null = keep current
+     * @param array<string, string> $envOverrides  extra egg variables (e.g. a modpack's
+     *        exact loader version); only variables the egg has are set
      */
-    public function switchLoader(object $server, int $targetEggId, ?string $mcVersion = null, bool $requireBackup = true): array
+    public function switchLoader(object $server, int $targetEggId, ?string $mcVersion = null, bool $requireBackup = true, array $envOverrides = []): array
     {
         $uuid = $server->uuid;
 
@@ -142,6 +144,11 @@ class LoaderSwitchService
         }
 
         $env = $this->buildEnvironment($egg, $mc);
+        foreach ($envOverrides as $key => $value) {
+            if (array_key_exists($key, $env)) {
+                $env[$key] = (string) $value;
+            }
+        }
         $image = $this->resolveEggImage($egg, $mc);
         // A direct jar from MCJars (#22) for eggs that take DL_PATH.
         $pin = app(McJarsService::class)->pinFor(McJarsService::keywordForEgg((string) $egg->name), $mc);

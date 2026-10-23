@@ -38,8 +38,14 @@ beforeEach(function () {
     app()->instance(DaemonFileClient::class, $this->wings);
 
     $this->power = 'running';
+    $this->installing = 0;   // polls left until a reinstall finishes
     $this->ops = Mockery::mock(PanelServerOps::class);
-    $this->ops->shouldReceive('runtimeState')->andReturnUsing(fn () => ['power' => $this->power, 'install' => null]);
+    $this->ops->shouldReceive('runtimeState')->andReturnUsing(function () {
+        $install = $this->installing > 0 ? 'installing' : null;
+        $this->installing = max(0, $this->installing - 1);
+
+        return ['power' => $this->power, 'install' => $install];
+    })->byDefault();
     $this->ops->shouldReceive('power')->with('srv-mp', 'stop')->andReturnUsing(function () {
         $this->power = 'offline';
     });
@@ -244,6 +250,7 @@ it('tells a server on another loader or version what to switch to, and refuses t
     ModManagerSetting::forServer('srv-mp')->forceFill(['loader' => 'forge', 'game_version' => '1.21.4'])->save();
 
     expect(mpSvc()->preview($this->server, 'PACK', 'v1')['blockers'][0])->toContain('needs Fabric 1.20.1; the server runs Forge 1.21.4')
+        ->toContain('permissions to change its version')
         ->and(fn () => mpSvc()->start($this->server, 'PACK', 'v1', 1))->toThrow(ModpackException::class);
 });
 
@@ -435,4 +442,118 @@ it('marks versions for another Minecraft version or loader, compatible first', f
         ->and($versions['old']['reason'])->toBe('For Minecraft 1.19.2, not 1.20.1')
         ->and($versions['forge']['reason'])->toBe('For Forge, not Fabric')
         ->and($versions->first()['id'])->toBe('v1');
+});
+
+// --- stage 2: switch the server to the pack's loader and version ---------
+
+function mpEgg(string $name, array $vars): Pterodactyl\Models\Egg
+{
+    $egg = Pterodactyl\Models\Egg::query()->create(['name' => $name, 'docker_images' => ['Java 21' => 'ghcr.io/pterodactyl/yolks:java_21']]);
+    foreach ($vars as $var => $default) {
+        Pterodactyl\Models\EggVariable::query()->create(['egg_id' => $egg->id, 'env_variable' => $var, 'default_value' => $default]);
+    }
+
+    return $egg;
+}
+
+/** The pelican-eggs Fabric egg's variables, as on the panel. */
+function mpFabricEgg(): Pterodactyl\Models\Egg
+{
+    return mpEgg('Fabric', ['SERVER_JARFILE' => 'server.jar', 'MC_VERSION' => 'latest', 'FABRIC_VERSION' => 'latest', 'LOADER_VERSION' => 'latest']);
+}
+
+function mpPanel(object $t): void
+{
+    panelTables();
+    $t->server = Pterodactyl\Models\Server::query()->create(['uuid' => 'srv-mp', 'name' => 'MP']);
+}
+
+it('switches the server to a pack for another version when the user may', function () {
+    mpPanel($this);
+    $egg = mpFabricEgg();
+    mpPublish($this, 'v121', ['mods/a.jar' => ['mod' => 'MODA']], ['overrides/config/a.toml' => 'x'], ['minecraft' => '1.21.1', 'fabric-loader' => '0.16.5']);
+    $this->wings->put('/world/level.dat', 'old world');
+    $this->wings->put('/mods/old.jar', 'old');
+    $this->wings->put('/eula.txt', 'eula=true');
+
+    $p = mpSvc()->preview($this->server, 'PACK', 'v121', true);
+    expect($p['blockers'])->toBe([])
+        ->and($p['switch'])->toBe(['egg_name' => 'Fabric', 'from' => ['loader' => 'fabric', 'minecraft' => '1.20.1']])
+        ->and($p['plan']['switch']['env'])->toBe(['LOADER_VERSION' => '0.16.5'])
+        ->and(fn () => mpSvc()->start($this->server, 'PACK', 'v121', 1, true, false))->toThrow(ModpackException::class, 'deletes everything');
+
+    $env = null;
+    $this->ops->shouldReceive('changeEgg')->once()->andReturnUsing(function ($uuid, $eggId, $environment) use (&$env, $egg) {
+        expect($eggId)->toBe($egg->id);
+        $env = $environment;
+    });
+    $this->ops->shouldReceive('setDockerImage')->once()->with('srv-mp', 'ghcr.io/pterodactyl/yolks:java_21');
+    $this->ops->shouldReceive('reinstall')->once()->andReturnUsing(function () {
+        $this->installing = 2;   // "installing" for two polls
+        $this->wings->put('/server.jar', 'fabric launcher');
+    });
+
+    mpSvc()->start($this->server, 'PACK', 'v121', 1, true, true);
+    $pack = mpRun();
+
+    $f = $this->wings->files;
+    expect($pack->status)->toBe(Modpack::STATUS_INSTALLED, (string) $pack->error)
+        ->and([$env['MC_VERSION'], $env['LOADER_VERSION'], $env['FABRIC_VERSION']])->toBe(['1.21.1', '0.16.5', 'latest'])
+        ->and($f)->not->toHaveKey('/world/level.dat')
+        ->and($f)->not->toHaveKey('/mods/old.jar')
+        ->and($f['/eula.txt'])->toBe('eula=true')
+        ->and($f['/server.jar'])->toBe('fabric launcher')
+        ->and($f['/mods/a.jar'])->toBe('jar:mods/a.jar:v121')
+        ->and($f['/config/a.toml'])->toBe('x')
+        ->and($pack->minecraft)->toBe('1.21.1')
+        ->and($this->backupNames)->toHaveCount(1);
+    $s = ModManagerSetting::forServer('srv-mp');
+    expect([$s->loader, $s->game_version])->toBe(['fabric', '1.21.1']);
+});
+
+it('pins Forge as mc-loader and NeoForge as the loader version', function () {
+    mpPanel($this);
+    mpEgg('Forge Minecraft', ['SERVER_JARFILE' => 'server.jar', 'MC_VERSION' => 'latest', 'BUILD_TYPE' => 'recommended', 'FORGE_VERSION' => '']);
+    mpEgg('NeoForge', ['MC_VERSION' => 'latest', 'NEOFORGE_VERSION' => '']);
+    mpPublish($this, 'forge', ['mods/a.jar' => []], [], ['minecraft' => '1.20.1', 'forge' => '47.2.0']);
+    mpPublish($this, 'neo', ['mods/a.jar' => []], [], ['minecraft' => '1.21.1', 'neoforge' => '21.1.77']);
+
+    expect(mpSvc()->preview($this->server, 'PACK', 'forge', true)['plan']['switch']['env'])->toBe(['FORGE_VERSION' => '1.20.1-47.2.0'])
+        ->and(mpSvc()->preview($this->server, 'PACK', 'neo', true)['plan']['switch']['env'])->toBe(['NEOFORGE_VERSION' => '21.1.77']);
+});
+
+it("won't switch without an egg for the loader, with backups off, or with install scripts skipped", function () {
+    mpPanel($this);
+    mpPublish($this, 'neo', ['mods/a.jar' => []], [], ['minecraft' => '1.21.1', 'neoforge' => '21.1.77']);
+    expect(mpSvc()->preview($this->server, 'PACK', 'neo', true)['blockers'][0])->toContain('no Neoforge egg');
+
+    mpFabricEgg();
+    mpPublish($this, 'v121', ['mods/a.jar' => []], [], ['minecraft' => '1.21.1', 'fabric-loader' => '0.16.5']);
+
+    $this->server->forceFill(['skip_scripts' => true])->save();
+    expect(mpSvc()->preview($this->server, 'PACK', 'v121', true)['blockers'][0])->toContain('Skip Egg Install Script');
+    $this->server->forceFill(['skip_scripts' => false])->save();
+
+    $ops = Mockery::mock(PanelServerOps::class);
+    $ops->shouldReceive('serverBackupLimit')->andReturn(0);
+    app()->instance(PanelServerOps::class, $ops);
+    $p = mpSvc()->preview($this->server, 'PACK', 'v121', true);
+    expect($p['switch'])->toBeNull()
+        ->and($p['blockers'][0])->toContain('backups turned off');
+});
+
+it('fails the install, keeping the backup as the way back, when the reinstall fails', function () {
+    mpPanel($this);
+    mpFabricEgg();
+    mpPublish($this, 'v121', ['mods/a.jar' => []], [], ['minecraft' => '1.21.1', 'fabric-loader' => '0.16.5']);
+    $this->ops->shouldReceive('changeEgg', 'setDockerImage');
+    $this->ops->shouldReceive('reinstall')->andReturnUsing(fn () => $this->server->forceFill(['status' => 'install_failed'])->save());
+    $this->ops->shouldReceive('runtimeState')->andReturnUsing(fn () => ['power' => 'offline', 'install' => $this->server->refresh()->status]);
+
+    mpSvc()->start($this->server, 'PACK', 'v121', 1, true, true);
+    $pack = mpRun();
+
+    expect($pack->status)->toBe(Modpack::STATUS_FAILED)
+        ->and($pack->error)->toContain('reinstall onto Fabric failed')
+        ->and($this->wings->files)->not->toHaveKey('/mods/a.jar');
 });

@@ -30,6 +30,21 @@ function panelTables(): void
         $t->string('status')->nullable();
         $t->string('external_id')->nullable();
         $t->unsignedInteger('backup_limit')->default(0);
+        $t->unsignedBigInteger('egg_id')->nullable();
+        $t->boolean('skip_scripts')->default(false);
+        $t->timestamps();
+    });
+    $schema->create('eggs', function (Illuminate\Database\Schema\Blueprint $t) {
+        $t->id();
+        $t->string('name');
+        $t->text('docker_images')->nullable();
+        $t->timestamps();
+    });
+    $schema->create('egg_variables', function (Illuminate\Database\Schema\Blueprint $t) {
+        $t->id();
+        $t->unsignedBigInteger('egg_id');
+        $t->string('env_variable');
+        $t->string('default_value')->nullable();
         $t->timestamps();
     });
 }

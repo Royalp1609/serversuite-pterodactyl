@@ -1531,13 +1531,20 @@ class ModManagerController extends Controller
         $svc = app(\ServerSuite\Services\ModpackService::class);
 
         return response()->json(['data' => [
-            'supported' => $svc->supports($srv),
-            'context'   => $svc->serverContext($srv),
-            'status'    => $svc->status($srv),
+            'supported'  => $svc->supports($srv),
+            'context'    => $svc->serverContext($srv),
+            'status'     => $svc->status($srv),
+            'can_switch' => $this->canSwitchForModpack($request, $srv),
         ]]);
     }
 
-    /** GET /{server}/modpacks/search?query=&sort=&offset= : packs with a build for this server's loader and version */
+    /** A pack for another loader or version switches the server: the Versions tab's loader-switch permissions (#23 stage 2). */
+    private function canSwitchForModpack(Request $request, Server $srv): bool
+    {
+        return \ServerSuite\Support\PanelPermissions::holds($request->user(), $srv, \ServerSuite\Support\PanelPermissions::required('loaderSwitch'));
+    }
+
+    /** GET /{server}/modpacks/search?query=&sort=&offset=&any_version= : packs with a build for this server's loader and version (or any, for a user who can switch) */
     public function modpacksSearch(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
@@ -1546,9 +1553,11 @@ class ModManagerController extends Controller
             'query'  => ['nullable', 'string', 'max:100'],
             'sort'   => ['nullable', 'string', 'in:relevance,downloads,follows,newest,updated'],
             'offset' => ['nullable', 'integer', 'min:0', 'max:10000'],
+            'any_version' => ['nullable', 'boolean'],
         ]);
+        $any = ! empty($data['any_version']) && $this->canSwitchForModpack($request, $srv);
 
-        return $this->modpackCall($srv, fn ($svc) => $svc->search($srv, (string) ($data['query'] ?? ''), (int) ($data['offset'] ?? 0), 24, $data['sort'] ?? null));
+        return $this->modpackCall($srv, fn ($svc) => $svc->search($srv, (string) ($data['query'] ?? ''), (int) ($data['offset'] ?? 0), 24, $data['sort'] ?? null, $any));
     }
 
     /** GET /{server}/modpacks/{project}/versions : newest first, each marked compatible or not */
@@ -1571,15 +1580,15 @@ class ModManagerController extends Controller
             'version_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
         ]);
 
-        return $this->modpackCall($srv, function ($svc) use ($srv, $data) {
-            $p = $svc->preview($srv, $data['project_id'], $data['version_id']);
+        return $this->modpackCall($srv, function ($svc) use ($srv, $data, $request) {
+            $p = $svc->preview($srv, $data['project_id'], $data['version_id'], $this->canSwitchForModpack($request, $srv));
             unset($p['plan']);   // stays on the server; start() rebuilds it
 
             return $p;
         });
     }
 
-    /** POST /{server}/modpacks/install { project_id, version_id, confirmed } : stop, back up, install (queued) */
+    /** POST /{server}/modpacks/install { project_id, version_id, confirmed, wipe_confirmed? } : stop, back up, switch if needed, install (queued) */
     public function modpackInstall(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
@@ -1588,10 +1597,12 @@ class ModManagerController extends Controller
             'project_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
             'version_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{1,64}$/'],
             'confirmed'  => ['required', 'accepted'],
+            'wipe_confirmed' => ['nullable', 'boolean'],
         ]);
 
         $res = $this->modpackCall($srv, function ($svc) use ($srv, $data, $request) {
-            $pack = $svc->start($srv, $data['project_id'], $data['version_id'], (int) $request->user()->id);
+            $pack = $svc->start($srv, $data['project_id'], $data['version_id'], (int) $request->user()->id,
+                $this->canSwitchForModpack($request, $srv), ! empty($data['wipe_confirmed']));
             $this->audit($srv, 'modpack-started', ['pack' => $pack->target['name'] ?? null, 'version' => $pack->target['version_number'] ?? null]);
 
             return $svc->status($srv);

@@ -20,6 +20,8 @@ use ServerSuite\Support\SuiteActivity;
  *   stopping   - stop the server (mods rewrite configs on shutdown, which
  *                would undo the pack's overrides)
  *   backing_up - "Pre-modpack" backup, unless the server has backups off
+ *   switching / reinstalling - only when the server isn't on the pack's
+ *                loader and Minecraft version: wipe, change egg, reinstall
  *   staging    - Wings fetches the .mrpack and unpacks it in /.serversuite/modpack;
  *                its index must match the one the user confirmed
  *   files      - remove what the new version dropped, then download the rest
@@ -41,6 +43,7 @@ class ModpackInstaller
         protected PanelServerOps $ops,
         protected FileDeliveryService $delivery,
         protected BackupRotationService $rotation,
+        protected LoaderSwitchService $loaderSwitch,
     ) {}
 
     /** Advance the install. Returns seconds until the next run, or null when finished. */
@@ -52,6 +55,8 @@ class ModpackInstaller
             $delay = match ($pack->phase) {
                 'stopping'   => $this->stopping($pack),
                 'backing_up' => $this->backingUp($pack),
+                'switching'  => $this->switching($pack),
+                'reinstalling' => $this->reinstalling($pack),
                 'staging'    => $this->staging($pack),
                 'files'      => $this->files($pack, $started),
                 'overrides'  => $this->overrides($pack),
@@ -106,7 +111,7 @@ class ModpackInstaller
         $state = $pack->state ?? [];
 
         if (($state['backups'] ?? 'yes') === 'disabled') {
-            $pack->phase = 'staging';
+            $pack->phase = $this->afterBackup($pack);
 
             return 0;
         }
@@ -126,7 +131,7 @@ class ModpackInstaller
                 return 60;
             }
             if (! $res->isFailed() && $res->reason === 'backups_disabled') {
-                $pack->phase = 'staging';
+                $pack->phase = $this->afterBackup($pack);
 
                 return 0;
             }
@@ -142,7 +147,7 @@ class ModpackInstaller
             if (! $backup->isSuccessful) {
                 throw new ModpackException('The pre-modpack backup failed. Nothing was changed.');
             }
-            $pack->phase = 'staging';
+            $pack->phase = $this->afterBackup($pack);
 
             return 0;
         }
@@ -151,6 +156,58 @@ class ModpackInstaller
         }
 
         return 10;
+    }
+
+    private function afterBackup(Modpack $pack): string
+    {
+        return empty($pack->plan['switch']) ? 'staging' : 'switching';
+    }
+
+    /**
+     * Stage 2: put the server on the pack's loader and Minecraft version.
+     * LoaderSwitchService wipes the server, changes the egg (with the pack's
+     * exact loader version) and reinstalls. It wants a completed backup from
+     * the last hour, which the pre-modpack backup is.
+     */
+    private function switching(Modpack $pack): int
+    {
+        $sw = (array) $pack->plan['switch'];
+        $server = \Pterodactyl\Models\Server::query()->where('uuid', $pack->server_uuid)->firstOrFail();
+
+        try {
+            $out = $this->loaderSwitch->switchLoader($server, (int) $sw['egg_id'], (string) ($pack->target['minecraft'] ?? ''), true, (array) ($sw['env'] ?? []));
+        } catch (\RuntimeException $e) {
+            throw new ModpackException('Could not switch the server: ' . $e->getMessage());
+        }
+
+        if (($out['status'] ?? null) === 'reinstalling') {
+            $pack->mergeState(['switched_at' => now()->getTimestamp()]);
+            $pack->phase = 'reinstalling';
+
+            return 15;
+        }
+
+        return 5;   // still stopping
+    }
+
+    private function reinstalling(Modpack $pack): int
+    {
+        $install = $this->ops->runtimeState($pack->server_uuid)['install'] ?? null;
+        $egg = $pack->plan['switch']['egg_name'] ?? 'the new loader';
+        if (in_array($install, ['install_failed', 'reinstall_failed'], true)) {
+            throw new ModpackException("The server's reinstall onto {$egg} failed. Check its console; the pre-modpack backup has the old server.");
+        }
+        if ($install === 'installing') {
+            if (now()->getTimestamp() - (int) ($pack->state['switched_at'] ?? now()->getTimestamp()) > 1800) {
+                throw new ModpackException("The server's reinstall onto {$egg} took over 30 minutes. Check its console; the pre-modpack backup has the old server.");
+            }
+
+            return 15;
+        }
+
+        $pack->phase = 'staging';
+
+        return 0;
     }
 
     private function staging(Modpack $pack): int
