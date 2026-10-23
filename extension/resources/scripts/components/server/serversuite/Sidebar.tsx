@@ -3,6 +3,7 @@ import { NavLink, useLocation, useRouteMatch } from 'react-router-dom';
 import { useStoreState } from 'easy-peasy';
 import Can from '@/components/elements/Can';
 import { ServerContext } from '@/state/server';
+import ReinstallScreen from './ReinstallScreen';
 import routes from '@/routers/routes';
 import blueprintRoutes from '@blueprint/extends/routers/routes';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -160,8 +161,12 @@ const ServerSidebar = () => {
     );
 };
 
-/** The slot is shared with the account pages; only server pages get the sidebar. */
+/**
+ * The slot is shared with the account pages; only server pages get the
+ * sidebar, and the reinstall screen (#61), which sits outside the sidebar
+ * so it shows on narrow screens too.
+ */
 export default () => {
     const { pathname } = useLocation();
-    return pathname.startsWith('/server/') ? <ServerSidebar /> : null;
+    return pathname.startsWith('/server/') ? <><ServerSidebar /><ReinstallScreen /></> : null;
 };
