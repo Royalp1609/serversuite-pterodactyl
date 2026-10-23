@@ -1,36 +1,33 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useHistory } from 'react-router-dom';
 import Can from '@/components/elements/Can';
 import http from '@/api/http';
 import { ServerContext } from '@/state/server';
-import { SocketEvent } from '@/components/server/events';
-import useWebsocketEvent from '@/plugins/useWebsocketEvent';
+import ServerInstallSvg from '@/assets/images/server_installing.svg';
+import ServerRestoreSvg from '@/assets/images/server_restore.svg';
+import ServerErrorSvg from '@/assets/images/server_error.svg';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckCircle, faCircle, faExclamationTriangle, faPlay, faSpinner, faTerminal } from '@fortawesome/free-solid-svg-icons';
+import { faCheckCircle, faCircle, faExclamationTriangle, faPlay, faTerminal } from '@fortawesome/free-solid-svg-icons';
 
 /*
- * Server Suite — full-screen reinstall progress (#61).
- * Shown on every server page while the server reinstalls, however that was
- * started (Versions tab, Settings → Reinstall, an admin, a modpack switch):
- * it follows the server's install status, not a button. Stages: reinstalling
- * → starting → done, then it goes to the console. If the install fails it
+ * Server Suite — full-screen reinstall and restore progress (#61).
+ * Shown on every server page while the server reinstalls or restores a
+ * backup, however that was started (Versions tab, Settings → Reinstall, an
+ * admin, a modpack switch, either Backups page): it follows the server's
+ * status, not a button. Reinstall: reinstalling → starting → done, then it
+ * goes to the console. Restore: restoring → done. If an install fails it
  * stays up with the error. Mounted next to the sidebar (Blueprint's
  * BeforeSubNavigation slot) and rendered into <body>, so neither the
  * sidebar's CSS nor its stacking order can hide it on any screen size.
  *
- * Wings sends the installer's output only to panel admins
- * (admin.websocket.install), so others see the stage and the timer without
- * the log. Install events may not reach them either, so the status is also
- * polled from the client API.
+ * Install and restore events may not reach subusers over the websocket, so
+ * the status is also polled from the client API.
  */
 
-type Stage = 'installing' | 'starting' | 'failed' | null;
+type Stage = 'installing' | 'starting' | 'failed' | 'restoring' | 'restored' | null;
 
 const FAILED = ['install_failed', 'reinstall_failed'];
-const MAX_LINES = 400;
-// eslint-disable-next-line no-control-regex
-const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
 const clock = (ms: number) => {
     const s = Math.max(0, Math.floor(ms / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -47,34 +44,44 @@ export default () => {
     const setServerFromState = ServerContext.useStoreActions((actions) => actions.server.setServerFromState);
 
     const [stage, setStage] = useState<Stage>(null);
-    const [lines, setLines] = useState<string[]>([]);
     const [startedAt, setStartedAt] = useState<number>(Date.now());
     const [now, setNow] = useState(Date.now());
     const [offlineSince, setOfflineSince] = useState<number | null>(null);
     const [packRunning, setPackRunning] = useState(false);
     const [busy, setBusy] = useState(false);
-    const logRef = useRef<HTMLPreElement>(null);
 
-    // Stage from the server's status (also when the page opens mid-reinstall).
+    /** Start the timer, or carry on the one from before a page change. */
+    const begin = (next: Stage) => {
+        if (!uuid || stage === next) return;
+        let t = Date.now();
+        try {
+            t = Number(sessionStorage.getItem(startKey(uuid))) || t;
+            sessionStorage.setItem(startKey(uuid), String(t));
+        } catch {
+            // storage off: time from now
+        }
+        setStartedAt(t);
+        setStage(next);
+    };
+    const end = () => {
+        try { if (uuid) sessionStorage.removeItem(startKey(uuid)); } catch { /* ignore */ }
+    };
+
+    // Stage from the server's status (also when the page opens mid-way).
     useEffect(() => {
         if (!uuid) return;
         if (status === 'installing') {
-            if (stage !== 'installing') {
-                let t = Date.now();
-                try {
-                    t = Number(sessionStorage.getItem(startKey(uuid))) || t;
-                    sessionStorage.setItem(startKey(uuid), String(t));
-                } catch {
-                    // storage off: time from now
-                }
-                setStartedAt(t);
-                setLines([]);
-                setStage('installing');
-            }
+            begin('installing');
+        } else if (status === 'restoring_backup') {
+            begin('restoring');
         } else if (status && FAILED.includes(status)) {
+            end();
             setStage('failed');
+        } else if (status === null && stage === 'restoring') {
+            end();
+            setStage('restored');
         } else if (status === null && stage === 'installing') {
-            try { sessionStorage.removeItem(startKey(uuid)); } catch { /* ignore */ }
+            end();
             setStage('starting');
             setOfflineSince(null);
             // A modpack install (#23 stage 2) carries on after the reinstall and starts nothing.
@@ -84,7 +91,7 @@ export default () => {
         }
     }, [uuid, status]);
 
-    // Poll the status: install events only reach panel admins.
+    // Poll the status: install and restore events may not reach subusers.
     useEffect(() => {
         if (!uuid) return;
         const poll = () => http.get(`/api/client/servers/${uuid}`)
@@ -93,23 +100,15 @@ export default () => {
                 if (s !== status) setServerFromState((d) => ({ ...d, status: s }));
             })
             .catch(() => undefined);
-        const t = setInterval(poll, stage === 'installing' ? 5000 : 20000);
+        const t = setInterval(poll, stage === 'installing' || stage === 'restoring' ? 5000 : 20000);
         return () => clearInterval(t);
     }, [uuid, status, stage]);
-
-    useWebsocketEvent(SocketEvent.INSTALL_OUTPUT, (line) => {
-        setLines((cur) => [...cur, stripAnsi(line)].slice(-MAX_LINES));
-    });
 
     useEffect(() => {
         if (!stage) return;
         const t = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(t);
     }, [stage]);
-
-    useEffect(() => {
-        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-    }, [lines]);
 
     // After the install: wait for the server to run, then go to the console.
     useEffect(() => {
@@ -134,35 +133,39 @@ export default () => {
     const close = () => setStage(null);
     // Not starting on its own: whoever reinstalled it doesn't start it (Settings → Reinstall, an admin).
     const idle = stage === 'starting' && power === 'offline' && offlineSince !== null && now - offlineSince > 15000;
+    const restore = stage === 'restoring' || stage === 'restored';
 
-    const steps: Array<{ key: string; label: string }> = [
-        { key: 'installing', label: 'Reinstalling' },
-        { key: 'starting', label: 'Starting the server' },
-        { key: 'done', label: 'Done' },
-    ];
-    const at = stage === 'installing' || stage === 'failed' ? 0 : 1;
+    const steps = restore
+        ? ['Restoring the backup', 'Done']
+        : ['Reinstalling', 'Starting the server', 'Done'];
+    const at = { installing: 0, failed: 0, restoring: 0, starting: 1, restored: 1 }[stage];
+    const image = stage === 'failed' ? ServerErrorSvg : restore ? ServerRestoreSvg : ServerInstallSvg;
+    const title = stage === 'failed' ? 'The reinstall failed'
+        : stage === 'restoring' ? 'Restoring a backup'
+            : stage === 'restored' ? 'Backup restored'
+                : packRunning && stage === 'starting' ? 'Reinstall finished' : 'Reinstalling the server';
 
     return createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(2, 6, 23, 0.94)', overflowY: 'auto' }}>
-            <div className="max-w-4xl mx-auto px-4 py-10">
-                <h2 className="text-2xl font-bold text-white mb-1">
-                    {stage === 'failed' ? 'The reinstall failed' : packRunning && stage === 'starting' ? 'Reinstall finished' : 'Reinstalling the server'}
-                </h2>
+            <div className="max-w-2xl mx-auto px-4 py-12 flex flex-col items-center text-center">
+                <img src={image} alt="" style={{ width: '100%', maxWidth: '18rem', height: 'auto' }} className="mb-8" />
+                <h2 className="text-2xl font-bold text-white mb-1">{title}</h2>
                 <p className="text-sm text-neutral-400 mb-6">
                     {stage === 'failed'
                         ? 'The install script stopped with an error, so the server has no working files.'
-                        : `Running for ${clock(now - startedAt)}. You can leave this page; the reinstall carries on.`}
+                        : stage === 'restored'
+                            ? `Took ${clock(now - startedAt)}. Server Suite checks the mod list against the backup in a few seconds; the Mods tab says what changed.`
+                            : `Running for ${clock(now - startedAt)}. You can leave this page; it carries on.`}
                 </p>
 
-                <ol className="flex flex-wrap gap-6 mb-6 text-sm">
-                    {steps.map((s, i) => (
-                        <li key={s.key} className="flex items-center gap-2" style={{ color: i < at ? 'rgb(52,211,153)' : i === at ? 'white' : 'rgb(115,115,115)' }}>
+                <ol className="flex flex-wrap justify-center gap-6 mb-6 text-sm">
+                    {steps.map((label, i) => (
+                        <li key={label} className="flex items-center gap-2" style={{ color: i < at || stage === 'restored' ? 'rgb(52,211,153)' : i === at ? 'white' : 'rgb(115,115,115)' }}>
                             <FontAwesomeIcon
-                                icon={stage === 'failed' && i === 0 ? faExclamationTriangle : i < at ? faCheckCircle : i === at ? faSpinner : faCircle}
-                                spin={stage !== 'failed' && i === at}
-                                style={stage === 'failed' && i === 0 ? { color: 'rgb(248,113,113)' } : undefined}
+                                icon={stage === 'failed' && i === 0 ? faExclamationTriangle : i < at || stage === 'restored' ? faCheckCircle : faCircle}
+                                style={stage === 'failed' && i === 0 ? { color: 'rgb(248,113,113)' } : i > at ? { opacity: 0.4 } : undefined}
                             />
-                            {s.label}
+                            {label}
                         </li>
                     ))}
                 </ol>
@@ -170,7 +173,7 @@ export default () => {
                 {stage === 'starting' && packRunning && (
                     <div className="text-sm rounded-lg p-3 mb-4" style={{ background: 'rgba(99,102,241,0.12)', color: 'rgb(199,210,254)' }}>
                         The modpack install carries on now (downloads and configs) and leaves the server stopped. Follow it on the Modpacks tab.
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-3 flex justify-center gap-2">
                             <Link to={`/server/${id}/modpacks`} onClick={close} className="px-3 py-2 rounded-lg text-white" style={{ background: 'rgb(99,102,241)' }}>Open Modpacks</Link>
                         </div>
                     </div>
@@ -182,36 +185,26 @@ export default () => {
                             <>
                                 The install finished, but nothing has started the server.{' '}
                                 <Can action={'control.start'} renderOnError={<span className="text-neutral-400">You don&apos;t have permission to start it.</span>}>
-                                    <button onClick={start} disabled={busy} className="ml-2 px-3 py-2 rounded-lg text-white inline-flex items-center gap-2" style={{ background: 'rgb(16,185,129)' }}>
-                                        <FontAwesomeIcon icon={busy ? faSpinner : faPlay} spin={busy} /> Start the server
+                                    <button onClick={start} disabled={busy} className="ml-2 px-3 py-2 rounded-lg text-white inline-flex items-center gap-2" style={{ background: 'rgb(16,185,129)', opacity: busy ? 0.6 : 1 }}>
+                                        <FontAwesomeIcon icon={faPlay} /> Start the server
                                     </button>
                                 </Can>
                             </>
                         ) : (
-                            <><FontAwesomeIcon icon={faSpinner} spin /> Install finished. Waiting for the server to start ({power || 'unknown'})…</>
+                            <>Install finished. Waiting for the server to start ({power || 'unknown'}).</>
                         )}
                     </div>
                 )}
 
                 {stage === 'failed' && (
                     <div className="text-sm rounded-lg p-3 mb-4" style={{ background: 'rgba(239,68,68,0.12)', color: 'rgb(252,165,165)' }}>
-                        Check the end of the install log below{lines.length === 0 ? ' (panel admins see it; ask one if it is empty)' : ''}.
-                        If this was a version or loader switch, the backup Server Suite took first has the old server: restore it from Backups
-                        once the server can be used again (a panel admin can reinstall or restore it now).
+                        A panel admin can see the install log in the console. If this was a version or loader switch, the backup Server Suite
+                        took first has the old server: restore it from Backups once the server can be used again (a panel admin can reinstall
+                        or restore it now).
                     </div>
                 )}
 
-                <pre
-                    ref={logRef}
-                    className="text-xs rounded-lg p-3 mb-4"
-                    style={{ background: 'rgb(15,23,42)', color: 'rgb(203,213,225)', height: '22rem', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
-                >
-                    {lines.length > 0
-                        ? (stage === 'failed' ? lines.slice(-60) : lines).join('\n')
-                        : 'The installer\'s output is sent to panel admins only, so it isn\'t shown here. The stages above still update.'}
-                </pre>
-
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap justify-center gap-2">
                     <Link to={`/server/${id}`} onClick={close} className="px-3 py-2 rounded-lg text-sm inline-flex items-center gap-2" style={{ background: 'rgba(30,41,59,0.8)', color: 'rgb(203,213,225)' }}>
                         <FontAwesomeIcon icon={faTerminal} /> Console
                     </Link>
@@ -220,7 +213,12 @@ export default () => {
                             Backups
                         </Link>
                     )}
-                    {stage !== 'installing' && (
+                    {stage === 'restored' && (
+                        <Link to={`/server/${id}/mod-manager`} onClick={close} className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(30,41,59,0.8)', color: 'rgb(203,213,225)' }}>
+                            Mods
+                        </Link>
+                    )}
+                    {stage !== 'installing' && stage !== 'restoring' && (
                         <button onClick={close} className="px-3 py-2 rounded-lg text-sm" style={{ color: 'rgb(148,163,184)' }}>Close</button>
                     )}
                 </div>
