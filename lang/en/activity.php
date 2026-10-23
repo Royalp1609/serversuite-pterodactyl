@@ -36,6 +36,8 @@ return [
             'backup-unlocked' => 'Unlocked a backup',
             'backup-deleted' => 'Deleted a backup',
             'backup-restored' => 'Restored a backup',
+            'jar-aligned' => 'Set the server jar to :jar after the install (:was was missing)',
+            'args-repaired' => 'Repaired unix_args.txt after the install',
             'mods-restored' => 'Restored backup :backup: mod list updated (:back back, :gone gone)',
             'backup-downloaded' => 'Downloaded a backup',
             'modpack-started' => 'Started installing the modpack :pack :version',

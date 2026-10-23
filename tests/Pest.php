@@ -47,4 +47,11 @@ function panelTables(): void
         $t->string('default_value')->nullable();
         $t->timestamps();
     });
+    $schema->create('server_variables', function (Illuminate\Database\Schema\Blueprint $t) {
+        $t->id();
+        $t->unsignedBigInteger('server_id');
+        $t->unsignedBigInteger('variable_id');
+        $t->string('variable_value')->nullable();
+        $t->timestamps();
+    });
 }
