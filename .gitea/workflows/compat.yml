@@ -1,0 +1,123 @@
+name: Compat
+
+# One run of the panel jobs from ci.yml against a single pterodactyl/panel tag.
+# release-watch (docker-compose repo) starts it through the Gitea API when
+# pterodactyl/panel ships a release, and links the run on its "Investigate" issue.
+# Start it by hand under Actions -> Compat -> Run workflow.
+# Kept separate from ci.yml because Gitea plans matrix jobs before it
+# evaluates expressions, so ci.yml's matrix can't come from an input.
+# Keep these steps in step with ci.yml's.
+
+on:
+  workflow_dispatch:
+    inputs:
+      panel_ref:
+        description: "pterodactyl/panel tag to test against, e.g. a new release"
+        required: true
+
+jobs:
+  panel:
+    name: Pterodactyl ${{ github.event.inputs.panel_ref }} (install + PHPStan)
+    runs-on: ubuntu-latest
+    env:
+      PANEL: ${{ github.workspace }}/../panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          # the panel's composer.json ext-* requirements (+ bcmath for s1lentium/iptools)
+          extensions: bcmath, mbstring, pdo, pdo_mysql, posix, zip
+          tools: composer:v2
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-panel-${{ github.event.inputs.panel_ref }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-panel-${{ github.event.inputs.panel_ref }}-
+      - name: Clone pterodactyl/panel ${{ github.event.inputs.panel_ref }}
+        run: git clone --quiet --depth 1 --branch "${{ github.event.inputs.panel_ref }}" https://github.com/pterodactyl/panel.git "$PANEL"
+      - name: Install the package into the panel (as INSTALL.md does)
+        working-directory: ${{ env.PANEL }}
+        run: |
+          cp .env.example .env
+          composer config repositories.serversuite \
+            "{\"type\":\"path\",\"url\":\"$GITHUB_WORKSPACE\",\"options\":{\"symlink\":false}}"
+          composer require --no-interaction --no-progress --prefer-dist "pterodactyl-serversuite/serversuite:*"
+      - name: Service provider boots, commands register
+        working-directory: ${{ env.PANEL }}
+        run: |
+          php artisan package:discover
+          php artisan list --raw > "$RUNNER_TEMP/commands.txt"
+          for c in serversuite:check-updates serversuite:rotate-backups serversuite:move-subdomains; do
+            grep -q "^$c " "$RUNNER_TEMP/commands.txt" || { echo "::error::$c not registered"; exit 1; }
+          done
+      - name: Server Suite permission groups are grantable (#17), activity labels merge (#19), billing API routes (#38)
+        working-directory: ${{ env.PANEL }}
+        run: |
+          php -r '
+            require "vendor/autoload.php";
+            $app = require "bootstrap/app.php";
+            $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+            $allowed = Pterodactyl\Models\Permission::permissions()->map(fn ($v, $p) => array_map(fn ($k) => "$p.$k", array_keys($v["keys"])))->flatten()->all();
+            foreach (["mods.read", "mods.install", "subdomains.manage", "players.manage", "backup.read"] as $p) {
+                if (! in_array($p, $allowed, true)) { fwrite(STDERR, "::error::$p is not grantable\n"); exit(1); }
+            }
+            echo "permission groups ok\n";
+            $activity = app("translator")->getLoader()->load("en", "activity");
+            if (! isset($activity["server"]["serversuite"]["mod-removed"], $activity["server"]["file"])) { fwrite(STDERR, "::error::activity labels not merged with the panel ones\n"); exit(1); }
+            echo "activity labels ok\n";
+            foreach (["GET" => "api/application/serversuite/servers/{ref}", "PUT" => "api/application/serversuite/servers/{ref}/subdomains"] as $m => $uri) {
+                $r = collect(app("router")->getRoutes()->getRoutes())->first(fn ($r) => $r->uri() === $uri && in_array($m, $r->methods(), true));
+                if (! $r || ! in_array("application-api", $r->gatherMiddleware(), true)) { fwrite(STDERR, "::error::billing API route $m $uri missing or not behind application-api\n"); exit(1); }
+            }
+            echo "billing API routes ok\n";
+          '
+      - name: PHPStan against the panel source
+        working-directory: ${{ env.PANEL }}
+        run: |
+          cp -r "$GITHUB_WORKSPACE/extension" serversuite-blueprint
+          php -d memory_limit=1G vendor/bin/phpstan analyse -c "$GITHUB_WORKSPACE/.ci/phpstan.neon" --no-progress
+
+  extension:
+    name: Extension typecheck (Pterodactyl ${{ github.event.inputs.panel_ref }})
+    runs-on: ubuntu-latest
+    env:
+      PANEL: ${{ github.workspace }}/../panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"   # panel package.json: engines.node >= 22
+      - name: Clone pterodactyl/panel ${{ github.event.inputs.panel_ref }}
+        run: git clone --quiet --depth 1 --branch "${{ github.event.inputs.panel_ref }}" https://github.com/pterodactyl/panel.git "$PANEL"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.PANEL }}/node_modules
+          key: panel-node-modules-${{ github.event.inputs.panel_ref }}
+      - name: yarn install (panel frontend)
+        working-directory: ${{ env.PANEL }}
+        run: |
+          corepack enable
+          # retry: the registry occasionally 502s mid-install
+          for i in 1 2 3; do
+            yarn install --frozen-lockfile --non-interactive --silent --network-timeout 300000 && exit 0
+            echo "::warning::yarn install failed (attempt $i), retrying"; sleep 15
+          done
+          exit 1
+      # The panel's tsconfig covers resources/scripts/**, so dropping the
+      # components where Blueprint installs them typechecks them against the
+      # real panel frontend (@/api/http, @/state/server, twin.macro, ...).
+      - name: tsc
+        working-directory: ${{ env.PANEL }}
+        run: |
+          cp -r "$GITHUB_WORKSPACE/extension/resources/scripts/components/server/serversuite" \
+            resources/scripts/components/server/serversuite
+          # Blueprint adds the @blueprint alias and generates routes.ts on
+          # install; Sidebar.tsx imports it, so stand in for both.
+          mkdir -p resources/scripts/blueprint/extends/routers
+          printf '%s\n' "import React from 'react';" \
+            "interface R { path: string; name: string | undefined; component: React.ComponentType; exact?: boolean; adminOnly: boolean; identifier: string; permission: string | string[] | null }" \
+            "export default { account: [] as R[], server: [] as R[] };" > resources/scripts/blueprint/extends/routers/routes.ts
+          node -e 'const fs=require("fs"),c=JSON.parse(fs.readFileSync("tsconfig.json"));c.compilerOptions.paths["@blueprint/*"]=["./resources/scripts/blueprint/*"];fs.writeFileSync("tsconfig.json",JSON.stringify(c,null,2))'
+          yarn -s tsc
