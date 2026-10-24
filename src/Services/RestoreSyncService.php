@@ -107,8 +107,12 @@ class RestoreSyncService
      *
      * @return array<string, mixed>|null
      */
+    /** Set by completed(): the panel logged the restore as failed. */
+    public bool $lastRestoreFailed = false;
+
     public function completed(object $server): ?array
     {
+        $this->lastRestoreFailed = false;
         $marker = Cache::pull($this->markerKey($server->uuid));
         $restore = $this->restoreFromActivity($server);
 
@@ -122,6 +126,8 @@ class RestoreSyncService
             return null;
         }
         if ($this->restoreFailed($server, (int) $restore['at'])) {
+            $this->lastRestoreFailed = true;
+
             return null;
         }
 

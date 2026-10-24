@@ -49,6 +49,7 @@ beforeEach(function () {
     $this->ops->shouldReceive('power')->with('srv-mp', 'stop')->andReturnUsing(function () {
         $this->power = 'offline';
     });
+    $this->ops->shouldReceive('power')->with('srv-mp', 'start');   // #69: started again at the end
     $this->ops->shouldReceive('serverBackupLimit')->andReturn(5);
     $this->ops->shouldReceive('listBackups')->andReturn([new BackupRef('b-1', 'Pre-modpack', 10, false, true, now()->toIso8601String(), now()->toIso8601String())]);
     app()->instance(PanelServerOps::class, $this->ops);
@@ -282,6 +283,7 @@ it('installs a pack end to end', function () {
         ->and($this->backupNames)->toBe(["Pre-modpack \u{2192} Test Pack v1"])
         ->and([$pack->name, $pack->version_number, $pack->loader, $pack->minecraft])->toBe(['Test Pack', 'v1', 'fabric', '1.20.1']);
     $this->ops->shouldHaveReceived('power')->with('srv-mp', 'stop')->once();
+    $this->ops->shouldHaveReceived('power')->with('srv-mp', 'start')->once();   // #69: it was running
 
     $mods = ServerMod::forServer('srv-mp')->orderBy('source_id')->get();
     expect($mods->pluck('source_id')->all())->toBe(['MODA', 'MODB'])

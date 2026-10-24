@@ -32,6 +32,9 @@ class SyncAfterRestoreJob implements ShouldQueue
         $server = class_exists($model) ? $model::query()->where('uuid', $this->serverUuid)->first() : null;
         if ($server !== null && $server->status === null) {
             $sync->completed($server);
+            // Then start it again if it was running before the restore (#69).
+            $auto = app(\ServerSuite\Services\AutoStartService::class);
+            $sync->lastRestoreFailed ? $auto->forget($this->serverUuid) : $auto->resume($this->serverUuid, 'restore');
         }
     }
 }
