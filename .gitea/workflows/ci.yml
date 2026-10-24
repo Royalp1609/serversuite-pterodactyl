@@ -4,15 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # release-watch (docker-compose repo) starts this against a new panel
-  # release, so its "Investigate" issue says straight away whether the
-  # extension still installs and passes. Empty = the usual matrix.
-  workflow_dispatch:
-    inputs:
-      panel_ref:
-        description: "pterodactyl/panel tag to test against (empty: the usual versions)"
-        required: false
-        default: ""
 
 jobs:
   lint:
@@ -83,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        panel: ${{ fromJSON(github.event.inputs.panel_ref && format('["{0}"]', github.event.inputs.panel_ref) || '["v1.14.0", "v1.15.2"]') }}
+        panel: [v1.14.0, v1.15.2]
     env:
       PANEL: ${{ github.workspace }}/../panel
     steps:
@@ -150,7 +141,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        panel: ${{ fromJSON(github.event.inputs.panel_ref && format('["{0}"]', github.event.inputs.panel_ref) || '["v1.14.0", "v1.15.2"]') }}
+        panel: [v1.14.0, v1.15.2]
     env:
       PANEL: ${{ github.workspace }}/../panel
     steps:
