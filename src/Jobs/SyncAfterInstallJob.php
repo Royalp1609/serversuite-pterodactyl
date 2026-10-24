@@ -27,5 +27,7 @@ class SyncAfterInstallJob implements ShouldQueue
     public function handle(PostSwitchService $post): void
     {
         $post->finish($this->serverUuid);
+        // Then start it again if it was running before the reinstall (#69).
+        app(\ServerSuite\Services\AutoStartService::class)->resume($this->serverUuid, 'reinstall');
     }
 }

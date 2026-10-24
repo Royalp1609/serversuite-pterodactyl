@@ -111,9 +111,10 @@ export default () => {
     }, [stage]);
 
     // After the install: wait for the server to run, then go to the console.
+    // After a restore: stay (the Mods tab has news), but say it runs again or offer Start (#69).
     useEffect(() => {
-        if (stage !== 'starting') return;
-        if (power === 'running') {
+        if (stage !== 'starting' && stage !== 'restored') return;
+        if (power === 'running' && stage === 'starting') {
             setStage(null);
             history.push(`/server/${id}`);
         } else if (power === 'offline' && offlineSince === null) {
@@ -132,7 +133,7 @@ export default () => {
     };
     const close = () => setStage(null);
     // Not starting on its own: whoever reinstalled it doesn't start it (Settings → Reinstall, an admin).
-    const idle = stage === 'starting' && power === 'offline' && offlineSince !== null && now - offlineSince > 15000;
+    const idle = (stage === 'starting' || stage === 'restored') && power === 'offline' && offlineSince !== null && now - offlineSince > 15000;
     const restore = stage === 'restoring' || stage === 'restored';
 
     const steps = restore
@@ -180,11 +181,15 @@ export default () => {
                     </div>
                 )}
 
-                {stage === 'starting' && !packRunning && (
+                {stage === 'restored' && power === 'running' && (
+                    <p className="text-sm mb-4" style={{ color: 'rgb(52,211,153)' }}>The server is running again.</p>
+                )}
+
+                {((stage === 'starting' && !packRunning) || (stage === 'restored' && idle)) && (
                     <div className="text-sm text-neutral-300 mb-4 w-full">
                         {idle ? (
                             <>
-                                The install finished, but nothing has started the server.{' '}
+                                {stage === 'restored' ? 'The restore finished' : 'The install finished'}, but nothing has started the server.{' '}
                                 <Can action={'control.start'} renderOnError={<span className="text-neutral-400">You don&apos;t have permission to start it.</span>}>
                                     <button onClick={start} disabled={busy} className="ml-2 px-3 py-2 rounded-lg text-white inline-flex items-center gap-2" style={{ background: 'rgb(16,185,129)', opacity: busy ? 0.6 : 1 }}>
                                         <FontAwesomeIcon icon={faPlay} /> Start the server

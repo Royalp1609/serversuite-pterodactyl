@@ -33,7 +33,8 @@ use ServerSuite\Support\SuiteActivity;
  * ("Pre-remove") -> removing: delete the files the pack installed, forget
  * its mods and the pack itself.
  *
- * The server is left stopped; the owner starts it when ready.
+ * The server is started again at the end if it was running when the install
+ * began (#69); otherwise it is left stopped for the owner.
  */
 class ModpackInstaller
 {
@@ -105,7 +106,8 @@ class ModpackInstaller
         $state = $pack->state ?? [];
         if (empty($state['stop_sent_at'])) {
             $this->ops->power($pack->server_uuid, 'stop');
-            $pack->mergeState(['stop_sent_at' => now()->getTimestamp()]);
+            // Started again when the pack is done (#69).
+            $pack->mergeState(['stop_sent_at' => now()->getTimestamp(), 'was_running' => true]);
         } elseif (now()->getTimestamp() - (int) $state['stop_sent_at'] > 300) {
             throw new ModpackException('The server did not stop within 5 minutes. Stop it from the console and try again.');
         }
@@ -222,6 +224,7 @@ class ModpackInstaller
 
         $pack->status = 'removed';   // ends step()'s loop
         $pack->delete();
+        $this->startAgain($pack, 'modpack removal');
 
         return null;
     }
@@ -417,7 +420,23 @@ class ModpackInstaller
             'files' => count($plan['install'] ?? []), 'failed' => count($failed),
         ]);
 
+        $this->startAgain($pack, 'modpack');
+
         return null;
+    }
+
+    /** Start the server if it was running when the install or removal began (#69). */
+    private function startAgain(Modpack $pack, string $after): void
+    {
+        if (empty($pack->state['was_running'])) {
+            return;
+        }
+        try {
+            $this->ops->power($pack->server_uuid, 'start');
+            SuiteActivity::logFor($pack->server_uuid, 'server:serversuite.auto-started', ['after' => $after]);
+        } catch (\Throwable $e) {
+            Log::warning("[Server Suite] could not start {$pack->server_uuid} after the modpack: {$e->getMessage()}");
+        }
     }
 
     /** Manifest: the pack's mods are tracked mods linked to the pack. */

@@ -139,6 +139,21 @@ class ModManagerServiceProvider extends ServiceProvider
 
         // An install or reinstall finished, however it was started: make
         // sure the startup finds a jar (Forge 26.x leaves no server.jar).
+        // A reinstall or restore starts (#69): remember whether the server was
+        // running, to start it again afterwards. Read here, in the panel's own
+        // request and before it tells Wings (which stops the server), not
+        // after commit. A failed install forgets it.
+        $server::updated(function ($s) {
+            if (! $s->wasChanged('status')) {
+                return;
+            }
+            if (in_array($s->status, ['installing', 'restoring_backup'], true)) {
+                app(\ServerSuite\Services\AutoStartService::class)->remember((string) $s->uuid);
+            } elseif (in_array($s->status, ['install_failed', 'reinstall_failed'], true)) {
+                app(\ServerSuite\Services\AutoStartService::class)->forget((string) $s->uuid);
+            }
+        });
+
         $server::updated(function ($s) {
             if (! $s->wasChanged('status') || $s->getOriginal('status') !== 'installing' || $s->status !== null) {
                 return;

@@ -192,9 +192,9 @@ export default () => {
                 const nowRunning = d.status?.status === 'installing';
                 if (wasRunning.current && !nowRunning) {
                     setNotice(d.status === null
-                        ? "Modpack removed. Your own mods and the worlds are still there; start the server from the console when you're ready."
+                        ? 'Modpack removed. Your own mods and the worlds are still there. The server starts again if it was running before.'
                         : d.status?.status === 'installed'
-                            ? "Modpack installed. Start the server from the console when you're ready."
+                            ? 'Modpack installed. The server starts again if it was running before; otherwise start it from the console when you\'re ready.'
                             : null);
                 }
                 wasRunning.current = nowRunning;
@@ -334,7 +334,7 @@ export default () => {
                             <p className="text-xs text-neutral-400 mt-2">
                                 {s.target.action === 'remove'
                                     ? 'The server stays stopped. You can leave this page.'
-                                    : `${s.done} of ${s.total} files${s.failed > 0 ? ` (${s.failed} failed)` : ''}. The server stays stopped until the install finishes. You can leave this page.`}
+                                    : `${s.done} of ${s.total} files${s.failed > 0 ? ` (${s.failed} failed)` : ''}. The server stays stopped until the install finishes, then starts again if it was running. You can leave this page.`}
                             </p>
                         </>
                     )}
