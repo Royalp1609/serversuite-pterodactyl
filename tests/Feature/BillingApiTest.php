@@ -70,6 +70,15 @@ it('never removes subdomains when the allowance drops', function () {
     expect(Subdomain::query()->count())->toBe(2);
 });
 
+it('reports effective_keep as what rotation keeps: the backup limit (#73)', function () {
+    // A keep setting doesn't change it: rotation keeps exactly the limit.
+    $this->putJson(api('external:svc-42', '/backups'), ['enabled' => true, 'interval_hours' => 24, 'keep' => 5])
+        ->assertOk()->assertJsonPath('attributes.backups.backup_limit', 3)->assertJsonPath('attributes.backups.effective_keep', 3);
+
+    $this->server->forceFill(['backup_limit' => 0])->save();
+    $this->getJson(api('external:svc-42'))->assertOk()->assertJsonPath('attributes.backups.effective_keep', 0);
+});
+
 it('sets the backup plan and keeps what a later call leaves out', function () {
     $this->putJson(api('external:svc-42', '/backups'), ['enabled' => true, 'interval_hours' => 24, 'hour' => 4, 'keep' => 5])
         ->assertOk()->assertJsonPath('attributes.backups.interval_hours', 24)->assertJsonPath('attributes.backups.hour', 4);

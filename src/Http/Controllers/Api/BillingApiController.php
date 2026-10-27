@@ -10,7 +10,7 @@ use ServerSuite\Http\Requests\Api\SetAllowanceRequest;
 use ServerSuite\Http\Requests\Api\SetBackupPlanRequest;
 use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Models\Subdomain;
-use ServerSuite\Services\BackupRetentionResolver;
+use ServerSuite\Services\BackupRotationService;
 use ServerSuite\Services\SubdomainService;
 use ServerSuite\Support\BackupSchedule;
 use ServerSuite\Support\SuiteActivity;
@@ -115,7 +115,8 @@ class BillingApiController extends Controller
                     'interval_hours' => $s->backup_interval_hours === null ? null : (int) $s->backup_interval_hours,
                     'hour' => $hour,
                     'keep' => $s->backup_keep === null ? null : (int) $s->backup_keep,
-                    'effective_keep' => app(BackupRetentionResolver::class)->resolve($server->uuid),
+                    // What rotation keeps: the backup limit (the resolver only without one).
+                    'effective_keep' => app(BackupRotationService::class)->effectiveKeep($server->uuid),
                     'backup_limit' => (int) $server->backup_limit,
                     'timezone' => BackupSchedule::timezone(),
                     'next_run' => $next,
