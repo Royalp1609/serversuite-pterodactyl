@@ -53,6 +53,33 @@ class BackupRotationService
     }
 
     /**
+     * How many backups rotation keeps for a server: what the billing API and
+     * the UI report. 0 when the panel forbids backups (rotation skips).
+     */
+    public function effectiveKeep(string $serverUuid, ?int $keepOverride = null): int
+    {
+        $limit = $this->ops->serverBackupLimit($serverUuid);
+
+        return $limit !== null && $limit <= 0 ? 0 : $this->keepFor($serverUuid, $limit, $keepOverride);
+    }
+
+    /**
+     * Retention equals the panel-set backup limit: panel admins control the
+     * count via the server's backup_limit, and server admins cannot change
+     * it. An explicit override (CLI --keep) is still honoured but can never
+     * exceed the limit. The resolver is only a fallback for the unusual case
+     * of a server with no limit configured at all.
+     */
+    private function keepFor(string $serverUuid, ?int $limit, ?int $keepOverride): int
+    {
+        if ($keepOverride !== null) {
+            return $limit === null ? $keepOverride : min($keepOverride, $limit);
+        }
+
+        return $limit ?? $this->retention->resolve($serverUuid);
+    }
+
+    /**
      * Run one rotation cycle for a server: ensure room, create one rolling
      * backup, and trim at most one excess backup.
      *
@@ -70,16 +97,7 @@ class BackupRotationService
             return RotationResult::skipped('backups_disabled');
         }
 
-        // Retention equals the panel-set backup limit: panel admins control
-        // the count via the server's backup_limit, and server admins cannot
-        // change it. An explicit override (CLI --keep) is still honoured but
-        // can never exceed the limit. The resolver is only a fallback for the
-        // unusual case of a server with no limit configured at all.
-        if ($keepOverride !== null) {
-            $effectiveKeep = $limit === null ? $keepOverride : min($keepOverride, $limit);
-        } else {
-            $effectiveKeep = $limit ?? $this->retention->resolve($serverUuid);
-        }
+        $effectiveKeep = $this->keepFor($serverUuid, $limit, $keepOverride);
 
         if ($effectiveKeep < 1) {
             return RotationResult::skipped('keep_below_one');
