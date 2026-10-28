@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation, useRouteMatch } from 'react-router-dom';
 import { useStoreState } from 'easy-peasy';
+import http from '@/api/http';
 import Can from '@/components/elements/Can';
 import { ServerContext } from '@/state/server';
 import ReinstallScreen from './ReinstallScreen';
@@ -55,6 +56,17 @@ const SUITE: Record<string, { group: string; icon: IconDefinition }> = {
     '/notifications': { group: 'Configuration', icon: faBell },
 };
 
+// Tabs that only some games have (#78): path => feature in the server's game profile.
+// Tabs not listed (Backups, Subdomains, Notifications) work on every game.
+const GAME_FEATURE: Record<string, string> = {
+    '/mod-manager': 'mods',
+    '/modpacks': 'modpacks',
+    '/versions': 'versions',
+    '/properties': 'properties',
+    '/players': 'players',
+    '/velocity': 'network',
+};
+
 // Order inside each group, as on Pelican.
 const ORDER = [
     '/', '/activity',
@@ -86,10 +98,32 @@ const useExtensionEggs = (ids: string[]) => {
     return eggs;
 };
 
+/**
+ * The Server Suite features the server's game has (Minecraft: all of them).
+ * null while loading: game-specific tabs wait, so a Rust server never flashes
+ * the Minecraft tabs. If the check fails they show, and the server still
+ * refuses what doesn't apply.
+ */
+const useGameFeatures = (uuid?: string) => {
+    const [features, setFeatures] = useState<string[] | null>(null);
+    useEffect(() => {
+        if (!uuid) return;
+        let gone = false;
+        setFeatures(null);
+        http.get(`/extensions/serversuite/${uuid}/game`)
+            .then((res) => !gone && setFeatures(res.data.data.features as string[]))
+            .catch(() => !gone && setFeatures(Object.values(GAME_FEATURE)));
+        return () => { gone = true; };
+    }, [uuid]);
+    return features;
+};
+
 const ServerSidebar = () => {
     const rootAdmin = useStoreState((state: any) => state.user.data?.rootAdmin) as boolean;
     const serverId = ServerContext.useStoreState((state) => state.server.data?.internalId);
     const serverEgg = ServerContext.useStoreState((state) => (state.server.data as any)?.BlueprintFramework?.eggId);
+    const uuid = ServerContext.useStoreState((state) => state.server.data?.uuid);
+    const features = useGameFeatures(uuid);
     const match = useRouteMatch<{ id: string }>();
     const ext = blueprintRoutes.server as Route[];
     const ids = [...new Set(ext.map((r) => r.identifier || ''))];
@@ -121,6 +155,10 @@ const ServerSidebar = () => {
         .filter((r) => {
             const list = eggs[r.identifier || ''] || ['-1'];
             return list.includes('-1') || list.includes(String(serverEgg));
+        })
+        .filter((r) => {
+            const feature = r.identifier === 'serversuite' ? GAME_FEATURE[r.path] : undefined;
+            return !feature || (features !== null && features.includes(feature));
         })
         .forEach((r) => {
             const s = r.identifier === 'serversuite' ? SUITE[r.path] : undefined;

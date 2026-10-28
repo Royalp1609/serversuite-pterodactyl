@@ -254,6 +254,58 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Games (#77)
+    |--------------------------------------------------------------------------
+    | Games other than Minecraft, recognised by the Steam app id in the
+    | server's SRCDS_APPID variable (egg tags and nests aren't reliable).
+    | Servers that are neither one of these nor Minecraft are "unknown" and
+    | only get the game-neutral tabs: Dashboard, Backups, Notifications and
+    | Subdomains. An admin can set an egg's game by hand on the Server Suite
+    | admin page.
+    |
+    | startup:   words in the startup command that identify the game, for
+    |            eggs without SRCDS_APPID (Pterodactyl's older Rust egg).
+    | features:  extra Server Suite features for the game, on top of the
+    |            game-neutral ones. List one only once it works for that game.
+    | srv:       SRV service for subdomains (e.g. "_minecraft._tcp"); null =
+    |            A record only, players type the port.
+    | variables: egg variable names per setting, first match wins. Eggs for
+    |            the same game drift (Pterodactyl's Rust egg 14 uses HOSTNAME,
+    |            the pelican-eggs one SERVER_HOSTNAME).
+    */
+    'games' => [
+        'rust' => [
+            'name'          => 'Rust',
+            'steam_app_ids' => [258550],
+            'startup'       => ['RustDedicated'],
+            'features'      => [],
+            'srv'           => null,
+            'mods_label'    => 'Plugins',
+            'variables'     => [
+                'hostname'   => ['SERVER_HOSTNAME', 'HOSTNAME'],
+                'framework'  => ['FRAMEWORK'],
+                'query_port' => ['QUERY_PORT'],
+                'rcon_port'  => ['RCON_PORT'],
+                'app_port'   => ['APP_PORT'],
+            ],
+        ],
+        'valheim' => [
+            'name'          => 'Valheim',
+            'steam_app_ids' => [896660],
+            'startup'       => ['valheim_server'],
+            'features'      => [],
+            'srv'           => null,
+            'mods_label'    => 'Mods',
+            'variables'     => [
+                'server_name' => ['SERVER_NAME'],
+                'world'       => ['WORLD'],
+                'modpack'     => ['V_MODPACK'],
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Egg Catalog
     |--------------------------------------------------------------------------
     | Server Suite doesn't ship a hardcoded egg list. It reads the community-

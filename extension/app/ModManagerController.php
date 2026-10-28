@@ -495,6 +495,22 @@ class ModManagerController extends Controller
     }
 
     /**
+     * GET /{server}/game: which game the server runs and the Server Suite
+     * features it gets (#77). The sidebar uses it to hide tabs.
+     */
+    public function game(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        $game = app(\ServerSuite\Services\GameDetectionService::class)->for($srv);
+
+        return response()->json(['data' => [
+            'key' => $game->key, 'name' => $game->name, 'features' => $game->features, 'mods_label' => $game->modsLabel,
+        ]]);
+    }
+
+    /**
      * POST /{server}/loader-switch   { egg_id, version?, confirm_name }
      * Destructive: a loader change is always a clean-slate reset. Gated by typing
      * the server name. Returns {status: stopping} until offline, then reinstalling.
@@ -1998,6 +2014,28 @@ class ModManagerController extends Controller
         return $this->adminSubdomainRedirect(fn ($svc) => $svc->removeDomain($id), 'Domain removed.');
     }
 
+    /** POST /admin/egg-games   { game: { <egg id>: <game key> | '' } } (#77; '' = detect) */
+    public function adminSaveEggGames(Request $request)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $choices = array_keys(\ServerSuite\Services\GameDetectionService::choices());
+        $data = $request->validate([
+            'game'   => ['required', 'array'],
+            'game.*' => ['nullable', 'string', \Illuminate\Validation\Rule::in($choices)],
+        ]);
+
+        $current = \ServerSuite\Services\GameDetectionService::overrides();
+        foreach ($data['game'] as $eggId => $game) {
+            $game = (string) ($game ?? '');
+            if (($current[(int) $eggId] ?? '') === $game || ! \Pterodactyl\Models\Egg::query()->whereKey((int) $eggId)->exists()) {
+                continue;
+            }
+            \ServerSuite\Services\GameDetectionService::setOverride((int) $eggId, $game === '' ? null : $game);
+        }
+
+        return redirect()->to('/admin/extensions/serversuite?' . http_build_query(['games_ok' => 'Games saved.']) . '#games');
+    }
+
     /** POST /admin/subdomain-allowances   { allowance: { <server uuid>: n } } */
     public function adminSaveAllowances(Request $request)
     {
@@ -2068,6 +2106,13 @@ class ModManagerController extends Controller
     {
         if (! PanelPermissions::allows($request->user(), $server, $endpoint)) {
             abort(403, 'You do not have permission to do this on this server (needs ' . implode(', ', PanelPermissions::required($endpoint)) . ').');
+        }
+
+        // Minecraft-only endpoints on other games (#78): the tabs are hidden,
+        // and the server refuses too.
+        $blocker = \ServerSuite\Support\GameGuard::endpointBlocker($server, $endpoint);
+        if ($blocker !== null) {
+            abort(404, $blocker);
         }
     }
 }

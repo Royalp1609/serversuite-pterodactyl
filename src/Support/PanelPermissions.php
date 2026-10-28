@@ -113,6 +113,8 @@ final class PanelPermissions
         'subdomainsClaim' => ['subdomains.manage'], 'subdomainsRelease' => ['subdomains.manage'],
         'subdomainsRepoint' => ['subdomains.manage'], 'subdomainsStatusCard' => ['subdomains.manage'],
         'subdomainsSaveOwn' => ['subdomains.manage'], 'subdomainsRemoveOwn' => ['subdomains.manage'],
+        // Which game the server runs (#77): the sidebar asks, so anyone on the server.
+        'game' => ['member'],
     ];
 
     /** Tab => permission pattern Pterodactyl's router checks (Components.yml carries the same). */
@@ -136,7 +138,12 @@ final class PanelPermissions
             return false;
         }
         foreach (self::ENDPOINTS[$endpoint] as $permission) {
-            if ($permission === 'owner' ? ! self::isOwner($user, $server) : ! $user->can($permission, $server)) {
+            $ok = match ($permission) {
+                'owner'  => self::isOwner($user, $server),
+                'member' => self::isMember($user, $server),
+                default  => $user->can($permission, $server),
+            };
+            if (! $ok) {
                 return false;
             }
         }
@@ -148,6 +155,17 @@ final class PanelPermissions
     public static function isOwner(?object $user, object $server): bool
     {
         return $user !== null && ((bool) ($user->root_admin ?? false) || (int) ($server->owner_id ?? -1) === (int) ($user->id ?? -2));
+    }
+
+    /** The owner, a root admin, or any subuser of the server. */
+    public static function isMember(?object $user, object $server): bool
+    {
+        if (self::isOwner($user, $server)) {
+            return true;
+        }
+
+        return $user !== null && method_exists($server, 'subusers')
+            && $server->subusers()->where('user_id', $user->id ?? 0)->exists();
     }
 
     /** Whether $user holds every one of $permissions on $server. @param list<string> $permissions */

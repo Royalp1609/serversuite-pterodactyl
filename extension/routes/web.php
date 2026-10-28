@@ -26,6 +26,10 @@ Route::post('/admin/import-catalog', [ModManagerController::class, 'adminImportC
 Route::post('/admin/update-eggs', [ModManagerController::class, 'adminUpdateAllEggs'])
     ->name('extension.serversuite.admin-update-eggs');
 
+// Which game the server runs (#77): the sidebar hides tabs by it.
+Route::get('/{server}/game', [ModManagerController::class, 'game'])
+    ->name('extension.serversuite.game');
+
 // Backup before mod changes (#24): the clearance a mod change needs.
 Route::get('/{server}/prechange', [ModManagerController::class, 'prechangeMode'])
     ->name('extension.serversuite.prechange-mode');
@@ -129,6 +133,8 @@ Route::post('/admin/domains/{id}/toggle', [ModManagerController::class, 'adminTo
     ->whereNumber('id')->name('extension.serversuite.admin-toggle-domain');
 Route::post('/admin/domains/{id}/remove', [ModManagerController::class, 'adminRemoveDomain'])
     ->whereNumber('id')->name('extension.serversuite.admin-remove-domain');
+Route::post('/admin/egg-games', [ModManagerController::class, 'adminSaveEggGames'])
+    ->name('extension.serversuite.admin-egg-games');
 Route::post('/admin/subdomain-allowances', [ModManagerController::class, 'adminSaveAllowances'])
     ->name('extension.serversuite.admin-subdomain-allowances');
 

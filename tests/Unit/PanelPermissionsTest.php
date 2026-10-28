@@ -50,7 +50,7 @@ it('only asks for permissions a subuser can actually be granted', function () {
     $grantable = grantable();
 
     foreach (PanelPermissions::ENDPOINTS as $endpoint => $perms) {
-        foreach (array_diff($perms, ['owner']) as $p) {
+        foreach (array_diff($perms, ['owner', 'member']) as $p) {   // pseudo-permissions, checked by PanelPermissions itself
             expect($grantable)->toContain($p);
         }
     }

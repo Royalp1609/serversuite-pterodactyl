@@ -11,6 +11,7 @@ use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Models\Modpack;
 use ServerSuite\Models\ServerMod;
 use ServerSuite\Modpacks\MrpackIndex;
+use ServerSuite\Support\GameGuard;
 use ServerSuite\Support\RepositoryManager;
 
 /**
@@ -342,6 +343,12 @@ class ModpackService
      */
     public function start(object $server, string $projectId, string $versionId, int $userId, bool $canSwitch = false, bool $wipeConfirmed = false, string $source = 'modrinth'): Modpack
     {
+        try {
+            GameGuard::assertMinecraft($server, 'install a modpack');
+        } catch (\RuntimeException $e) {
+            throw new ModpackException($e->getMessage());
+        }
+
         $p = $this->preview($server, $projectId, $versionId, $canSwitch, $source);
         if ($p['blockers'] !== []) {
             throw new ModpackException($p['blockers'][0]);

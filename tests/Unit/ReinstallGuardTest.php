@@ -162,6 +162,8 @@ it('loader switch refuses before stopping, wiping or swapping the egg', function
 
 it('does not block a normal server (nuclear proceeds to the stop)', function () {
     [$ops] = bindSwitchFakes();
+    // A Minecraft server (#78): Server Suite has its loader on record.
+    \ServerSuite\Models\ModManagerSetting::forServer('srv-1')->forceFill(['loader' => 'paper'])->save();
 
     $result = app(VersionSwitchService::class)->nuclear(new ReinstallableServer(), 'clean_slate');
 

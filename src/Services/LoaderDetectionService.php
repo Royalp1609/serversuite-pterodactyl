@@ -85,18 +85,33 @@ class LoaderDetectionService
      */
     public function detectDetailed(object $server): LoaderDetectionResult
     {
+        $result = $this->eggLoader($server);
+
+        if (! $result->isResolved()) {
+            return $result;
+        }
+
+        return new LoaderDetectionResult(
+            loader: $result->loader,
+            confidence: $result->confidence,
+            signal: $result->signal,
+            gameVersion: $this->detectGameVersion($server, $this->egg($server)),
+        );
+    }
+
+    /**
+     * The loader from the egg alone: no stored settings, no file reads and no
+     * game version, so it's cheap enough for every page render (#81).
+     */
+    public function eggLoader(object $server): LoaderDetectionResult
+    {
         $egg = $this->egg($server);
 
         // --- Signal 1: egg UUID mapped in config -----------------------------
         $uuid = $egg->uuid ?? null;
         $uuidMap = (array) config('serversuite.detection.egg_uuids', []);
         if ($uuid && isset($uuidMap[$uuid])) {
-            return new LoaderDetectionResult(
-                loader: $uuidMap[$uuid],
-                confidence: self::CONFIDENCE_EGG_UUID,
-                signal: 'egg_uuid',
-                gameVersion: $this->detectGameVersion($server, $egg),
-            );
+            return new LoaderDetectionResult($uuidMap[$uuid], self::CONFIDENCE_EGG_UUID, 'egg_uuid');
         }
 
         // Gather text from progressively weaker signals.
@@ -110,12 +125,7 @@ class LoaderDetectionService
         foreach ($signals as $signalName => [$confidence, $haystack]) {
             $loader = $this->matchLoader($haystack);
             if ($loader !== null) {
-                return new LoaderDetectionResult(
-                    loader: $loader,
-                    confidence: $confidence,
-                    signal: $signalName,
-                    gameVersion: $this->detectGameVersion($server, $egg),
-                );
+                return new LoaderDetectionResult($loader, $confidence, $signalName);
             }
         }
 
@@ -352,7 +362,7 @@ class LoaderDetectionService
      *
      * @param string[] $names  Candidate env-variable names (case-insensitive).
      */
-    protected function serverVariable(object $server, array $names): ?string
+    public function serverVariable(object $server, array $names): ?string
     {
         $wanted = array_map('strtoupper', $names);
 
