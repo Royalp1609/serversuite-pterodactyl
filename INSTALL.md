@@ -1,7 +1,7 @@
 # Server Suite (PterodactylModManager) — Installation & Deployment Guide
 
 Two artifacts, deployed in this order, always:
-(both are attached to every release on the repo's **Releases** page in Gitea,
+(both are attached to every release on the repo's **Releases** page,
 built by CI from the version tag):
 
 1. **Backend** — Composer package `pterodactyl-serversuite/serversuite` (all logic)
