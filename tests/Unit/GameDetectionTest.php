@@ -151,3 +151,12 @@ it('refuses version and loader switches, resets and modpacks on other games befo
         ->and(fn () => app(ModpackService::class)->start(rustServer(), 'PACK', 'v1', 1))
         ->toThrow(ModpackException::class, 'Cannot install a modpack: this only works on a Minecraft server (this one runs Rust).');
 });
+
+it('recognises an egg without SRCDS_APPID by its server binary', function () {
+    // Pterodactyl's older Rust egg: the app id is only in its install script.
+    $old = gameServer('srv-rust-old', ['name' => 'Rust', 'nest' => (object) ['name' => 'Rust'],
+        'startup' => './RustDedicated -batchmode +server.port {{SERVER_PORT}}'], ['HOSTNAME' => 'A Rust Server'], 14);
+
+    expect(app(GameDetectionService::class)->for($old))->key->toBe('rust')->signal->toBe('startup')
+        ->and(app(GameDetectionService::class)->variable($old, 'hostname'))->toBe('A Rust Server');
+});

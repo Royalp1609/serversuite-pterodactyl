@@ -11,7 +11,8 @@ use ServerSuite\Support\Data\GameProfile;
  *
  * Order:
  *   1. an admin's choice for the server's egg (Server Suite admin page)
- *   2. the Steam app id in SRCDS_APPID, matched against config('serversuite.games')
+ *   2. the Steam app id in SRCDS_APPID, matched against config('serversuite.games'),
+ *      then the game's server binary in the startup command (eggs without SRCDS_APPID)
  *   3. Minecraft: the egg's nest is named Minecraft, or the egg alone names a loader
  *      (uuid, name, image, startup or install script; see LoaderDetectionService),
  *      or Server Suite already stored a loader for the server
@@ -64,6 +65,15 @@ class GameDetectionService
             foreach ($games as $game => $config) {
                 if (in_array((int) $appId, array_map('intval', (array) ($config['steam_app_ids'] ?? [])), true)) {
                     return GameProfile::fromConfig((string) $game, (array) $config, 'steam_app_id');
+                }
+            }
+        }
+
+        $startup = $this->startupText($server);
+        foreach ($games as $game => $config) {
+            foreach ((array) ($config['startup'] ?? []) as $marker) {
+                if ($marker !== '' && str_contains($startup, strtolower((string) $marker))) {
+                    return GameProfile::fromConfig((string) $game, (array) $config, 'startup');
                 }
             }
         }
@@ -171,4 +181,19 @@ class GameDetectionService
 
         return is_object($nest) && str_contains(strtolower((string) ($nest->name ?? '')), 'minecraft');
     }
+
+    /** The server's startup command, else the egg's (Pelican eggs keep a map of them), lower-cased. */
+    protected function startupText(object $server): string
+    {
+        $egg = $server->egg ?? null;
+        $parts = [(string) ($server->startup ?? '')];
+        if (is_object($egg)) {
+            $parts[] = (string) ($egg->startup ?? '');
+            $commands = $egg->startup_commands ?? [];
+            $parts = array_merge($parts, array_map('strval', is_array($commands) ? array_values($commands) : []));
+        }
+
+        return strtolower(implode(' ', $parts));
+    }
+
 }

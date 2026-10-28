@@ -263,6 +263,8 @@ return [
     | Subdomains. An admin can set an egg's game by hand on the Server Suite
     | admin page.
     |
+    | startup:   words in the startup command that identify the game, for
+    |            eggs without SRCDS_APPID (Pterodactyl's older Rust egg).
     | features:  extra Server Suite features for the game, on top of the
     |            game-neutral ones. List one only once it works for that game.
     | srv:       SRV service for subdomains (e.g. "_minecraft._tcp"); null =
@@ -275,6 +277,7 @@ return [
         'rust' => [
             'name'          => 'Rust',
             'steam_app_ids' => [258550],
+            'startup'       => ['RustDedicated'],
             'features'      => [],
             'srv'           => null,
             'mods_label'    => 'Plugins',
@@ -289,6 +292,7 @@ return [
         'valheim' => [
             'name'          => 'Valheim',
             'steam_app_ids' => [896660],
+            'startup'       => ['valheim_server'],
             'features'      => [],
             'srv'           => null,
             'mods_label'    => 'Mods',
