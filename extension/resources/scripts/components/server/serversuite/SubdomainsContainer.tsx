@@ -13,8 +13,9 @@ import styled from 'styled-components/macro';
  * Server Suite — Subdomains tab (#14).
  * Claim <name>.<domain> for this server: on a domain the panel admin offers,
  * or on the server's own Cloudflare domain. The backend creates an A record
- * (the server's IP) and a SRV record (the port), so players can join with
- * just the name. Endpoints under /extensions/serversuite/<uuid>/subdomains.
+ * (the server's IP) and, for games that look one up (Minecraft), a SRV record
+ * (the port), so players can join with just the name. Other games join with
+ * name:port, which the tab shows (#79). Endpoints under /extensions/serversuite/<uuid>/subdomains.
  * No business logic here: SubdomainService enforces every rule.
  * Each subdomain can also have a public status card (#29) at
  * /status/<fqdn>, off by default.
@@ -101,7 +102,7 @@ const Stale = styled.span`
 `;
 
 interface Item {
-    id: number; fqdn: string; own: boolean; ip: string | null; port: number | null; stale: boolean; move_pending: boolean;
+    id: number; fqdn: string; address: string; own: boolean; ip: string | null; port: number | null; stale: boolean; move_pending: boolean;
     status_public: boolean; card_url: string | null; badge_url: string | null;
 }
 interface Overview {
@@ -112,6 +113,7 @@ interface Overview {
     own: { zone: string | null; configured: boolean };
     items: Item[];
     status_cards: boolean;
+    game: { name: string; srv: boolean };
 }
 
 export default () => {
@@ -170,7 +172,10 @@ export default () => {
                     <div>
                         <Title><FontAwesomeIcon icon={faGlobe} /> Subdomains</Title>
                         <Subtitle>
-                            Give players an address instead of an IP and port. Using {data.used} of {data.allowance}.
+                            {data.game.srv
+                                ? 'Give players an address instead of an IP and port.'
+                                : `Give players an address instead of an IP. ${data.game.name} doesn't look up the port by name, so players join with the name and the port shown.`}{' '}
+                            Using {data.used} of {data.allowance}.
                         </Subtitle>
                     </div>
                 </Header>
@@ -180,7 +185,7 @@ export default () => {
                     <Row key={s.id}>
                         <div>
                             <Name>
-                                {s.fqdn}
+                                {s.address}
                                 {s.stale && (
                                     <Stale title="DNS moves within a minute of the server starting on the new address.">
                                         <FontAwesomeIcon icon={faExclamationTriangle} /> moves to {data.target.ip}:{data.target.port} after the next restart
@@ -193,7 +198,7 @@ export default () => {
                             </Meta>
                         </div>
                         <Actions>
-                            <GhostButton title="Copy" onClick={() => navigator.clipboard?.writeText(s.fqdn)}>
+                            <GhostButton title="Copy the address players join with" onClick={() => navigator.clipboard?.writeText(s.address)}>
                                 <FontAwesomeIcon icon={faCopy} />
                             </GhostButton>
                             {data.status_cards && (

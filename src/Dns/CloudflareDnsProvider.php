@@ -12,7 +12,8 @@ use ServerSuite\Contracts\DnsProvider;
  *  - Use a scoped API token (Zone > DNS > Edit on that zone only), never the
  *    Global API Key. The token is passed in, never logged or returned.
  *  - A records are DNS-only (proxied=false): Cloudflare's proxy doesn't carry
- *    Minecraft traffic and would hide the real IP the SRV record points at.
+ *    game traffic and would hide the real IP the SRV record points at.
+ *  - SRV records only for games whose clients look one up (#83).
  *  - Fixed API base, bearer token, timeouts; labels are validated here as
  *    well as by the caller before going into a record name.
  */
@@ -55,7 +56,7 @@ class CloudflareDnsProvider implements DnsProvider
         return $this->zoneId = (string) $id;
     }
 
-    public function createRecords(string $label, string $ip, int $port): array
+    public function createRecords(string $label, string $ip, int $port, ?string $srvService = '_minecraft._tcp'): array
     {
         self::assertLabel($label);
         $fqdn = $label . '.' . $this->zone;
@@ -67,7 +68,11 @@ class CloudflareDnsProvider implements DnsProvider
         }
         $aId = (string) $a->json('result.id');
 
-        $srv = $this->http()->post($base, $this->srvRecord($fqdn, $port));
+        if ($srvService === null) {
+            return ['fqdn' => $fqdn, 'a_record_id' => $aId, 'srv_record_id' => null];
+        }
+
+        $srv = $this->http()->post($base, $this->srvRecord($fqdn, $port, $srvService));
         if (! $srv->successful() || ! $srv->json('success')) {
             // Roll back rather than leave a half-configured name.
             $this->deleteRecords($aId, null);
@@ -77,7 +82,7 @@ class CloudflareDnsProvider implements DnsProvider
         return ['fqdn' => $fqdn, 'a_record_id' => $aId, 'srv_record_id' => (string) $srv->json('result.id')];
     }
 
-    public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $ip, int $port): void
+    public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $ip, int $port, string $srvService = '_minecraft._tcp'): void
     {
         $base = $this->recordsUrl();
 
@@ -89,7 +94,7 @@ class CloudflareDnsProvider implements DnsProvider
         }
 
         if ($srvRecordId) {
-            $res = $this->http()->patch("{$base}/{$srvRecordId}", $this->srvRecord($fqdn, $port));
+            $res = $this->http()->patch("{$base}/{$srvRecordId}", $this->srvRecord($fqdn, $port, $srvService));
             if (! $res->successful() || ! $res->json('success')) {
                 throw new \RuntimeException('Cloudflare SRV record update failed: ' . self::error($res));
             }
@@ -142,10 +147,14 @@ class CloudflareDnsProvider implements DnsProvider
     }
 
     /** @return array<string, mixed> */
-    private function srvRecord(string $fqdn, int $port): array
+    private function srvRecord(string $fqdn, int $port, string $service): array
     {
+        if (! preg_match('/^_[a-z0-9-]+\._(tcp|udp)$/', $service)) {
+            throw new \InvalidArgumentException('Invalid SRV service.');
+        }
+
         return [
-            'type' => 'SRV', 'name' => '_minecraft._tcp.' . $fqdn,
+            'type' => 'SRV', 'name' => $service . '.' . $fqdn,
             'data' => ['priority' => 0, 'weight' => 5, 'port' => $port, 'target' => $fqdn],
             'ttl' => 300, 'comment' => self::COMMENT,
         ];

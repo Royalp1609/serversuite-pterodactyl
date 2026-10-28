@@ -63,9 +63,65 @@ function panelDomain(): SubdomainDomain
 function allow(string $uuid, int $n): void
 {
     cfService()->setAllowance($uuid, $n);
+    // The bare test servers have no egg: a stored loader makes them Minecraft (#79).
+    $setting = ModManagerSetting::forServer($uuid);
+    if (! $setting->loader) {
+        $setting->forceFill(['loader' => 'paper'])->save();
+    }
 }
 
-beforeEach(fn () => fakeCloudflare());
+/** A Rust server (#79): Steam app id 258550, no SRV lookup. */
+function cfRust(int $port = 28015): object
+{
+    return (object) [
+        'uuid'       => 'rust-1',
+        'egg_id'     => 0,
+        'allocation' => (object) ['ip' => '203.0.113.20', 'ip_alias' => null, 'port' => $port],
+        'variables'  => collect([(object) ['env_variable' => 'SRCDS_APPID', 'server_value' => null, 'default_value' => '258550']]),
+    ];
+}
+
+beforeEach(function () {
+    fakeCloudflare();
+    \ServerSuite\Services\GameDetectionService::flush();
+});
+
+it('gives a Rust subdomain an A record only and shows name:port', function () {
+    $d = panelDomain();
+    cfService()->setAllowance('rust-1', 1);
+
+    $sub = cfService()->claim(cfRust(), 'rusty', $d->id);
+
+    expect($sub->fqdn)->toBe('rusty.play.example.com')->and($sub->srv_record_id)->toBeNull();
+    Http::assertNotSent(fn (Request $r) => $r->method() === 'POST' && ($r['type'] ?? null) === 'SRV');
+    $o = cfService()->overview(cfRust());
+    expect($o['game'])->toBe(['name' => 'Rust', 'srv' => false])
+        ->and($o['status_cards'])->toBeFalse()
+        ->and($o['items'][0]['address'])->toBe('rusty.play.example.com:28015');
+});
+
+it('moves a Rust subdomain by updating only the A record', function () {
+    $d = panelDomain();
+    cfService()->setAllowance('rust-1', 1);
+    $sub = cfService()->claim(cfRust(), 'rusty', $d->id);
+
+    cfService()->repoint(cfRust(28020), $sub->id);
+
+    $patches = collect(Http::recorded())->filter(fn ($p) => $p[0]->method() === 'PATCH');
+    expect($patches)->toHaveCount(1)
+        ->and($patches->first()[0]['type'])->toBe('A')
+        ->and($sub->fresh()->port)->toBe(28020);
+});
+
+it('keeps the SRV record and the name-only address on Minecraft', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    cfService()->claim(cfServer(), 'mysmp', $d->id);
+
+    $o = cfService()->overview(cfServer());
+    expect($o['game'])->toBe(['name' => 'Minecraft', 'srv' => true])
+        ->and($o['items'][0]['address'])->toBe('mysmp.play.example.com');
+});
 
 it('adds an admin domain after checking the token, and stores the token encrypted', function () {
     $d = panelDomain();

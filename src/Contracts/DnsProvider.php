@@ -4,7 +4,8 @@ namespace ServerSuite\Contracts;
 
 /**
  * A DNS provider that can point a subdomain at a game server: an A record for
- * the IP plus a SRV record carrying the port. Bound to one zone and one set of
+ * the IP, plus a SRV record carrying the port for games whose clients look one
+ * up (Minecraft: _minecraft._tcp). Bound to one zone and one set of
  * credentials (an admin domain, or a server's own domain).
  */
 interface DnsProvider
@@ -22,21 +23,22 @@ interface DnsProvider
     public function verify(): string;
 
     /**
-     * Create the A + SRV records for $label. Rolls back the A record if the
-     * SRV record fails, so a name is never left half-configured.
+     * Create the A record for $label, and the SRV record for $srvService
+     * (null = A record only, #83). Rolls back the A record if the SRV record
+     * fails, so a name is never left half-configured.
      *
-     * @return array{fqdn: string, a_record_id: string, srv_record_id: string}
+     * @return array{fqdn: string, a_record_id: string, srv_record_id: ?string}
      *
      * @throws \RuntimeException
      */
-    public function createRecords(string $label, string $ip, int $port): array;
+    public function createRecords(string $label, string $ip, int $port, ?string $srvService = '_minecraft._tcp'): array;
 
     /**
      * Point existing records at a new IP / port.
      *
      * @throws \RuntimeException
      */
-    public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $ip, int $port): void;
+    public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $ip, int $port, string $srvService = '_minecraft._tcp'): void;
 
     /** Best-effort cleanup; must not throw on records that are already gone. */
     public function deleteRecords(?string $aRecordId, ?string $srvRecordId): void;

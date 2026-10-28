@@ -336,7 +336,7 @@
         <div class="box">
             <div class="box-header with-border"><h3 class="box-title">About subdomains</h3></div>
             <div class="box-body">
-                <p>Server owners claim <code>name.yourdomain</code> from their server's <strong>Subdomains</strong> tab, or use their own Cloudflare domain. Each claim creates an A record (the server's IP, not proxied) and a <code>_minecraft._tcp</code> SRV record carrying the port, so players connect with just the name.</p>
+                <p>Server owners claim <code>name.yourdomain</code> from their server's <strong>Subdomains</strong> tab, or use their own Cloudflare domain. Each claim creates an A record (the server's IP, not proxied). Minecraft servers also get a <code>_minecraft._tcp</code> SRV record carrying the port, so players connect with just the name; Rust, Valheim and other games don't look one up, so their players add the port.</p>
                 <p>Records are removed when a server is deleted and re-pointed when its primary allocation changes.</p>
             </div>
         </div>
