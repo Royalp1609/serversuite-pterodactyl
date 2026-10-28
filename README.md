@@ -12,8 +12,8 @@ It ships as two parts that are always deployed together:
 | **Backend** | Composer package `pterodactyl-serversuite/serversuite`: all the logic, models, migrations and scheduled commands | `serversuite-pterodactyl-backend-v<version>.zip` |
 | **Extension** | [Blueprint](https://blueprint.zip) extension `serversuite`: the React tabs, the admin page and the routes | `serversuite.blueprint` |
 
-The sister project `pelican-server-suite`
-is the same suite as a native Pelican plugin.
+A sister project, Server Suite for Pelican, is the same suite as a native
+Pelican plugin.
 
 ---
 
@@ -225,9 +225,6 @@ Every change made through Server Suite (mods installed, updated or removed,
 version and loader switches, resets, backups, subdomains) shows in the server's
 **Activity** tab, with who did it.
 
-Upgrading: subusers who already hold `backup.*` or `startup.*` permissions now
-see the Backups and Versions tabs.
-
 ---
 
 ## Development
@@ -239,26 +236,16 @@ config/       serversuite.php defaults (admin settings override them)
 extension/    Blueprint extension source: conf.yml, React tabs, controller, routes, admin view
 tests/        Pest tests (Orchestra Testbench, SQLite, fakes for the panel and Wings)
 tools/        build-blueprint.py (package + checks), release.py
-.gitea/       CI and release workflows
 ```
 
-- **CI** (every PR and push to `main`): PHP lint, Pest on Laravel 11 and 12,
-  install into real Pterodactyl 1.14.0/1.15.2 checkouts with PHPStan, a
-  TypeScript check of the extension against both panel frontends, and a package
-  check (`serversuite.blueprint` in sync with `extension/`, versions match,
-  no Blueprint placeholder tokens such as `{name}` in source files).
+- Every change is tested with Pest on Laravel 11 and 12, installed into real
+  Pterodactyl 1.14.0 and 1.15.2 checkouts with PHPStan, and the extension is
+  type-checked against both panel frontends.
 - After changing anything in `extension/`, run `python3 tools/build-blueprint.py`
   and commit the rebuilt `serversuite.blueprint`.
-- **Releases**: bump the version in `composer.json` and `extension/conf.yml`,
-  then push a tag `v<version>`. The release workflow builds both files and
-  publishes the release, with notes listing the PRs merged since the last one.
-- Work is tracked as issues; each fix or feature is a branch and PR, and CI
-  must pass before it's merged.
 
-More detail: [PROVIDERS.md](PROVIDERS.md) (mod repositories),
-[RECONCILIATION.md](RECONCILIATION.md), [EGGS.md](EGGS.md),
-[PHASES.md](PHASES.md) (build history).
+More detail: [PROVIDERS.md](PROVIDERS.md) (mod repositories), [EGGS.md](EGGS.md).
 
 ## Licence
 
-MIT (see `composer.json`).
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).

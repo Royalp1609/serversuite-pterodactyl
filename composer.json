@@ -3,7 +3,7 @@
     "description": "A mod management plugin for Pterodactyl and Pelican panels.",
     "type": "library",
     "version": "0.17.4",
-    "license": "MIT",
+    "license": "AGPL-3.0-only",
     "authors": [
         {
             "name": "Your Name",

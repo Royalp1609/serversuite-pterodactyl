@@ -35,7 +35,7 @@ DIST = ROOT / "dist"
 # the same fixed date as before made PHP's opcache treat changed code as
 # unchanged, and the panel kept running the old version (2026-10-20).
 # What the panel needs from this repo; tests, CI and the extension source stay out.
-BACKEND = ["composer.json", "src", "config", "database", "resources", "routes", "lang", "INSTALL.md", "PROVIDERS.md"]
+BACKEND = ["composer.json", "LICENSE", "src", "config", "database", "resources", "routes", "lang", "INSTALL.md", "PROVIDERS.md"]
 
 
 def stamp(tag: str) -> tuple:
