@@ -192,6 +192,62 @@
     </div>
 </div>
 
+{{-- Games (#77): which game each egg runs; decides the tabs its servers get. --}}
+@php
+    $ssGameDetector = app(\ServerSuite\Services\GameDetectionService::class);
+    $ssGameChoices = \ServerSuite\Services\GameDetectionService::choices();
+    $ssGameOverrides = \ServerSuite\Services\GameDetectionService::overrides();
+    $ssGameEggs = \Pterodactyl\Models\Egg::query()->with('nest')->orderBy('nest_id')->orderBy('name')->get();
+    $ssEggServers = \Pterodactyl\Models\Server::query()->selectRaw('egg_id, count(*) as n')->groupBy('egg_id')->pluck('n', 'egg_id');
+@endphp
+<div class="row" id="games">
+    <div class="col-xs-12 col-md-8">
+        <div class="box">
+            <div class="box-header with-border"><h3 class="box-title">Games</h3></div>
+            <div class="box-body">
+                @if (request()->query('games_ok'))
+                    <div class="alert alert-success">{{ request()->query('games_ok') }}</div>
+                @endif
+                <form method="POST" action="/extensions/serversuite/admin/egg-games">
+                    @csrf
+                    <table class="table table-condensed">
+                        <thead><tr><th>Egg</th><th>Servers</th><th>Detected</th><th style="width:220px;">Game</th></tr></thead>
+                        <tbody>
+                        @foreach ($ssGameEggs as $egg)
+                            @php $ssAuto = $ssGameDetector->forEgg($egg); $ssPick = $ssGameOverrides[$egg->id] ?? ''; @endphp
+                            <tr>
+                                <td>{{ $egg->name }} <span class="text-muted small">({{ $egg->nest->name ?? 'no nest' }})</span></td>
+                                <td>{{ $ssEggServers[$egg->id] ?? 0 }}</td>
+                                <td><span title="Detected from: {{ $ssAuto->signal }}">{{ $ssAuto->name }}</span></td>
+                                <td>
+                                    <select name="game[{{ $egg->id }}]" class="form-control input-sm">
+                                        <option value="" @if ($ssPick === '') selected @endif>Use detected</option>
+                                        @foreach ($ssGameChoices as $key => $label)
+                                            <option value="{{ $key }}" @if ($ssPick === $key) selected @endif>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </td>
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                    <button type="submit" class="btn btn-primary">Save games</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-xs-12 col-md-4">
+        <div class="box">
+            <div class="box-header with-border"><h3 class="box-title">About games</h3></div>
+            <div class="box-body">
+                <p>Minecraft servers get every Server Suite tab. Rust, Valheim and other games get Backups, Subdomains and Notifications, plus what has been built for that game.</p>
+                <p>Version and loader switches, resets and modpacks are refused on anything that isn't Minecraft, so a plan sold as one game can't be turned into a Minecraft server.</p>
+                <p>Rust and Valheim are found by the Steam app id in the egg's <code>SRCDS_APPID</code>; Minecraft by the egg's nest, name, image or startup command. Set the game here if detection gets an egg wrong.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
 {{-- Subdomains (#14): domains the admin offers + per-server allowances. --}}
 @php
     $ssDomains = class_exists(\ServerSuite\Models\SubdomainDomain::class)
