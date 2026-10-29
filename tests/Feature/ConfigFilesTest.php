@@ -89,3 +89,21 @@ it('browses and saves a game\'s own folders and nothing else (#86)', function ()
 
     expect($this->files->files['/BepInEx/config/BepInEx.cfg'])->toBe(str_replace('Enabled = true', 'Enabled = false', $bep));
 });
+
+it('leaves Rust\'s owners and bans to the Players tab', function () {
+    $roots = ['/server/rust/cfg'];
+    $hidden = ['/server/rust/cfg/users.cfg', '/server/rust/cfg/bans.cfg'];
+    $this->files->put('/server/rust/cfg/server.cfg', "server.hostname \"x\"\n");
+    $this->files->put('/server/rust/cfg/users.cfg', "ownerid 76561197960287930 \"Owner\" \"\"\r\n");
+    $this->files->put('/server/rust/cfg/bans.cfg', '');
+
+    expect(array_column($this->svc->browse('s', null, $roots, $hidden)['entries'], 'path'))->toBe(['/server/rust/cfg/server.cfg'])
+        ->and(array_column($this->svc->browse('s', '/server/rust/cfg', $roots, $hidden)['entries'], 'path'))->toBe(['/server/rust/cfg/server.cfg']);
+    foreach (['/server/rust/cfg/users.cfg', '/server/rust/cfg/./users.cfg', '//server/rust//cfg/users.cfg', '/server/rust/cfg/bans.cfg'] as $path) {
+        expect(fn () => $this->svc->open('s', $path, $roots, $hidden))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $this->svc->save('s', $path, sha1(''), null, 'ownerid 76561198000000001 "" ""', $roots, $hidden))->toThrow(InvalidArgumentException::class);
+    }
+    expect($this->files->files['/server/rust/cfg/users.cfg'])->toBe("ownerid 76561197960287930 \"Owner\" \"\"\r\n")
+        ->and($this->files->files['/server/rust/cfg/bans.cfg'])->toBe('')
+        ->and(\ServerSuite\Support\Data\GameProfile::fromConfig('rust', config('serversuite.games.rust'), 'test')->configHidden)->toBe($hidden);
+});

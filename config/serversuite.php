@@ -279,6 +279,8 @@ return [
     |            "players" = the Players tab (SteamPlayersService: Rust,
     |            Valheim).
     | config_roots: folders the Configs tab offers (missing ones are skipped).
+    | config_hidden: files under those folders the Configs tab won't list or
+    |            open, because another tab (and its permission) manages them.
     | logs:      what the Errors tab reads: path (a file, or a folder with
     |            newest = a file-name pattern: the newest match), format
     |            (oxide, carbon, bepinex; see LogErrors) and optionally
@@ -302,6 +304,8 @@ return [
             ],
             // Oxide and Carbon plugin configs and data, and the server's own cfg (the eggs set +server.identity "rust").
             'config_roots'  => ['/oxide/config', '/oxide/data', '/carbon/configs', '/carbon/data', '/server/rust/cfg'],
+            // Owners, moderators and bans: the Players tab's (players.manage), not the config editor's.
+            'config_hidden' => ['/server/rust/cfg/users.cfg', '/server/rust/cfg/bans.cfg'],
             'srv'           => null,
             'mods_label'    => 'Plugins',
             'variables'     => [

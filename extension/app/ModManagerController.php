@@ -1277,7 +1277,8 @@ class ModManagerController extends Controller
         }
         $report = $svc->report($srv->uuid, $request->boolean('warnings'), $minecraft ? null : $games->logSources($srv));
 
-        return response()->json(['data' => ['minecraft' => $minecraft] + $report + ($minecraft ? [] : ['crashes' => []])]);
+        // Crash reports are Minecraft's. array_replace, not +: + keeps the report's own key.
+        return response()->json(['data' => ['minecraft' => $minecraft] + ($minecraft ? $report : array_replace($report, ['crashes' => []]))]);
     }
 
     /** GET /{server}/errors/crash?name=crash-....txt : one crash report (Minecraft) */
@@ -1481,7 +1482,7 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
-        return $this->configAction(fn ($svc) => $svc->browse($srv->uuid, $request->query('path'), \ServerSuite\Services\ConfigFilesService::roots($srv)));
+        return $this->configAction(fn ($svc) => $svc->browse($srv->uuid, $request->query('path'), \ServerSuite\Services\ConfigFilesService::roots($srv), \ServerSuite\Services\ConfigFilesService::hidden($srv)));
     }
 
     /** GET /{server}/configs/file?path= : text, hash and the typed form */
@@ -1491,7 +1492,7 @@ class ModManagerController extends Controller
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         $path = (string) $request->validate(['path' => ['required', 'string', 'max:1024']])['path'];
 
-        return $this->configAction(fn ($svc) => $svc->open($srv->uuid, $path, \ServerSuite\Services\ConfigFilesService::roots($srv)));
+        return $this->configAction(fn ($svc) => $svc->open($srv->uuid, $path, \ServerSuite\Services\ConfigFilesService::roots($srv), \ServerSuite\Services\ConfigFilesService::hidden($srv)));
     }
 
     /** POST /{server}/configs/render { path, hash, values } : the text with form values applied, not saved */
@@ -1501,7 +1502,7 @@ class ModManagerController extends Controller
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         $data = $request->validate(['path' => ['required', 'string', 'max:1024'], 'hash' => ['required', 'string', 'size:40'], 'values' => ['present', 'array']]);
 
-        return $this->configAction(fn ($svc) => ['content' => $svc->render($srv->uuid, $data['path'], $data['hash'], $data['values'], \ServerSuite\Services\ConfigFilesService::roots($srv))]);
+        return $this->configAction(fn ($svc) => ['content' => $svc->render($srv->uuid, $data['path'], $data['hash'], $data['values'], \ServerSuite\Services\ConfigFilesService::roots($srv), \ServerSuite\Services\ConfigFilesService::hidden($srv))]);
     }
 
     /** POST /{server}/configs/file { path, hash, values | content } */
@@ -1520,18 +1521,19 @@ class ModManagerController extends Controller
         }
 
         $roots = \ServerSuite\Services\ConfigFilesService::roots($srv);
+        $hidden = \ServerSuite\Services\ConfigFilesService::hidden($srv);
 
-        return $this->configAction(function ($svc) use ($srv, $data, $clearance, $roots) {
+        return $this->configAction(function ($svc) use ($srv, $data, $clearance, $roots, $hidden) {
             $values = $data['values'] ?? null;
-            $r = $svc->save($srv->uuid, $data['path'], $data['hash'], $values, $values === null ? ($data['content'] ?? '') : null, $roots);
+            $r = $svc->save($srv->uuid, $data['path'], $data['hash'], $values, $values === null ? ($data['content'] ?? '') : null, $roots, $hidden);
             if ($r['written']) {
                 $changed = $r['changed'] === [] ? null : implode(', ', array_slice($r['changed'], 0, 20)) . (count($r['changed']) > 20 ? ', …' : '');
-                $file = \ServerSuite\Services\ConfigFilesService::safe($data['path'], $roots);
+                $file = \ServerSuite\Services\ConfigFilesService::safe($data['path'], $roots, $hidden);
                 $this->audit($srv, 'config-saved', ['file' => $file, 'changed' => $changed, 'backup' => $clearance['backup']]);
                 $this->recordChange($srv, 'edit ' . ltrim($file, '/'), $clearance);
             }
 
-            return $r + $svc->open($srv->uuid, $data['path'], $roots);
+            return $r + $svc->open($srv->uuid, $data['path'], $roots, $hidden);
         });
     }
 

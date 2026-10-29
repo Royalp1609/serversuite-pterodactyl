@@ -70,3 +70,18 @@ it('keeps Valheim\'s header, saves Steam_ IDs and warns about the permitted list
     expect($this->svc->add($this->server, 'valheim', 'banned', '76561198000000003'))->toContain('Restart the server to apply it')
         ->and($this->sent)->toBe([]);
 });
+
+it('refuses changes while the server starts or stops', function () {
+    $this->files->put(STEAM_USERS, "ownerid 76561197960287930 \"SS Test Owner\" \"test\"\r\n");
+
+    foreach (['starting' => 'started', 'stopping' => 'stopped'] as $state => $done) {
+        $this->running = $state;
+        expect(fn () => $this->svc->add($this->server, 'rust', 'owners', '76561198000000001'))->toThrow(RuntimeException::class, "The server is {$state}. Try again once it has {$done}.")
+            ->and(fn () => $this->svc->remove($this->server, 'rust', 'owners', '76561197960287930'))->toThrow(RuntimeException::class)
+            ->and(fn () => $this->svc->add($this->server, 'valheim', 'banned', '76561198000000001'))->toThrow(RuntimeException::class);
+    }
+
+    expect($this->sent)->toBe([])
+        ->and($this->files->files[STEAM_USERS])->toBe("ownerid 76561197960287930 \"SS Test Owner\" \"test\"\r\n")
+        ->and($this->files->files)->not->toHaveKey(STEAM_VALHEIM . 'bannedlist.txt');
+});
