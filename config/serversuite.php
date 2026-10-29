@@ -13,6 +13,13 @@ return [
     */
     'panel' => env('MOD_MANAGER_PANEL', 'auto'),
 
+    // Errors tab (#87): how much of the end of each log to read, and how
+    // long a report is cached (the tab polls).
+    'errors' => [
+        'tail_bytes'    => env('SERVERSUITE_ERRORS_TAIL_BYTES', 1048576),
+        'cache_seconds' => 10,
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Enabled Repositories
@@ -268,7 +275,13 @@ return [
     | features:  extra Server Suite features for the game, on top of the
     |            game-neutral ones. List one only once it works for that game.
     |            "configs" = the Configs tab, browsing config_roots.
+    |            "errors" = the Errors tab, reading logs.
     | config_roots: folders the Configs tab offers (missing ones are skipped).
+    | logs:      what the Errors tab reads: path (a file, or a folder with
+    |            newest = a file-name pattern: the newest match), format
+    |            (oxide, carbon, bepinex; see LogErrors) and optionally
+    |            when = [setting => values] (a server with FRAMEWORK=carbon
+    |            reads Carbon's log, not the Oxide one left behind).
     | srv:       SRV service for subdomains (e.g. "_minecraft._tcp"); null =
     |            A record only, players type the port.
     | variables: egg variable names per setting, first match wins. Eggs for
@@ -280,7 +293,11 @@ return [
             'name'          => 'Rust',
             'steam_app_ids' => [258550],
             'startup'       => ['RustDedicated'],
-            'features'      => ['configs'],
+            'features'      => ['configs', 'errors'],
+            'logs'          => [
+                ['path' => '/oxide/logs', 'newest' => '/^oxide_[\d-]+\.txt$/', 'format' => 'oxide', 'when' => ['framework' => ['oxide']]],
+                ['path' => '/carbon/logs/Carbon.Core.log', 'format' => 'carbon', 'when' => ['framework' => ['carbon']]],
+            ],
             // Oxide and Carbon plugin configs and data, and the server's own cfg (the eggs set +server.identity "rust").
             'config_roots'  => ['/oxide/config', '/oxide/data', '/carbon/configs', '/carbon/data', '/server/rust/cfg'],
             'srv'           => null,
@@ -297,8 +314,11 @@ return [
             'name'          => 'Valheim',
             'steam_app_ids' => [896660],
             'startup'       => ['valheim_server'],
-            'features'      => ['configs'],
+            'features'      => ['configs', 'errors'],
             'config_roots'  => ['/BepInEx/config'],
+            'logs'          => [
+                ['path' => '/BepInEx/LogOutput.log', 'format' => 'bepinex'],
+            ],
             'srv'           => null,
             'mods_label'    => 'Mods',
             'variables'     => [

@@ -1,0 +1,15 @@
+[2026.10.29 15:47:42] [WARN] Carbon Analytics are ON. They're entirely anonymous and help us to further improve.
+[2026.10.29 15:47:42] [INFO] Carbon 2.0.262.0 [2026.10.01.0] 8a81d70 on Linux 
+[2026.10.29 15:47:42] [INFO]        raul on production (2026-10-02 11:07:29 +0200)
+[2026.10.29 15:47:42] [INFO] Rust   134/2635.289.1 on release (22/10/2026 17:30:56) 168909
+[2026.10.29 15:47:55] [ERRO] Failed compiling 'SSBrokenTest.cs':
+[2026.10.29 15:47:55] [ERRO]   1. Cannot implicitly convert type 'string' to 'int' [CS0029]
+     (SSBrokenTest 46 line 6)
+[2026.10.29 15:47:55] [INFO] [SS Throw Test] loaded
+[2026.10.29 15:47:55] [INFO] Loaded plugin SS Throw Test v1.0.0 by ServerSuite [381ms]
+[2026.10.29 15:47:57] [ERRO] Timer of 1s has failed in 'SS Throw Test v1.0.0 by ServerSuite' [callback] (Object reference not set to an instance of an object)
+   at void Oxide.Plugins.SSThrowTest.Loaded()+() => { } in /home/container/carbon/plugins/SSThrowTest.cs:line 6
+   at void Oxide.Core.Libraries.Timer.FireCollectedTimer(TimerInstance timer, int generation, double now) in /home/runner/work/Carbon/Carbon/src/Carbon.Components/Carbon.Common/src/Oxide/Libraries/Timer.Scheduler.cs:line 299
+[2026.10.29 15:48:07] [WARN] [ImageDatabase] The server identifier has changed. Wiping old image database. [old 0, new 3069]
+[2026.10.29 15:48:07] [INFO]  Batch completed! OSI on 2 plugins.
+[2026.10.29 15:48:14] [INFO] [Codefling] Failed fetching vendor. Error code 404!

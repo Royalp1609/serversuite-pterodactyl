@@ -46,6 +46,12 @@ Route::get('/{server}/restore-sync', [ModManagerController::class, 'restoreSync'
 Route::post('/{server}/restore-sync/dismiss', [ModManagerController::class, 'restoreSyncDismiss'])
     ->name('extension.serversuite.restore-sync-dismiss');
 
+// Errors tab (#87)
+Route::get('/{server}/errors', [ModManagerController::class, 'errors'])
+    ->name('extension.serversuite.errors');
+Route::get('/{server}/errors/crash', [ModManagerController::class, 'errorsCrash'])
+    ->name('extension.serversuite.errors-crash');
+
 // Crash help (#25)
 Route::get('/{server}/crash', [ModManagerController::class, 'crash'])
     ->name('extension.serversuite.crash');

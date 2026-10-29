@@ -35,6 +35,7 @@ class GameGuard
         'properties' => 'properties', 'propertiesSave' => 'properties', 'propertiesResetWorld' => 'properties',
         'modpacks' => 'modpacks', 'modpacksSearch' => 'modpacks', 'modpackVersions' => 'modpacks',
         'modpackPreview' => 'modpacks', 'modpackInstall' => 'modpacks', 'modpackRemove' => 'modpacks',
+        'errors' => 'errors', 'errorsCrash' => 'errors',
         'players' => 'players', 'playersAdd' => 'players', 'playersRemove' => 'players', 'playersWhitelist' => 'players',
     ];
 

@@ -82,6 +82,8 @@ final class PanelPermissions
         'prechange' => ['mods.read'], 'prechangeState' => ['mods.read'],
         // Crash help (#25)
         'crash' => ['mods.read'], 'crashDismiss' => ['mods.read'],
+        // Errors tab (#87): reading the log is reading server files.
+        'errors' => ['file.read-content'], 'errorsCrash' => ['file.read-content'],
         'crashDisable' => ['mods.remove'], 'crashEnable' => ['mods.install'],
         // Bedrock crossplay (#28)
         'crossplay' => ['mods.read'], 'crossplayInstall' => ['mods.install'], 'crossplayConfigure' => ['mods.install'],

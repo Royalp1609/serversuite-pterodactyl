@@ -23,6 +23,7 @@ readonly class GameProfile
     /**
      * @param list<string> $features
      * @param list<string> $configRoots folders the Configs tab browses, e.g. /BepInEx/config
+     * @param list<array{path: string, format: string, newest?: string, when?: array<string, list<string>>}> $logs what the Errors tab reads
      */
     public function __construct(
         public string $key,
@@ -32,6 +33,7 @@ readonly class GameProfile
         public string $modsLabel = 'Mods',
         public string $signal = 'none',
         public array $configRoots = [],
+        public array $logs = [['path' => '/logs/latest.log', 'format' => 'minecraft']],
     ) {}
 
     public static function minecraft(string $signal = 'minecraft'): self
@@ -59,6 +61,7 @@ readonly class GameProfile
             (string) ($config['mods_label'] ?? 'Mods'),
             $signal,
             array_values(array_map(fn ($r) => '/' . trim((string) $r, '/'), (array) ($config['config_roots'] ?? []))),
+            array_values(array_filter((array) ($config['logs'] ?? []), fn ($l) => is_array($l) && isset($l['path'], $l['format']))),
         );
     }
 

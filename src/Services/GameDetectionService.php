@@ -121,6 +121,29 @@ class GameDetectionService
     }
 
     /**
+     * The logs the Errors tab reads for this server: the profile's, less
+     * those whose `when` doesn't match (Rust: the framework it runs).
+     *
+     * @return list<array{path: string, format: string, newest?: string}>
+     */
+    public function logSources(object $server): array
+    {
+        $out = [];
+        foreach ($this->for($server)->logs as $log) {
+            foreach ((array) ($log['when'] ?? []) as $setting => $values) {
+                $value = strtolower(trim((string) $this->variable($server, (string) $setting)));
+                if (! in_array($value, array_map('strtolower', (array) $values), true)) {
+                    continue 2;
+                }
+            }
+            unset($log['when']);
+            $out[] = $log;
+        }
+
+        return $out;
+    }
+
+    /**
      * Game keys an admin can pick, with names.
      *
      * @return array<string, string>

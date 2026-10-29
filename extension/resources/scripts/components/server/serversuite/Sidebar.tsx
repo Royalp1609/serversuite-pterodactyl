@@ -10,7 +10,7 @@ import blueprintRoutes from '@blueprint/extends/routers/routes';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
-    faArchive, faBell, faBoxOpen, faClock, faCodeBranch, faCog, faCube, faDatabase, faExternalLinkAlt, faFolder,
+    faArchive, faBell, faBoxOpen, faClock, faCodeBranch, faCog, faCube, faDatabase, faExclamationTriangle, faExternalLinkAlt, faFolder,
     faGlobe, faHistory, faNetworkWired, faPlay, faProjectDiagram, faPuzzlePiece, faSlidersH, faTerminal, faUserFriends, faUsers,
 } from '@fortawesome/free-solid-svg-icons';
 
@@ -45,6 +45,7 @@ const HIDDEN_NATIVE = ['/backups'];
 
 // Ours, by path.
 const SUITE: Record<string, { group: string; icon: IconDefinition }> = {
+    '/errors': { group: 'General', icon: faExclamationTriangle },
     '/mod-manager': { group: 'Management', icon: faCube },
     '/modpacks': { group: 'Management', icon: faBoxOpen },
     '/configs': { group: 'Management', icon: faSlidersH },
@@ -60,6 +61,7 @@ const SUITE: Record<string, { group: string; icon: IconDefinition }> = {
 // Tabs that only some games have (#78): path => feature in the server's game profile.
 // Tabs not listed (Backups, Subdomains, Notifications) work on every game.
 const GAME_FEATURE: Record<string, string> = {
+    '/errors': 'errors',
     '/mod-manager': 'mods',
     '/modpacks': 'modpacks',
     '/configs': 'configs',
@@ -71,7 +73,7 @@ const GAME_FEATURE: Record<string, string> = {
 
 // Order inside each group, as on Pelican.
 const ORDER = [
-    '/', '/activity',
+    '/', '/errors', '/activity',
     '/files', '/mod-manager', '/configs', '/modpacks', '/databases', '/backup-rotation', '/network', '/subdomains', '/players', '/velocity',
     '/schedules', '/properties', '/versions', '/users', '/startup', '/notifications', '/settings',
 ];

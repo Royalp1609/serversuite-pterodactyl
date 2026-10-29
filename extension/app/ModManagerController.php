@@ -1254,6 +1254,47 @@ class ModManagerController extends Controller
     }
 
     // -------------------------------------------------------------------------
+    // Errors tab (#87; Pelican #41/#91)
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /{server}/errors?warnings=1&refresh=1: the log's errors and
+     * warnings grouped, with the plugin or mod each points at. Minecraft
+     * reads logs/latest.log and lists crash reports; Rust and Valheim read
+     * their own logs (the game profile's) and Rust gets the "Rust changed
+     * under Oxide/Carbon" notice.
+     */
+    public function errors(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        $games = app(\ServerSuite\Services\GameDetectionService::class);
+        $minecraft = $games->for($srv)->isMinecraft();
+        $svc = app(\ServerSuite\Services\ErrorLogService::class);
+        if ($request->boolean('refresh')) {
+            $svc->forget($srv->uuid);
+        }
+        $report = $svc->report($srv->uuid, $request->boolean('warnings'), $minecraft ? null : $games->logSources($srv));
+
+        return response()->json(['data' => ['minecraft' => $minecraft] + $report + ($minecraft ? [] : ['crashes' => []])]);
+    }
+
+    /** GET /{server}/errors/crash?name=crash-....txt : one crash report (Minecraft) */
+    public function errorsCrash(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $name = (string) $request->validate(['name' => ['required', 'string', 'max:200']])['name'];
+
+        $crash = app(\ServerSuite\Services\GameDetectionService::class)->for($srv)->isMinecraft()
+            ? app(\ServerSuite\Services\ErrorLogService::class)->crash($srv->uuid, $name)
+            : null;
+
+        return $crash === null ? response()->json(['error' => 'No such crash report.'], 404) : response()->json(['data' => $crash]);
+    }
+
+    // -------------------------------------------------------------------------
     // Crash help (#25)
     // -------------------------------------------------------------------------
 
