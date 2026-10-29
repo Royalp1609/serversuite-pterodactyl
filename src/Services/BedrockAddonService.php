@@ -163,7 +163,7 @@ class BedrockAddonService
 
         $tmp = self::TMP_PREFIX . bin2hex(random_bytes(4));
         $tmpDir = self::INBOX . '/' . $tmp;
-        $local = tempnam(sys_get_temp_dir(), 'ss-addon');
+        $local = tempnam(sys_get_temp_dir(), 'ss-addon') ?: throw new \RuntimeException('Could not make a temporary file to check the archive.');
         $moved = false;
         $done = false;
         try {

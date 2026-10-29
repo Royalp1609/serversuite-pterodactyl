@@ -109,7 +109,7 @@ final class BedrockArchive
                 if ($nested !== null) {
                     throw new \RuntimeException("{$nested} contains another archive ({$name}); only one level of .mcpack is supported.");
                 }
-                $file = tempnam(sys_get_temp_dir(), 'ss-mcpack');
+                $file = tempnam(sys_get_temp_dir(), 'ss-mcpack') ?: throw new \RuntimeException('Could not make a temporary file to read the archive.');
                 $tmp[] = $file;
                 $in = $zip->getStream($name);
                 $out = fopen($file, 'wb');
