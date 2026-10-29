@@ -463,7 +463,7 @@ class BedrockAddonService
         if ($raw === null || trim($raw) === '') {
             return [];
         }
-        $list = json_decode(BedrockArchive::stripComments($raw), true);
+        $list = BedrockArchive::decode($raw);
         if (! is_array($list) || ! array_is_list($list)) {
             throw new \RuntimeException(self::WORLD_FILES[$type] . ' in the world folder isn\'t a JSON list. Fix or delete it in Files.');
         }

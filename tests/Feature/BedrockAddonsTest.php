@@ -235,3 +235,18 @@ it('knows Bedrock Dedicated Server from PocketMine, Nukkit and Java', function (
         ->and(BedrockAddonService::isBedrock((object) ['startup' => 'java -jar nukkit.jar', 'egg' => $egg('Nukkit Bedrock')]))->toBeFalse()
         ->and(BedrockAddonService::isBedrock((object) ['startup' => 'java -jar server.jar', 'egg' => $egg('Paper')]))->toBeFalse();
 });
+
+it('reads long manifests, comments and trailing commas as the game does', function () {
+    // A real custom pack (Bedrock Tweaks) has a 29 KB manifest; a regex over its description ran out of PCRE's JIT stack.
+    $long = str_repeat('Alternate Block Destruction \"quoted\" https://example.com/x\n', 600);
+    $manifest = "\u{FEFF}{\n  // made by hand, \"with quotes\", and a comma,\n  \"format_version\": 2,\n"
+        . '  "header": { "name": "Tweaks // not a comment", "description": "' . $long . '", "uuid": "' . ADDON_RP . "\", \"version\": [1, 0, 0], },\n"
+        . "  /* block\n comment */ \"modules\": [ { \"type\": \"resources\", \"uuid\": \"c1b2c3d4-0000-4000-8000-000000000001\", \"version\": [1, 0, 0] }, ],\n}\n";
+    $packs = addonPacksOf(addonZip(['manifest.json' => $manifest]));
+
+    expect(strlen($manifest))->toBeGreaterThan(30000)
+        ->and($packs[0]['name'])->toBe('Tweaks // not a comment')
+        ->and($packs[0]['description'])->toStartWith('Alternate Block Destruction "quoted" https://example.com/x')
+        ->and(BedrockArchive::decode('{ "a": [1, 2,], } // end'))->toBe(['a' => [1, 2]])
+        ->and(BedrockArchive::decode('{ "a": '))->toBeNull();
+});
