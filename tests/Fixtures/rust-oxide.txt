@@ -1,0 +1,28 @@
+15:25 [Info] Loading Oxide Core v2.0.4143...
+15:25 [Info] Loading extensions...
+15:25 [Info] Loaded extension CSharp v2.0.4149 by Oxide Team and Contributors
+15:25 [Info] Loaded extension MySql v2.0.3784 by Oxide Team and Contributors
+15:25 [Info] Loaded extension SQLite v2.0.3804 by Oxide Team and Contributors
+15:25 [Info] Unity version: 6000.3.15x1-13
+15:25 [Info] Loaded extension Unity v2.0.3777 by Oxide Team and Contributors
+15:25 [Info] Loaded extension Rust v2.0.7839 by Oxide Team and Contributors
+15:25 [Info] [CSharp] Downloading Oxide.Compiler. . .
+15:25 [Info] [CSharp] Downloaded newer version of Oxide.Compiler | Newer found
+15:25 [Info] File permissions set for Oxide.Compiler
+15:25 [Info] Using Covalence provider for game 'Rust'
+15:25 [Info] Loading plugins...
+15:25 [Info] Loaded plugin Unity v2.0.3777 by Oxide Team and Contributors
+15:25 [Info] Loaded plugin Rust v2.0.7839 by Oxide Team and Contributors
+15:33 [Info] [CSharp] Started Oxide.Compiler v successfully
+15:33 [Info] SSThrowTest was compiled successfully in 1397ms
+15:33 [Error] Error while compiling SSBrokenTest: Cannot implicitly convert type 'string' to 'int' | Line: 6, Pos: 46
+15:33 [Info] [SS Throw Test] loaded
+15:33 [Info] Loaded plugin SS Throw Test v1.0.0 by ServerSuite
+15:33 [Error] Failed to run a 1.00 timer in 'SSThrowTest v1.0.0' (NullReferenceException: Object reference not set to an instance of an object)
+  at Oxide.Plugins.SSThrowTest+<>c.<Loaded>b__0_0 () [0x00000] in <58ec4ac38729444babfe86b5fb67eab9>:0 
+  at Oxide.Core.Libraries.Timer+TimerInstance.FireCallback () [0x00018] in <15f61ddda771464d8246ebdce8ff4811>:0 
+15:33 [Error] Failed to call hook 'Fail' on plugin 'SSThrowTest v1.0.0' (MissingMethodException: Method not found: void BasePlayer.ChatMessage(string))
+  at Oxide.Plugins.SSThrowTest.DirectCallHook (System.String name, System.Object& ret, System.Object[] args) [0x0008f] in <58ec4ac38729444babfe86b5fb67eab9>:0 
+  at Oxide.Plugins.CSharpPlugin.InvokeMethod (Oxide.Core.Plugins.HookMethod method, System.Object[] args) [0x00079] in <42f9bedc659b4f4786eb778d3cd58968>:0 
+  at Oxide.Core.Plugins.CSPlugin.OnCallHook (System.String name, System.Object[] args) [0x000de] in <15f61ddda771464d8246ebdce8ff4811>:0 
+  at Oxide.Core.Plugins.Plugin.CallHook (System.String hook, System.Object[] args) [0x00060] in <15f61ddda771464d8246ebdce8ff4811>:0 

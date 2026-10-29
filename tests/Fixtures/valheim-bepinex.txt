@@ -1,0 +1,46 @@
+[Message:   BepInEx] BepInEx 5.4.23.6 - valheim_server (10/29/2026 15:23:57)
+[Message:   BepInEx] User is running BepInExPack Valheim version 5.4.2360
+[Info   :   BepInEx] Running under Unity vUnknown (post-2017)
+[Info   :   BepInEx] CLR runtime version: 4.0.30319.42000
+[Info   :   BepInEx] Supports SRE: True
+[Info   :   BepInEx] System platform: Bits64, Linux
+[Message:   BepInEx] Preloader started
+[Info   :   BepInEx] Loaded 1 patcher method from [BepInEx.Preloader 5.4.23.6]
+[Info   :   BepInEx] 1 patcher plugin loaded
+[Info   :   BepInEx] Patching [UnityEngine.CoreModule] with [BepInEx.Chainloader]
+[Message:   BepInEx] Preloader finished
+[Message:   BepInEx] Valheim Version: l-1.0.21
+[Info   :   BepInEx] Detected Unity version: v6000.0.75f1
+[Message:   BepInEx] Chainloader ready
+[Message:   BepInEx] Chainloader started
+[Info   :   BepInEx] 2 plugins to load
+[Error  :   BepInEx] Could not load [SS Dep Test 1.0.0] (serversuite.deptest) because it has missing dependencies: serversuite.missing
+[Info   :   BepInEx] Loading [SS Throw Test 1.0.0] (serversuite.throwtest)
+[Error  :SS Throw Test] custom error from the plugin
+[Warning:SS Throw Test] custom warning
+[Message:   BepInEx] Chainloader startup complete (1 loaded, 0 skipped, 1 failed)
+[Info   : Unity Log] 10/29/2026 15:34:51: Set background loading budget to Low
+
+[Error  : Unity Log] InvalidOperationException: test failure in Start
+Stack trace:
+SSThrowTest.Start () (at <0d8d5464f5c14f219c32606cd4dbb2e1>:0)
+
+[Info   : Unity Log] 10/29/2026 15:34:51: Loading first scene!
+
+[Info   : Unity Log] 10/29/2026 15:34:51: Preferences initialized! Activating first scene!
+
+[Info   : Unity Log] 10/29/2026 15:34:52: Loading: Starting to load scene: start.unity (169d7618616154c03be07e9ad3af5893)
+
+[Info   : Unity Log] 10/29/2026 15:34:52: Set background loading budget to Normal
+
+[Info   : Unity Log] 10/29/2026 15:34:52: Loaded localization file #0 - 'localization' language: 'English'
+
+[Info   : Unity Log] 10/29/2026 15:34:52: Loaded localization file #1 - 'localization_extra' language: 'English'
+
+[Info   : Unity Log] 10/29/2026 15:34:52: Loaded localization file #2 - 'heightmap_message' language: 'English'
+[Error  : Unity Log] AsyncResourceUpload failed.
+[Error  : Unity Log] AsyncResourceUpload failed.
+[Warning: Unity Log] HDR Render Texture not supported, disabling HDR on reflection probe.
+[Error  : Unity Log] Could not find video decode shader pass Default in shader <not found>
+[Warning: Unity Log] [AmplifyOcclusion] System does not support CopyTexture. CacheAware will be disabled.
+[Error  : Unity Log] 10/29/2026 15:35:05: Failed to play intro cinematic

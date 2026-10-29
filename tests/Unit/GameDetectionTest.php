@@ -93,7 +93,7 @@ it('gives Minecraft every feature and other games the neutral ones', function ()
     $d = app(GameDetectionService::class);
 
     expect($d->for(paperServer())->supports('versions'))->toBeTrue()
-        ->and($d->for(rustServer())->features)->toBe(['dashboard', 'backups', 'notifications', 'subdomains', 'configs'])
+        ->and($d->for(rustServer())->features)->toBe(['dashboard', 'backups', 'notifications', 'subdomains', 'configs', 'errors'])
         ->and($d->for(rustServer())->configRoots)->toBe(['/oxide/config', '/oxide/data', '/carbon/configs', '/carbon/data', '/server/rust/cfg'])
         ->and($d->for(valheimServer())->configRoots)->toBe(['/BepInEx/config'])
         ->and($d->for(teamspeakServer())->supports('mods'))->toBeFalse();
