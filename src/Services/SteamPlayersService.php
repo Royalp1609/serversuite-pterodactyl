@@ -18,6 +18,10 @@ use ServerSuite\Contracts\DaemonFileClient;
  * file edits that apply on the next start. Its manual asks for Platform
  * User IDs, "Steam_<SteamID64>" (case sensitive); a bare SteamID64 gets the
  * prefix. Names aren't looked up (no Steam Web API key yet).
+ *
+ * While the server is starting or stopping, changes are refused: Rust reads
+ * its cfg files early in a boot that takes minutes and writes them again on
+ * the way down, so a file edit then would be read too late or written over.
  */
 class SteamPlayersService
 {
@@ -42,7 +46,7 @@ class SteamPlayersService
 
     /** @var (callable(object, string): void)|null test hook: send a console command */
     private $sender;
-    /** @var (callable(object): bool)|null test hook: is the server running */
+    /** @var (callable(object): (bool|string))|null test hook: running (bool) or Wings' state */
     private $running;
 
     public function __construct(protected DaemonFileClient $daemon, ?callable $sender = null, ?callable $running = null)
@@ -82,7 +86,7 @@ class SteamPlayersService
             $id = $this->steamId($who);
             $name = $this->text($name, 'Name');
             $reason = $this->text($reason, 'Reason');
-            if ($this->isRunning($server)) {
+            if ($this->settledState($server) === 'running') {
                 $this->send($server, "{$list['key']} {$id} \"{$name}\" \"{$reason}\"");
                 $this->send($server, 'server.writecfg');
 
@@ -99,6 +103,7 @@ class SteamPlayersService
         }
 
         $id = $this->platformId($who);
+        $running = $this->settledState($server) === 'running';
         $before = $this->rows($server, $game, $list);
         if (in_array($id, array_column($before, 'id'), true)) {
             return "{$id} is already on the list.";
@@ -108,7 +113,7 @@ class SteamPlayersService
             ? ' From then on only players on the permitted list can join.'
             : '';
 
-        return "{$id} added. " . $this->valheimApplies($server) . $note;
+        return "{$id} added. " . $this->valheimApplies($running) . $note;
     }
 
     /** @throws \RuntimeException */
@@ -118,7 +123,7 @@ class SteamPlayersService
 
         if ($game === 'rust') {
             $id = $this->steamId($who);
-            if ($this->isRunning($server)) {
+            if ($this->settledState($server) === 'running') {
                 $this->send($server, "{$list['remove']} {$id}");
                 $this->send($server, 'server.writecfg');
 
@@ -130,19 +135,20 @@ class SteamPlayersService
         }
 
         $id = $this->platformId($who);
+        $running = $this->settledState($server) === 'running';
         // Also an older bare SteamID line for the same player.
         $bare = str_starts_with($id, 'Steam_') ? substr($id, 6) : null;
         $this->editValheim($server, $list, fn (array $ids) => array_values(array_filter($ids, fn ($x) => $x !== $id && $x !== $bare)));
 
-        return "{$id} removed. " . $this->valheimApplies($server);
+        return "{$id} removed. " . $this->valheimApplies($running);
     }
 
     // -------------------------------------------------------------------------
 
     /** Valheim reads its lists on start, and an in-game ban rewrites the file from what it loaded. */
-    private function valheimApplies(object $server): string
+    private function valheimApplies(bool $running): string
     {
-        return $this->isRunning($server)
+        return $running
             ? 'Restart the server to apply it (until then an in-game ban or unban can overwrite the list).'
             : 'It applies when the server starts.';
     }
@@ -239,16 +245,39 @@ class SteamPlayersService
 
     private function isRunning(object $server): bool
     {
+        return $this->state($server) === 'running';
+    }
+
+    /**
+     * Wings' state for a change: running or offline.
+     *
+     * @throws \RuntimeException while starting or stopping
+     */
+    private function settledState(object $server): string
+    {
+        $state = $this->state($server);
+        if ($state === 'starting' || $state === 'stopping') {
+            throw new \RuntimeException("The server is {$state}. Try again once it has " . ($state === 'starting' ? 'started' : 'stopped') . '.');
+        }
+
+        return $state;
+    }
+
+    /** Wings' state: running, starting, stopping or offline (also when Wings can't be asked). */
+    private function state(object $server): string
+    {
         if ($this->running !== null) {
-            return ($this->running)($server);
+            $r = ($this->running)($server);
+
+            return is_string($r) ? $r : ($r ? 'running' : 'offline');
         }
         try {
             $d = app('\\Pterodactyl\\Repositories\\Wings\\DaemonServerRepository')->setServer($server)->getDetails();
         } catch (\Throwable) {
-            return false;
+            return 'offline';
         }
 
-        return ($d['state'] ?? ($d['utilization']['state'] ?? null)) === 'running';
+        return (string) ($d['state'] ?? ($d['utilization']['state'] ?? 'offline'));
     }
 
     /** @throws \RuntimeException */
