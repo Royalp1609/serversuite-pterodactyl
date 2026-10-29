@@ -69,6 +69,11 @@ function recordingDaemon(): DaemonFileClient
             return null;
         }
 
+        public function downloadTo(string $serverUuid, string $path, string $localPath, int $maxBytes): bool
+        {
+            return false;
+        }
+
         public function rename(string $serverUuid, string $root, string $from, string $to): void
         {
         }

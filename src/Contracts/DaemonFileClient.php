@@ -102,6 +102,14 @@ interface DaemonFileClient
     public function rename(string $serverUuid, string $root, string $from, string $to): void;
 
     /**
+     * Stream a file from the server to a local path (an add-on archive to
+     * check before it's unpacked). False when it's missing, unreadable or
+     * larger than $maxBytes; a partial file is left for the caller to delete.
+     * Non-throwing, like readFile().
+     */
+    public function downloadTo(string $serverUuid, string $path, string $localPath, int $maxBytes): bool;
+
+    /**
      * Unpack an archive in place: $file (relative to $directory) is
      * extracted into $directory by Wings (#23).
      *

@@ -47,6 +47,7 @@ const HIDDEN_NATIVE = ['/backups'];
 const SUITE: Record<string, { group: string; icon: IconDefinition }> = {
     '/errors': { group: 'General', icon: faExclamationTriangle },
     '/mod-manager': { group: 'Management', icon: faCube },
+    '/addons': { group: 'Management', icon: faCube },
     '/modpacks': { group: 'Management', icon: faBoxOpen },
     '/configs': { group: 'Management', icon: faSlidersH },
     '/backup-rotation': { group: 'Management', icon: faArchive },
@@ -63,6 +64,7 @@ const SUITE: Record<string, { group: string; icon: IconDefinition }> = {
 const GAME_FEATURE: Record<string, string> = {
     '/errors': 'errors',
     '/mod-manager': 'mods',
+    '/addons': 'addons',   // Bedrock Dedicated Server only (#93)
     '/modpacks': 'modpacks',
     '/configs': 'configs',
     '/versions': 'versions',
@@ -74,7 +76,7 @@ const GAME_FEATURE: Record<string, string> = {
 // Order inside each group, as on Pelican.
 const ORDER = [
     '/', '/errors', '/activity',
-    '/files', '/mod-manager', '/configs', '/modpacks', '/databases', '/backup-rotation', '/network', '/subdomains', '/players', '/velocity',
+    '/files', '/mod-manager', '/addons', '/configs', '/modpacks', '/databases', '/backup-rotation', '/network', '/subdomains', '/players', '/velocity',
     '/schedules', '/properties', '/versions', '/users', '/startup', '/notifications', '/settings',
 ];
 const GROUPS = ['General', 'Management', 'Configuration', 'Other'];

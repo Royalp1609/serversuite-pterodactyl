@@ -109,6 +109,22 @@ Route::post('/{server}/modpacks/remove', [ModManagerController::class, 'modpackR
     ->name('extension.serversuite.modpack-remove');
 
 // Players (#27): whitelist, ops and bans.
+// Bedrock add-ons (#93)
+Route::get('/{server}/addons', [ModManagerController::class, 'addons'])
+    ->name('extension.serversuite.addons');
+Route::post('/{server}/addons/folder', [ModManagerController::class, 'addonsFolder'])
+    ->name('extension.serversuite.addons-folder');
+Route::post('/{server}/addons/install', [ModManagerController::class, 'addonsInstall'])
+    ->name('extension.serversuite.addons-install');
+Route::post('/{server}/addons/remove', [ModManagerController::class, 'addonsRemove'])
+    ->name('extension.serversuite.addons-remove');
+Route::post('/{server}/addons/enable', [ModManagerController::class, 'addonsEnable'])
+    ->name('extension.serversuite.addons-enable');
+Route::post('/{server}/addons/move', [ModManagerController::class, 'addonsMove'])
+    ->name('extension.serversuite.addons-move');
+Route::post('/{server}/addons/texturepack', [ModManagerController::class, 'addonsTexturepack'])
+    ->name('extension.serversuite.addons-texturepack');
+
 Route::get('/{server}/players', [ModManagerController::class, 'players'])
     ->name('extension.serversuite.players');
 Route::post('/{server}/players', [ModManagerController::class, 'playersAdd'])
