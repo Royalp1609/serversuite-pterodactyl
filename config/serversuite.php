@@ -267,6 +267,8 @@ return [
     |            eggs without SRCDS_APPID (Pterodactyl's older Rust egg).
     | features:  extra Server Suite features for the game, on top of the
     |            game-neutral ones. List one only once it works for that game.
+    |            "configs" = the Configs tab, browsing config_roots.
+    | config_roots: folders the Configs tab offers (missing ones are skipped).
     | srv:       SRV service for subdomains (e.g. "_minecraft._tcp"); null =
     |            A record only, players type the port.
     | variables: egg variable names per setting, first match wins. Eggs for
@@ -278,7 +280,9 @@ return [
             'name'          => 'Rust',
             'steam_app_ids' => [258550],
             'startup'       => ['RustDedicated'],
-            'features'      => [],
+            'features'      => ['configs'],
+            // Oxide and Carbon plugin configs and data, and the server's own cfg (the eggs set +server.identity "rust").
+            'config_roots'  => ['/oxide/config', '/oxide/data', '/carbon/configs', '/carbon/data', '/server/rust/cfg'],
             'srv'           => null,
             'mods_label'    => 'Plugins',
             'variables'     => [
@@ -293,7 +297,8 @@ return [
             'name'          => 'Valheim',
             'steam_app_ids' => [896660],
             'startup'       => ['valheim_server'],
-            'features'      => [],
+            'features'      => ['configs'],
+            'config_roots'  => ['/BepInEx/config'],
             'srv'           => null,
             'mods_label'    => 'Mods',
             'variables'     => [

@@ -9,7 +9,9 @@ use ServerSuite\Support\Config\ConfigEditor;
 /**
  * The Mods tab's Configs view (#21): browse the config folders and edit a
  * file, as text or as the typed form (Pelican #8). Only under the config
- * roots, no "..", at most 512 KiB. A save writes through Wings and is
+ * roots, no "..", at most 512 KiB. The roots are Minecraft's (ROOTS) or the
+ * game profile's (#86: Rust's Oxide/Carbon folders, Valheim's BepInEx/config),
+ * see roots(). A save writes through Wings and is
  * refused if the file changed on disk since it was opened (servers rewrite
  * configs when they stop). Form saves change only the edited values; the
  * result is read back and checked first (ConfigEditor).
@@ -23,19 +25,31 @@ class ConfigFilesService
 
     public function __construct(protected DaemonFileClient $files) {}
 
-    /** A path under one of the roots, normalised; anything else throws. */
-    public static function safe(string $path): string
+    /** @return list<string> the config roots for $server's game */
+    public static function roots(object $server): array
+    {
+        $game = app(GameDetectionService::class)->for($server);
+
+        return $game->isMinecraft() ? self::ROOTS : $game->configRoots;
+    }
+
+    /**
+     * A path under one of the roots, normalised; anything else throws.
+     *
+     * @param list<string> $roots
+     */
+    public static function safe(string $path, array $roots = self::ROOTS): string
     {
         $path = '/' . ltrim((string) preg_replace('#/+#', '/', $path), '/');
         if (str_contains($path, '..') || preg_match('/[\x00-\x1F]/', $path)) {
             throw new \InvalidArgumentException('Invalid path.');
         }
-        foreach (self::ROOTS as $root) {
+        foreach ($roots as $root) {
             if ($path === $root || str_starts_with($path, $root . '/')) {
                 return rtrim($path, '/') ?: '/';
             }
         }
-        throw new \InvalidArgumentException('Only files under ' . implode(', ', self::ROOTS) . ' can be edited here.');
+        throw new \InvalidArgumentException('Only files under ' . implode(', ', $roots) . ' can be edited here.');
     }
 
     /**
@@ -43,11 +57,12 @@ class ConfigFilesService
      *
      * @return array{path: ?string, entries: list<array{name: string, path: string, is_file: bool, size: int}>}
      */
-    public function browse(string $uuid, ?string $path): array
+    /** @param list<string> $roots */
+    public function browse(string $uuid, ?string $path, array $roots = self::ROOTS): array
     {
         if ($path === null || $path === '' || $path === '/') {
             $entries = [];
-            foreach (self::ROOTS as $root) {
+            foreach ($roots as $root) {
                 try {
                     $entries = array_merge($entries, $this->entries($uuid, $root));
                 } catch (\Throwable) {
@@ -57,7 +72,7 @@ class ConfigFilesService
 
             return ['path' => null, 'entries' => $entries];
         }
-        $path = self::safe($path);
+        $path = self::safe($path, $roots);
 
         return ['path' => $path, 'entries' => $this->entries($uuid, $path)];
     }
@@ -67,9 +82,10 @@ class ConfigFilesService
      *
      * @return array{path: string, content: string, hash: string, fields: list<array<string, mixed>>, reason: ?string}
      */
-    public function open(string $uuid, string $path): array
+    /** @param list<string> $roots */
+    public function open(string $uuid, string $path, array $roots = self::ROOTS): array
     {
-        $path = self::safe($path);
+        $path = self::safe($path, $roots);
         $raw = $this->files->readFile($uuid, $path, self::MAX_BYTES)
             ?? throw new \InvalidArgumentException('Could not read the file. It may be gone, or larger than 512 KiB (edit those in the File Manager).');
         $form = ConfigEditor::open($raw, basename($path));
@@ -88,9 +104,9 @@ class ConfigFilesService
      *
      * @throws ConfigEditException|\InvalidArgumentException
      */
-    public function render(string $uuid, string $path, string $hash, array $values): string
+    public function render(string $uuid, string $path, string $hash, array $values, array $roots = self::ROOTS): string
     {
-        return ConfigEditor::save($this->current($uuid, $path, $hash), basename(self::safe($path)), $values)['content'];
+        return ConfigEditor::save($this->current($uuid, $path, $hash, $roots), basename(self::safe($path, $roots)), $values)['content'];
     }
 
     /**
@@ -102,10 +118,10 @@ class ConfigFilesService
      *
      * @throws ConfigEditException|\InvalidArgumentException
      */
-    public function save(string $uuid, string $path, string $hash, ?array $values, ?string $content): array
+    public function save(string $uuid, string $path, string $hash, ?array $values, ?string $content, array $roots = self::ROOTS): array
     {
-        $path = self::safe($path);
-        $disk = $this->current($uuid, $path, $hash);
+        $path = self::safe($path, $roots);
+        $disk = $this->current($uuid, $path, $hash, $roots);
         if ($values !== null) {
             $r = ConfigEditor::save($disk, basename($path), $values);
             ['content' => $new, 'changed' => $changed] = $r;
@@ -125,9 +141,9 @@ class ConfigFilesService
     }
 
     /** The file as it is on disk, if it's still what the user opened. */
-    private function current(string $uuid, string $path, string $hash): string
+    private function current(string $uuid, string $path, string $hash, array $roots): string
     {
-        $disk = $this->files->readFile($uuid, self::safe($path), self::MAX_BYTES);
+        $disk = $this->files->readFile($uuid, self::safe($path, $roots), self::MAX_BYTES);
         if ($disk === null || ! hash_equals(sha1($disk), $hash)) {
             throw new \InvalidArgumentException('Something else changed ' . $path . ' since you opened it (servers often rewrite configs when they stop). Reopen it and make the change again.');
         }

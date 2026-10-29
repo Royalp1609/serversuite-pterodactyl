@@ -15,7 +15,8 @@ use ServerSuite\Services\GameDetectionService;
 class GameGuard
 {
     /**
-     * Client endpoint (controller method) => the game feature it belongs to.
+     * Client endpoint (controller method) => the game feature it belongs to
+     * (or features: any one of them will do).
      * Endpoints not listed (backups, notifications, subdomains, the backup
      * prompt, crash and restore banners) work on every game.
      */
@@ -25,7 +26,8 @@ class GameGuard
         'installBatch' => 'mods', 'removeBatch' => 'mods', 'update' => 'mods', 'updateAll' => 'mods', 'destroy' => 'mods',
         'reconcileAdopt' => 'mods', 'reconcileForget' => 'mods',
         'crashDisable' => 'mods', 'crashEnable' => 'mods',
-        'configs' => 'mods', 'configsOpen' => 'mods', 'configsRender' => 'mods', 'configsSave' => 'mods',
+        // Minecraft edits configs in the Mods tab, Rust and Valheim in their Configs tab (#86).
+        'configs' => ['mods', 'configs'], 'configsOpen' => ['mods', 'configs'], 'configsRender' => ['mods', 'configs'], 'configsSave' => ['mods', 'configs'],
         'crossplay' => 'crossplay', 'crossplayInstall' => 'crossplay', 'crossplayConfigure' => 'crossplay',
         'serverVersions' => 'versions', 'loaders' => 'versions', 'serverVersionPreflight' => 'versions',
         'serverVersionApply' => 'versions', 'loaderSwitch' => 'versions', 'serverVersionNuclear' => 'reset',
@@ -41,14 +43,19 @@ class GameGuard
      */
     public static function endpointBlocker(object $server, string $endpoint): ?string
     {
-        $feature = self::ENDPOINT_FEATURES[$endpoint] ?? null;
-        if ($feature === null) {
+        $features = (array) (self::ENDPOINT_FEATURES[$endpoint] ?? []);
+        if ($features === []) {
             return null;
         }
 
         $game = app(GameDetectionService::class)->for($server);
+        foreach ($features as $feature) {
+            if ($game->supports($feature)) {
+                return null;
+            }
+        }
 
-        return $game->supports($feature) ? null : ($game->key === 'unknown'
+        return ($game->key === 'unknown'
             ? 'This only works on Minecraft servers.'
             : "This only works on Minecraft servers, and this one runs {$game->name}.");
     }

@@ -292,6 +292,37 @@ JSON, $out);
         ConfigEditor::save($raw, 'c.yml', [99 => 'x']);
     }
 
+    public function test_rust_convar_cfg_keeps_its_quoting(): void
+    {
+        // Rust's server.cfg and serverauto.cfg, as the server writes them (#90).
+        $raw = "server.hostname \"SS Test Rust\"\nserver.url \"http://example.com\"\nserver.worldsize 1000\nserver.seed \nbasesculpture.useconvexcolliders \"False\"\n";
+        $f = $this->fields($raw, 'server.cfg');
+
+        $this->assertSame('http://example.com', $f['server.url']['value'], 'the colon is part of the value');
+        $this->assertSame('toggle', $f['basesculpture.useconvexcolliders']['control']);
+        $this->assertSame('number', $f['server.worldsize']['control']);
+
+        $out = $this->save($raw, 'server.cfg', [
+            'server.hostname' => 'My Rust Server', 'server.worldsize' => '2000', 'server.seed' => '12345',
+            'basesculpture.useconvexcolliders' => true,
+        ]);
+        $this->assertSame("server.hostname \"My Rust Server\"\nserver.url \"http://example.com\"\nserver.worldsize 2000\nserver.seed 12345 \nbasesculpture.useconvexcolliders \"True\"\n", $out);
+
+        // A bare value that gains a space is quoted; a double quote can't be written.
+        $this->assertSame("server.hostname \"SS Test Rust\"\nserver.url \"http://example.com\"\nserver.worldsize 1000\nserver.seed \"a b\" \nbasesculpture.useconvexcolliders \"False\"\n",
+            $this->save($raw, 'server.cfg', ['server.seed' => 'a b']));
+        $this->assertRefused($raw, 'server.cfg', ['server.hostname' => 'a"b'], '');
+    }
+
+    public function test_a_cfg_line_with_a_quote_before_a_colon_is_not_misread(): void
+    {
+        // Not convars (the [section] line), so the INI-style reader: the quoted URL line is left alone.
+        $raw = "[General]\nurl \"http://example.com\"\nenabled = true\n";
+        $f = $this->fields($raw, 'mixed.cfg');
+
+        $this->assertSame(['General.enabled'], array_keys($f));
+    }
+
     public function test_unknown_types_have_no_form(): void
     {
         $this->assertNotNull(ConfigEditor::open('hello', 'notes.txt')['reason']);

@@ -93,7 +93,9 @@ it('gives Minecraft every feature and other games the neutral ones', function ()
     $d = app(GameDetectionService::class);
 
     expect($d->for(paperServer())->supports('versions'))->toBeTrue()
-        ->and($d->for(rustServer())->features)->toBe(['dashboard', 'backups', 'notifications', 'subdomains'])
+        ->and($d->for(rustServer())->features)->toBe(['dashboard', 'backups', 'notifications', 'subdomains', 'configs'])
+        ->and($d->for(rustServer())->configRoots)->toBe(['/oxide/config', '/oxide/data', '/carbon/configs', '/carbon/data', '/server/rust/cfg'])
+        ->and($d->for(valheimServer())->configRoots)->toBe(['/BepInEx/config'])
         ->and($d->for(teamspeakServer())->supports('mods'))->toBeFalse();
 });
 
@@ -127,7 +129,11 @@ it('blocks Minecraft-only endpoints on other games and leaves the rest open', fu
         ->and(GameGuard::endpointBlocker(teamspeakServer(), 'install'))->toBe('This only works on Minecraft servers.')
         ->and(GameGuard::endpointBlocker(rustServer(), 'backups'))->toBeNull()
         ->and(GameGuard::endpointBlocker(rustServer(), 'subdomainsClaim'))->toBeNull()
-        ->and(GameGuard::endpointBlocker(paperServer(), 'loaderSwitch'))->toBeNull();
+        ->and(GameGuard::endpointBlocker(paperServer(), 'loaderSwitch'))->toBeNull()
+        // Configs: Minecraft through the Mods tab, Rust/Valheim through their Configs tab (#86).
+        ->and(GameGuard::endpointBlocker(rustServer(), 'configsSave'))->toBeNull()
+        ->and(GameGuard::endpointBlocker(paperServer(), 'configsOpen'))->toBeNull()
+        ->and(GameGuard::endpointBlocker(teamspeakServer(), 'configs'))->toBe('This only works on Minecraft servers.');
 });
 
 it('maps every gated endpoint to one with permissions', function () {

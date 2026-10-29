@@ -74,3 +74,18 @@ it('keeps text files that have no form as text, and caps the size', function () 
     $this->files->put('/config/big.yml', str_repeat('a', ConfigFilesService::MAX_BYTES + 1));
     expect(fn () => $this->svc->open('s', '/config/big.yml'))->toThrow(InvalidArgumentException::class, '512 KiB');
 });
+
+it('browses and saves a game\'s own folders and nothing else (#86)', function () {
+    $roots = ['/BepInEx/config'];
+    $bep = "[Logging.Console]\n\n## Enables showing a console for log output.\n# Setting type: Boolean\n# Default value: true\nEnabled = true\n";
+    $this->files->put('/BepInEx/config/BepInEx.cfg', $bep);
+
+    expect(array_column($this->svc->browse('s', null, $roots)['entries'], 'path'))->toBe(['/BepInEx/config/BepInEx.cfg'])
+        ->and(fn () => $this->svc->open('s', '/plugins/Essentials/config.yml', $roots))->toThrow(InvalidArgumentException::class, 'Only files under /BepInEx/config');
+
+    $o = $this->svc->open('s', '/BepInEx/config/BepInEx.cfg', $roots);
+    $ids = array_column($o['fields'], 'id', 'label');
+    $this->svc->save('s', '/BepInEx/config/BepInEx.cfg', $o['hash'], [$ids['Logging.Console.Enabled'] => false], null, $roots);
+
+    expect($this->files->files['/BepInEx/config/BepInEx.cfg'])->toBe(str_replace('Enabled = true', 'Enabled = false', $bep));
+});
