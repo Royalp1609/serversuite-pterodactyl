@@ -22,6 +22,9 @@ beforeEach(function () {
     $node = Node::query()->create(['name' => 'secret-node', 'fqdn' => 'wings.internal.example']);
     $alloc = Allocation::query()->create(['node_id' => $node->id, 'ip' => '192.0.2.44', 'port' => 25565]);
     $this->server = Server::query()->create(['uuid' => 'c0ffee00-1111-2222-3333-444455556666', 'node_id' => $node->id, 'allocation_id' => $alloc->id]);
+    // A Minecraft server (#79): status cards ping with the Minecraft protocol.
+    \ServerSuite\Services\GameDetectionService::flush();
+    \ServerSuite\Models\ModManagerSetting::forServer($this->server->uuid)->forceFill(['loader' => 'paper'])->save();
 
     $this->pings = [];
     $this->reply = [
@@ -185,4 +188,15 @@ it('speaks the Server List Ping protocol', function () {
     expect(MinecraftPing::plainText(['text' => "\u{00A7}lhi", 'extra' => [' ', ['text' => 'there']]]))->toBe('hi there');
 
     expect(fn () => (new MinecraftPing())->ping('127.0.0.1', $port, 'gone.example.com', 0.5))->toThrow(RuntimeException::class);
+});
+
+it('refuses to switch a status card on for a game that is not Minecraft (#79)', function () {
+    \ServerSuite\Models\ModManagerSetting::forServer($this->server->uuid)->forceFill(['loader' => null])->save();
+    \ServerSuite\Services\GameDetectionService::flush();
+    $sub = \ServerSuite\Models\Subdomain::query()->create(['server_uuid' => $this->server->uuid, 'provider' => 'cloudflare', 'label' => 'ts', 'zone' => 'play.example.com',
+        'fqdn' => 'ts.play.example.com', 'a_record_id' => 'a-1', 'srv_record_id' => null, 'ip' => '192.0.2.44', 'port' => 25565]);
+
+    expect(fn () => app(\ServerSuite\Services\StatusCardService::class)->setPublic($this->server, $sub->id, true))
+        ->toThrow(\ServerSuite\Exceptions\SubdomainException::class, 'only work for Minecraft');
+    expect(app(\ServerSuite\Services\StatusCardService::class)->setPublic($this->server, $sub->id, false)->status_public)->toBeFalse();
 });

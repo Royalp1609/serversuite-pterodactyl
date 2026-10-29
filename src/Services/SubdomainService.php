@@ -51,6 +51,7 @@ class SubdomainService
      */
     public function overview(object $server): array
     {
+        $game = $this->game($server);
         $setting = ModManagerSetting::forServer($server->uuid);
         [$ip, $port] = $this->target($server);
         $items = Subdomain::query()->where('server_uuid', $server->uuid)->orderBy('fqdn')->get();
@@ -73,11 +74,15 @@ class SubdomainService
                 'port'  => $s->port,
                 'stale' => $ip !== null && ($s->ip !== $ip || $s->port !== $port),
                 'move_pending' => $s->move_pending_since !== null,
+                'address' => $s->srv_record_id !== null ? $s->fqdn : $s->fqdn . ':' . $s->port,
                 'status_public' => (bool) $s->status_public,
                 'card_url'  => $s->status_public && StatusCardService::enabled() ? StatusCardService::url($s->fqdn) : null,
                 'badge_url' => $s->status_public && StatusCardService::enabled() ? StatusCardService::url($s->fqdn, true) : null,
             ])->values()->all(),
-            'status_cards' => StatusCardService::enabled(),
+            // Status cards ping with the Minecraft protocol; games without a
+            // SRV lookup join with name:port (#79).
+            'status_cards' => StatusCardService::enabled() && $game->isMinecraft(),
+            'game'      => ['name' => $game->name, 'srv' => $game->srvService !== null],
             'reserved'  => $this->reserved(),
         ];
     }
@@ -132,7 +137,7 @@ class SubdomainService
         }
 
         try {
-            $res = $dns->createRecords($label, $ip, $port);
+            $res = $dns->createRecords($label, $ip, $port, $this->game($server)->srvService);
         } catch (\Throwable $e) {
             throw new SubdomainException($e->getMessage(), previous: $e);
         }
@@ -179,7 +184,9 @@ class SubdomainService
         }
 
         try {
-            $dns->updateRecords($sub->fqdn, $sub->a_record_id, $sub->srv_record_id, $ip, $port);
+            // A name with a SRV record keeps it; its service is the game's
+            // (Minecraft for every record made before #79).
+            $dns->updateRecords($sub->fqdn, $sub->a_record_id, $sub->srv_record_id, $ip, $port, $this->game($server)->srvService ?? '_minecraft._tcp');
         } catch (\Throwable $e) {
             throw new SubdomainException($e->getMessage(), previous: $e);
         }
@@ -458,4 +465,11 @@ class SubdomainService
 
         return $zone;
     }
+
+    /** The server's game (#79): which SRV record its subdomains get. */
+    private function game(object $server): \ServerSuite\Support\Data\GameProfile
+    {
+        return app(GameDetectionService::class)->for($server);
+    }
+
 }

@@ -77,6 +77,10 @@ class StatusCardService
     {
         $sub = Subdomain::query()->where('server_uuid', $server->uuid)->find($id)
             ?? throw new SubdomainException('Subdomain not found on this server.');
+        // The card pings with the Minecraft protocol (#79); turning one off always works.
+        if ($public && ! app(GameDetectionService::class)->for($server)->isMinecraft()) {
+            throw new SubdomainException('Status cards only work for Minecraft servers so far.');
+        }
         $sub->forceFill(['status_public' => $public])->save();
         Cache::forget(self::cacheKey($sub->server_uuid, $sub->fqdn));
 

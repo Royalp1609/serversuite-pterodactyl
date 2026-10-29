@@ -6,7 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * A subdomain claimed by a server: an A record (DNS only) plus a
- * _minecraft._tcp SRV record carrying the port.
+ * SRV record carrying the port for games that look one up (Minecraft:
+ * _minecraft._tcp); srv_record_id is null for games that don't (#79).
  *
  * @property int $id
  * @property string $server_uuid

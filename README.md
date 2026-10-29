@@ -141,8 +141,10 @@ Pelican plugin.
 
 ### Subdomains (server tab)
 - Claim `name.domain` on a domain the panel admin offers, or on the server
-  owner's **own Cloudflare domain**. Players join with just the name: an A
-  record points at the server and a SRV record carries the port.
+  owner's **own Cloudflare domain**. An A record points at the server. On
+  Minecraft a SRV record carries the port, so players join with just the name;
+  Rust, Valheim and other games don't look one up, so they join with
+  `name.domain:port`, which the tab shows. Status cards are Minecraft-only.
 - Each server has an **admin-set allowance** (default 0).
 - Records are removed when a server is deleted. When its primary allocation
   changes, they move once the server has restarted on the new address (or
