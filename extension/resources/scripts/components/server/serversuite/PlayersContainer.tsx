@@ -6,6 +6,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUsers, faSpinner, faSync } from '@fortawesome/free-solid-svg-icons';
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
+import SteamPlayers, { SteamOverview } from './SteamPlayers';
 
 /*
  * Server Suite — Players tab (#27).
@@ -58,6 +59,7 @@ type ListKey = 'whitelist' | 'ops' | 'banned-players' | 'banned-ips';
 const TABS: Record<ListKey, string> = { whitelist: 'Whitelist', ops: 'Operators', 'banned-players': 'Banned players', 'banned-ips': 'Banned IPs' };
 
 interface Overview {
+    game: 'minecraft';
     found: boolean; running: boolean; online_mode: boolean; whitelist_on: boolean;
     lists: Record<ListKey, Array<Record<string, any>>>;
     online: { count: number | null; max: number | null; names: string[] } | null;
@@ -68,7 +70,7 @@ const errorOf = (e: any, fallback: string) => e?.response?.data?.error || e?.res
 export default () => {
     const uuid = ServerContext.useStoreState((state) => state.server.data?.uuid);
     const base = `/extensions/serversuite/${uuid}/players`;
-    const [data, setData] = useState<Overview | null>(null);
+    const [raw, setData] = useState<Overview | SteamOverview | null>(null);
     const [list, setList] = useState<ListKey>('whitelist');
     const [who, setWho] = useState('');
     const [reason, setReason] = useState('');
@@ -88,10 +90,14 @@ export default () => {
         setError(null);
         setNotice(null);
         http.post(url, body)
-            .then((res) => { setNotice(res.data.data.message); after?.(); setTimeout(load, data?.running ? 600 : 0); })
+            .then((res) => { setNotice(res.data.data.message); after?.(); setTimeout(load, raw?.running ? 600 : 0); })
             .catch((e) => setError(errorOf(e, 'Not done.')))
             .finally(() => setBusy(null));
     };
+
+    // Rust and Valheim (#85): SteamID lists.
+    if (raw && raw.game !== 'minecraft') return <SteamPlayers base={base} data={raw} reload={load} />;
+    const data = raw as Overview | null;
 
     const banList = list === 'banned-players' || list === 'banned-ips';
     const rows = data?.lists[list] || [];

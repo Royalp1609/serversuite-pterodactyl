@@ -1750,18 +1750,46 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
-        return response()->json(['data' => app(\ServerSuite\Services\PlayersService::class)->overview($srv)]);
+        $game = $this->steamGame($srv);
+        if ($game !== null) {
+            $labels = array_map(fn ($l) => $l['label'], \ServerSuite\Services\SteamPlayersService::LISTS[$game]);
+
+            return response()->json(['data' => ['game' => $game, 'labels' => $labels]
+                + app(\ServerSuite\Services\SteamPlayersService::class)->overview($srv, $game)]);
+        }
+
+        return response()->json(['data' => ['game' => 'minecraft'] + app(\ServerSuite\Services\PlayersService::class)->overview($srv)]);
     }
 
-    /** POST /{server}/players { list, who, reason? } */
+    /** Rust or Valheim (#85): SteamID lists instead of Minecraft's; null for Minecraft. */
+    private function steamGame(Server $srv): ?string
+    {
+        $key = app(\ServerSuite\Services\GameDetectionService::class)->for($srv)->key;
+
+        return \ServerSuite\Services\SteamPlayersService::supports($key) ? $key : null;
+    }
+
+    /** The list keys the server's game has. */
+    private function playerLists(Server $srv): array
+    {
+        $game = $this->steamGame($srv);
+
+        return array_keys($game === null ? \ServerSuite\Services\PlayersService::LISTS : \ServerSuite\Services\SteamPlayersService::LISTS[$game]);
+    }
+
+    /** POST /{server}/players { list, who, name?, reason? } (name: Rust only) */
     public function playersAdd(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
-        $data = $request->validate(['list' => ['required', 'string', 'in:' . implode(',', array_keys(\ServerSuite\Services\PlayersService::LISTS))],
-            'who' => ['required', 'string', 'max:64'], 'reason' => ['nullable', 'string', 'max:200']]);
+        $data = $request->validate(['list' => ['required', 'string', 'in:' . implode(',', $this->playerLists($srv))],
+            'who' => ['required', 'string', 'max:80'], 'name' => ['nullable', 'string', 'max:64'], 'reason' => ['nullable', 'string', 'max:200']]);
+        $game = $this->steamGame($srv);
+        $fn = $game === null
+            ? fn ($svc) => $svc->add($srv, $data['list'], $data['who'], (string) ($data['reason'] ?? ''))
+            : fn () => app(\ServerSuite\Services\SteamPlayersService::class)->add($srv, $game, $data['list'], $data['who'], (string) ($data['name'] ?? ''), (string) ($data['reason'] ?? ''));
 
-        return $this->playersAction($srv, fn ($svc) => $svc->add($srv, $data['list'], $data['who'], (string) ($data['reason'] ?? '')), 'players-added', ['list' => $data['list'], 'who' => trim($data['who'])]);
+        return $this->playersAction($srv, $fn, 'players-added', ['list' => $data['list'], 'who' => trim($data['who'])]);
     }
 
     /** POST /{server}/players/remove { list, who } */
@@ -1769,10 +1797,14 @@ class ModManagerController extends Controller
     {
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
-        $data = $request->validate(['list' => ['required', 'string', 'in:' . implode(',', array_keys(\ServerSuite\Services\PlayersService::LISTS))],
-            'who' => ['required', 'string', 'max:64']]);
+        $data = $request->validate(['list' => ['required', 'string', 'in:' . implode(',', $this->playerLists($srv))],
+            'who' => ['required', 'string', 'max:80']]);
+        $game = $this->steamGame($srv);
+        $fn = $game === null
+            ? fn ($svc) => $svc->remove($srv, $data['list'], $data['who'])
+            : fn () => app(\ServerSuite\Services\SteamPlayersService::class)->remove($srv, $game, $data['list'], $data['who']);
 
-        return $this->playersAction($srv, fn ($svc) => $svc->remove($srv, $data['list'], $data['who']), 'players-removed', ['list' => $data['list'], 'who' => $data['who']]);
+        return $this->playersAction($srv, $fn, 'players-removed', ['list' => $data['list'], 'who' => $data['who']]);
     }
 
     /** POST /{server}/players/whitelist { on } */
@@ -1781,6 +1813,9 @@ class ModManagerController extends Controller
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
         $on = (bool) $request->validate(['on' => ['required', 'boolean']])['on'];
+        if ($this->steamGame($srv) !== null) {
+            return response()->json(['error' => 'This game has no whitelist switch.'], 422);
+        }
 
         return $this->playersAction($srv, fn ($svc) => $svc->setWhitelist($srv, $on), $on ? 'whitelist-on' : 'whitelist-off', []);
     }

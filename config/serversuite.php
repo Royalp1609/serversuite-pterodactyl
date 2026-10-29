@@ -276,6 +276,8 @@ return [
     |            game-neutral ones. List one only once it works for that game.
     |            "configs" = the Configs tab, browsing config_roots.
     |            "errors" = the Errors tab, reading logs.
+    |            "players" = the Players tab (SteamPlayersService: Rust,
+    |            Valheim).
     | config_roots: folders the Configs tab offers (missing ones are skipped).
     | logs:      what the Errors tab reads: path (a file, or a folder with
     |            newest = a file-name pattern: the newest match), format
@@ -293,7 +295,7 @@ return [
             'name'          => 'Rust',
             'steam_app_ids' => [258550],
             'startup'       => ['RustDedicated'],
-            'features'      => ['configs', 'errors'],
+            'features'      => ['configs', 'errors', 'players'],
             'logs'          => [
                 ['path' => '/oxide/logs', 'newest' => '/^oxide_[\d-]+\.txt$/', 'format' => 'oxide', 'when' => ['framework' => ['oxide']]],
                 ['path' => '/carbon/logs/Carbon.Core.log', 'format' => 'carbon', 'when' => ['framework' => ['carbon']]],
@@ -314,7 +316,7 @@ return [
             'name'          => 'Valheim',
             'steam_app_ids' => [896660],
             'startup'       => ['valheim_server'],
-            'features'      => ['configs', 'errors'],
+            'features'      => ['configs', 'errors', 'players'],
             'config_roots'  => ['/BepInEx/config'],
             'logs'          => [
                 ['path' => '/BepInEx/LogOutput.log', 'format' => 'bepinex'],
