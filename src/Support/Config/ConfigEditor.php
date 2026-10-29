@@ -38,13 +38,22 @@ class ConfigEditor
 
     private const LONG_TEXT = 100;
 
-    /** @return array{0: class-string<Format>, 1: string}|null */
-    public static function formatFor(string $filename): ?array
+    /**
+     * The format for a file. A .cfg made only of Source-style convar lines
+     * (`server.hostname "My server"`, Rust's server.cfg) is read as convars,
+     * not as a Forge/INI cfg.
+     *
+     * @return array{0: class-string<Format>, 1: string}|null
+     */
+    public static function formatFor(string $filename, ?string $raw = null): ?array
     {
         $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         $f = self::FORMATS[$ext] ?? null;
         if ($f !== null && $f[0] === YamlFormat::class && ! YamlFormat::available()) {
             return null;
+        }
+        if ($f !== null && $f[1] === 'cfg' && $raw !== null && KeyValueFormat::looksLikeConvars($raw)) {
+            return [KeyValueFormat::class, 'convar'];
         }
 
         return $f;
@@ -57,7 +66,7 @@ class ConfigEditor
      */
     public static function open(string $raw, string $filename): array
     {
-        $fmt = self::formatFor($filename);
+        $fmt = self::formatFor($filename, $raw);
         if ($fmt === null) {
             return ['fields' => [], 'reason' => 'There is no form view for this file type.'];
         }
@@ -89,7 +98,7 @@ class ConfigEditor
      */
     public static function save(string $raw, string $filename, array $values): array
     {
-        $fmt = self::formatFor($filename) ?? throw new ConfigEditException('There is no form view for this file type.');
+        $fmt = self::formatFor($filename, $raw) ?? throw new ConfigEditException('There is no form view for this file type.');
         [$class, $variant] = $fmt;
         $slots = self::slots($raw, $fmt) ?? throw new ConfigEditException("The form can't read this file safely any more. Use the text editor.");
 

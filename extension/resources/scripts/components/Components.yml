@@ -4,6 +4,7 @@ Navigation:
   Routes:
     - { Name: 'Mods', Permission: '"mods.*"', Path: '/mod-manager', Type: 'server', Component: 'server/serversuite/ModManagerContainer', AdminOnly: 'false' }
     - { Name: 'Modpacks', Permission: '"mods.*"', Path: '/modpacks', Type: 'server', Component: 'server/serversuite/ModpacksContainer', AdminOnly: 'false' }
+    - { Name: 'Configs', Permission: '"file.read-content"', Path: '/configs', Type: 'server', Component: 'server/serversuite/ConfigsContainer', AdminOnly: 'false' }
     - { Name: 'Backups', Permission: '"backup.*"', Path: '/backup-rotation', Type: 'server', Component: 'server/serversuite/BackupsContainer', AdminOnly: 'false' }
     - { Name: 'Versions', Permission: '"startup.*"', Path: '/versions', Type: 'server', Component: 'server/serversuite/VersionsContainer', AdminOnly: 'false' }
     - { Name: 'Subdomains', Permission: '"subdomains.*"', Path: '/subdomains', Type: 'server', Component: 'server/serversuite/SubdomainsContainer', AdminOnly: 'false' }

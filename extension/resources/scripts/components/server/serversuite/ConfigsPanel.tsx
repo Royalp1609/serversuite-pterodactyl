@@ -9,7 +9,8 @@ import ConfigFields, { ConfigField } from './ConfigFields';
 import { getClearance } from './prechange';
 
 /*
- * Server Suite — Mods tab, Configs view (#21).
+ * Server Suite — Mods tab, Configs view (#21), and the Configs tab for
+ * Rust and Valheim (#86, ConfigsContainer, with the game's roots).
  * Browse /plugins, /config, /defaultconfigs and /kubejs and edit a file as
  * a typed form (switches, numbers, choices, lists) or as text. The backend
  * (ConfigFilesService) enforces every rule: path limits, 512 KiB, in-place
@@ -61,7 +62,9 @@ interface OpenFile { path: string; content: string; hash: string; fields: Config
 
 const errorOf = (e: any, fallback: string) => e?.response?.data?.error || e?.response?.data?.message || fallback;
 
-export default ({ uuid }: { uuid: string }) => {
+const MINECRAFT_ROOTS = ['/plugins', '/config', '/defaultconfigs', '/kubejs'];
+
+export default ({ uuid, roots = MINECRAFT_ROOTS }: { uuid: string; roots?: string[] }) => {
     const base = `/extensions/serversuite/${uuid}/configs`;
     const [path, setPath] = useState<string | null>(null);
     const [entries, setEntries] = useState<Entry[]>([]);
@@ -107,7 +110,7 @@ export default ({ uuid }: { uuid: string }) => {
         if (file) { setFile(null); return; }
         if (!path) return;
         const parent = path.substring(0, path.lastIndexOf('/'));
-        browse(['', '/plugins', '/config', '/defaultconfigs', '/kubejs'].includes(path) ? null : parent || null);
+        browse(['', ...roots].includes(path) ? null : parent || null);
     };
 
     const toggleMode = () => {
@@ -181,7 +184,7 @@ export default ({ uuid }: { uuid: string }) => {
                             {e.is_file && <span className="text-xs text-neutral-500">{(e.size / 1024).toFixed(1)} KiB</span>}
                         </Row>
                     ))}
-                    {entries.length === 0 && !busy && <p className="text-center text-neutral-500 py-6 text-sm">No config files here. Start the server once so plugins and mods write their configs.</p>}
+                    {entries.length === 0 && !busy && <p className="text-center text-neutral-500 py-6 text-sm">No config files here. Start the server once so it writes its config files.</p>}
                 </div>
             )}
 

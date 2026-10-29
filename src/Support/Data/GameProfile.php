@@ -22,6 +22,7 @@ readonly class GameProfile
 
     /**
      * @param list<string> $features
+     * @param list<string> $configRoots folders the Configs tab browses, e.g. /BepInEx/config
      */
     public function __construct(
         public string $key,
@@ -30,6 +31,7 @@ readonly class GameProfile
         public ?string $srvService = null,
         public string $modsLabel = 'Mods',
         public string $signal = 'none',
+        public array $configRoots = [],
     ) {}
 
     public static function minecraft(string $signal = 'minecraft'): self
@@ -56,6 +58,7 @@ readonly class GameProfile
             isset($config['srv']) && $config['srv'] !== '' ? (string) $config['srv'] : null,
             (string) ($config['mods_label'] ?? 'Mods'),
             $signal,
+            array_values(array_map(fn ($r) => '/' . trim((string) $r, '/'), (array) ($config['config_roots'] ?? []))),
         );
     }
 

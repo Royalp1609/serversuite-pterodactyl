@@ -12,12 +12,40 @@ namespace ServerSuite\Support\Config;
  *    left alone. `[section]` headers are accepted too.
  *  - conf: HOCON-style: `name {` blocks, `=` or `:`, `#` and `//`
  *    comments, quoted strings. Arrays are left alone.
+ *  - convar: Source-engine convars, one `name value` per line, the value
+ *    bare or in double quotes, `//` comments (Rust's server.cfg and
+ *    serverauto.cfg). Picked for a .cfg whose lines all look like this.
  * A line the scanner doesn't recognise is kept as it is and not offered.
  */
 class KeyValueFormat extends Format
 {
+    /** One convar line: `name`, `name value` or `name "value"`. */
+    private const CONVAR = '/^(\s*)([A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]+("[^"\n]*"|[^\s"]+))?[ \t]*$/';
+
+    /** Every line is blank, a // comment or a convar, and there is at least one convar. */
+    public static function looksLikeConvars(string $raw): bool
+    {
+        $seen = false;
+        foreach (preg_split('/\r\n|\n|\r/', $raw) ?: [] as $line) {
+            $t = trim($line);
+            if ($t === '' || str_starts_with($t, '//')) {
+                continue;
+            }
+            if (! preg_match(self::CONVAR, $line)) {
+                return false;
+            }
+            $seen = true;
+        }
+
+        return $seen;
+    }
+
     public static function scan(string $raw, string $variant): ?array
     {
+        if ($variant === 'convar') {
+            return self::scanConvars($raw);
+        }
+
         $props = $variant === 'properties';
         $braces = in_array($variant, ['cfg', 'conf'], true);
         $sections = in_array($variant, ['ini', 'cfg'], true);
@@ -80,7 +108,7 @@ class KeyValueFormat extends Format
 
             $re = $props
                 ? '/^(\s*)((?:[^=:\\\\]|\\\\.)+?)\s*[=:]\s*(.*)$/'
-                : '/^(\s*)(?:([BIDS]):)?("(?:[^"\\\\]|\\\\.)*"|[^=:\s"][^=:]*?)\s*[=:]\s*(.*)$/';
+                : '/^(\s*)(?:([BIDS]):)?("(?:[^"\\\\]|\\\\.)*"|[^=:\s"][^=:"]*?)\s*[=:]\s*(.*)$/';
             if (! preg_match($re, $text, $m, PREG_OFFSET_CAPTURE)) {
                 $help = [];
                 continue;
@@ -125,6 +153,54 @@ class KeyValueFormat extends Format
                 continue;
             }
             $slots[] = $note + ['path' => $path] + $slot;
+        }
+
+        return self::markDuplicates($slots);
+    }
+
+    /** @return list<array<string, mixed>> */
+    private static function scanConvars(string $raw): array
+    {
+        $slots = [];
+        $help = [];
+        foreach (self::lines($raw) as $line) {
+            $t = trim($line['text']);
+            if ($t === '') {
+                $help = [];
+                continue;
+            }
+            if (str_starts_with($t, '//')) {
+                $help[] = trim(substr($t, 2));
+                continue;
+            }
+            if (! preg_match(self::CONVAR, $line['text'], $m, PREG_OFFSET_CAPTURE)) {
+                $help = [];
+                continue;
+            }
+            $note = ['help' => self::helpText($help)];
+            $help = [];
+            $v = $m[3][0] ?? '';
+            $quoted = str_starts_with($v, '"');
+            if (($m[3][1] ?? -1) < 0) {
+                // `name` alone: an empty value, written after one space.
+                $at = $line['start'] + $m[2][1] + strlen($m[2][0]);
+                $slots[] = $note + ['path' => [$m[2][0]]] + self::slot([], 'string', '', $at, $at, ['style' => ['convar' => true, 'quote' => null, 'case' => 'lower', 'lead' => ' ']]);
+                continue;
+            }
+            $text = $quoted ? substr($v, 1, -1) : $v;
+            $start = $line['start'] + $m[3][1];
+            $bool = preg_match('/^(true|false)$/i', $text) === 1;
+            $int = preg_match('/^-?(0|[1-9]\d{0,17})$/', $text) === 1;
+            $float = preg_match('/^-?\d+\.\d+$/', $text) === 1;
+            $type = $bool ? 'bool' : ($int ? 'int' : ($float ? 'float' : 'string'));
+            $value = match ($type) {
+                'bool' => strtolower($text) === 'true',
+                'int' => (int) $text,
+                'float' => (float) $text,
+                default => $text,
+            };
+            $slots[] = $note + ['path' => [$m[2][0]]]
+                + self::slot([], $type, $value, $start, $start + strlen($v), ['style' => ['convar' => true, 'quote' => $quoted ? '"' : null, 'case' => self::caseOf($text)]]);
         }
 
         return self::markDuplicates($slots);
@@ -192,6 +268,9 @@ class KeyValueFormat extends Format
     public static function encode(array $slot, mixed $value): string
     {
         $style = $slot['style'];
+        if ($style['convar'] ?? false) {
+            return self::encodeConvar($slot, $value);
+        }
 
         return match ($slot['type']) {
             'bool'  => match ($style['case'] ?? 'lower') {
@@ -203,6 +282,29 @@ class KeyValueFormat extends Format
             'float' => self::floatText((float) $value),
             default => self::encodeString((string) $value, $style),
         };
+    }
+
+    /**
+     * A convar value in its old quoting; a bare value that now needs quotes
+     * (empty, spaces) gets them. A double quote can't be written: the
+     * re-read then differs and the save is refused.
+     */
+    private static function encodeConvar(array $slot, mixed $value): string
+    {
+        $style = $slot['style'];
+        $text = match ($slot['type']) {
+            'bool'  => match ($style['case'] ?? 'lower') {
+                'upper' => $value ? 'TRUE' : 'FALSE',
+                'title' => $value ? 'True' : 'False',
+                default => $value ? 'true' : 'false',
+            },
+            'int'   => (string) $value,
+            'float' => self::floatText((float) $value),
+            default => (string) $value,
+        };
+        $quote = ($style['quote'] ?? null) === '"' || $text === '' || preg_match('/\s/', $text);
+
+        return ($style['lead'] ?? '') . ($quote ? '"' . $text . '"' : $text);
     }
 
     /** @param array<string, mixed> $style */

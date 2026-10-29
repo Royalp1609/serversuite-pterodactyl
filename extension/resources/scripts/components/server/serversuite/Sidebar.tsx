@@ -47,6 +47,7 @@ const HIDDEN_NATIVE = ['/backups'];
 const SUITE: Record<string, { group: string; icon: IconDefinition }> = {
     '/mod-manager': { group: 'Management', icon: faCube },
     '/modpacks': { group: 'Management', icon: faBoxOpen },
+    '/configs': { group: 'Management', icon: faSlidersH },
     '/backup-rotation': { group: 'Management', icon: faArchive },
     '/subdomains': { group: 'Management', icon: faGlobe },
     '/players': { group: 'Management', icon: faUsers },
@@ -61,6 +62,7 @@ const SUITE: Record<string, { group: string; icon: IconDefinition }> = {
 const GAME_FEATURE: Record<string, string> = {
     '/mod-manager': 'mods',
     '/modpacks': 'modpacks',
+    '/configs': 'configs',
     '/versions': 'versions',
     '/properties': 'properties',
     '/players': 'players',
@@ -70,7 +72,7 @@ const GAME_FEATURE: Record<string, string> = {
 // Order inside each group, as on Pelican.
 const ORDER = [
     '/', '/activity',
-    '/files', '/mod-manager', '/modpacks', '/databases', '/backup-rotation', '/network', '/subdomains', '/players', '/velocity',
+    '/files', '/mod-manager', '/configs', '/modpacks', '/databases', '/backup-rotation', '/network', '/subdomains', '/players', '/velocity',
     '/schedules', '/properties', '/versions', '/users', '/startup', '/notifications', '/settings',
 ];
 const GROUPS = ['General', 'Management', 'Configuration', 'Other'];
