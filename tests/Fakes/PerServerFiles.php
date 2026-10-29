@@ -44,6 +44,11 @@ class PerServerFiles implements DaemonFileClient
         return $this->for($serverUuid)->tailFile($serverUuid, $path, $bytes);
     }
 
+    public function downloadTo(string $serverUuid, string $path, string $localPath, int $maxBytes): bool
+    {
+        return $this->for($serverUuid)->downloadTo($serverUuid, $path, $localPath, $maxBytes);
+    }
+
     public function rename(string $serverUuid, string $root, string $from, string $to): void
     {
         $this->for($serverUuid)->rename($serverUuid, $root, $from, $to);

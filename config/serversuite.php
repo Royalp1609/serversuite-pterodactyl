@@ -20,6 +20,14 @@ return [
         'cache_seconds' => 10,
     ],
 
+    // Bedrock add-ons (#93): archives uploaded to /addons are streamed to the
+    // panel to be checked before Wings unpacks them. Caps per archive.
+    'bedrock' => [
+        'max_archive_mb'   => env('SERVERSUITE_BEDROCK_MAX_ARCHIVE_MB', 200),
+        'max_unpacked_mb'  => env('SERVERSUITE_BEDROCK_MAX_UNPACKED_MB', 1024),
+        'download_timeout' => 300,
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Enabled Repositories

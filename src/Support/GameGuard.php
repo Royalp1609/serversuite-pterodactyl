@@ -36,6 +36,9 @@ class GameGuard
         'modpacks' => 'modpacks', 'modpacksSearch' => 'modpacks', 'modpackVersions' => 'modpacks',
         'modpackPreview' => 'modpacks', 'modpackInstall' => 'modpacks', 'modpackRemove' => 'modpacks',
         'errors' => 'errors', 'errorsCrash' => 'errors',
+        // Bedrock add-ons (#93): Bedrock counts as Minecraft; the endpoints also check it's BDS.
+        'addons' => 'mods', 'addonsFolder' => 'mods', 'addonsInstall' => 'mods', 'addonsRemove' => 'mods',
+        'addonsEnable' => 'mods', 'addonsMove' => 'mods', 'addonsTexturepack' => 'mods',
         'players' => 'players', 'playersAdd' => 'players', 'playersRemove' => 'players', 'playersWhitelist' => 'players',
     ];
 

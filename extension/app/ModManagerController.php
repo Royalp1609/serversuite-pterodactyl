@@ -504,9 +504,14 @@ class ModManagerController extends Controller
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $game = app(\ServerSuite\Services\GameDetectionService::class)->for($srv);
+        $features = $game->features;
+        if (\ServerSuite\Services\BedrockAddonService::isBedrock($srv)) {
+            // Bedrock Dedicated Server: the Add-ons tab instead of Mods (#93).
+            $features = [...array_values(array_diff($features, ['mods'])), 'addons'];
+        }
 
         return response()->json(['data' => [
-            'key' => $game->key, 'name' => $game->name, 'features' => $game->features, 'mods_label' => $game->modsLabel,
+            'key' => $game->key, 'name' => $game->name, 'features' => $features, 'mods_label' => $game->modsLabel,
             'config_roots' => $game->configRoots,
         ]]);
     }
@@ -1832,6 +1837,148 @@ class ModManagerController extends Controller
         $this->audit($srv, $event, $props);
 
         return response()->json(['data' => ['message' => $msg]]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Bedrock add-ons (#93; Pelican #97)
+    // -------------------------------------------------------------------------
+
+    /** GET /{server}/addons: the /addons folder (null: none yet) and the installed packs */
+    public function addons(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $this->requireBedrock($srv);
+        $svc = app(\ServerSuite\Services\BedrockAddonService::class);
+
+        return $this->addonAction(fn () => ['inbox' => $svc->inbox($srv->uuid)] + $svc->installed($srv->uuid));
+    }
+
+    /** POST /{server}/addons/folder: create /addons */
+    public function addonsFolder(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $this->requireBedrock($srv);
+
+        return $this->addonAction(function () use ($srv) {
+            app(\ServerSuite\Services\BedrockAddonService::class)->createInbox($srv->uuid);
+            $this->audit($srv, 'addons-folder-created');
+
+            return ['message' => 'Created the addons folder. Upload .mcpack and .mcaddon files to it in the File Manager.'];
+        });
+    }
+
+    /** POST /{server}/addons/install { file, clearance? }: an archive from /addons */
+    public function addonsInstall(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $this->requireBedrock($srv);
+        $file = (string) $request->validate(['file' => ['required', 'string', 'max:255']])['file'];
+        $clearance = $this->requireClearance($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
+
+        return $this->addonAction(function () use ($srv, $file, $clearance) {
+            $r = app(\ServerSuite\Services\BedrockAddonService::class)->install($srv->uuid, $file);
+            $this->audit($srv, 'addon-installed', ['addon' => implode(', ', [...$r['installed'], ...$r['updated']]), 'file' => $file, 'backup' => $clearance['backup']]);
+            $this->recordChange($srv, "install {$file}", $clearance);
+
+            return $r;
+        });
+    }
+
+    /** POST /{server}/addons/remove { type, uuid, clearance? }: a pack Server Suite installed */
+    public function addonsRemove(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $this->requireBedrock($srv);
+        $data = $request->validate($this->addonRules());
+        $clearance = $this->requireClearance($request, $srv);
+        if ($clearance instanceof JsonResponse) {
+            return $clearance;
+        }
+
+        return $this->addonAction(function () use ($srv, $data, $clearance) {
+            $msg = app(\ServerSuite\Services\BedrockAddonService::class)->remove($srv->uuid, $data['type'], $data['uuid']);
+            $this->audit($srv, 'addon-removed', ['addon' => $data['uuid'], 'backup' => $clearance['backup']]);
+            $this->recordChange($srv, "remove add-on {$data['uuid']}", $clearance);
+
+            return ['message' => $msg];
+        });
+    }
+
+    /** POST /{server}/addons/enable { type, uuid, on }: switch a pack on or off for the world */
+    public function addonsEnable(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $this->requireBedrock($srv);
+        $data = $request->validate($this->addonRules() + ['on' => ['required', 'boolean']]);
+
+        return $this->addonAction(function () use ($srv, $data) {
+            $msg = app(\ServerSuite\Services\BedrockAddonService::class)->setEnabled($srv->uuid, $data['type'], $data['uuid'], (bool) $data['on']);
+            $this->audit($srv, $data['on'] ? 'addon-enabled' : 'addon-disabled', ['addon' => $data['uuid']]);
+
+            return ['message' => $msg];
+        });
+    }
+
+    /** POST /{server}/addons/move { type, uuid, delta: -1|1 }: change a switched-on pack's priority */
+    public function addonsMove(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $this->requireBedrock($srv);
+        $data = $request->validate($this->addonRules() + ['delta' => ['required', 'integer', 'in:-1,1']]);
+
+        return $this->addonAction(function () use ($srv, $data) {
+            app(\ServerSuite\Services\BedrockAddonService::class)->move($srv->uuid, $data['type'], $data['uuid'], (int) $data['delta']);
+            $this->audit($srv, 'addon-moved', ['addon' => $data['uuid'], 'direction' => match ((int) $data['delta']) { -1 => 'up', default => 'down' }]);
+
+            return ['message' => null];
+        });
+    }
+
+    /** POST /{server}/addons/texturepack { on }: texturepack-required in server.properties */
+    public function addonsTexturepack(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+        $this->requireBedrock($srv);
+        $on = (bool) $request->validate(['on' => ['required', 'boolean']])['on'];
+
+        return $this->addonAction(function () use ($srv, $on) {
+            app(\ServerSuite\Services\BedrockAddonService::class)->setTexturepackRequired($srv->uuid, $on);
+            $this->audit($srv, $on ? 'addons-texturepack-required' : 'addons-texturepack-optional');
+
+            return ['message' => ($on ? 'Players must now download the resource packs to join.' : 'Players may now join without the resource packs.') . ' It applies when the server restarts.'];
+        });
+    }
+
+    /** 404 unless the server is a Bedrock Dedicated Server. */
+    private function requireBedrock(Server $srv): void
+    {
+        if (! \ServerSuite\Services\BedrockAddonService::isBedrock($srv)) {
+            abort(404, 'Add-ons are for Bedrock Dedicated Server.');
+        }
+    }
+
+    private function addonRules(): array
+    {
+        return ['type' => ['required', 'string', 'in:behavior,resource'], 'uuid' => ['required', 'string', 'regex:/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i']];
+    }
+
+    private function addonAction(callable $fn): JsonResponse
+    {
+        try {
+            return response()->json(['data' => $fn()]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     // -------------------------------------------------------------------------

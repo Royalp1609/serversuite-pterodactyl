@@ -185,6 +185,16 @@ class FakeWings implements DaemonFileClient
         }
     }
 
+    public function downloadTo(string $serverUuid, string $path, string $localPath, int $maxBytes): bool
+    {
+        $b = $this->files[self::norm($path)] ?? null;
+        if ($b === null || strlen($b) > $maxBytes) {
+            return false;
+        }
+
+        return file_put_contents($localPath, $b) !== false;
+    }
+
     public function tailFile(string $serverUuid, string $path, int $bytes): ?array
     {
         $b = $this->files[self::norm($path)] ?? null;

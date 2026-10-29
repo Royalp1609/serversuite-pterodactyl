@@ -159,6 +159,35 @@ class PterodactylDaemonFileClient implements DaemonFileClient
         }
     }
 
+    public function downloadTo(string $serverUuid, string $path, string $localPath, int $maxBytes): bool
+    {
+        $out = null;
+        try {
+            $repo = $this->repoForServer($serverUuid);
+            $response = $repo->getHttpClient()->get("/api/servers/{$serverUuid}/files/contents", [
+                'query' => ['file' => $path], 'stream' => true, 'timeout' => (int) config('serversuite.bedrock.download_timeout', 300),
+            ]);
+            $body = $response->getBody();
+            $out = fopen($localPath, 'wb');
+            $size = 0;
+            while (! $body->eof()) {
+                $chunk = $body->read(1048576);
+                $size += strlen($chunk);
+                if ($size > $maxBytes || fwrite($out, $chunk) === false) {
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        } finally {
+            if (is_resource($out)) {
+                fclose($out);
+            }
+        }
+    }
+
     public function rename(string $serverUuid, string $root, string $from, string $to): void
     {
         try {

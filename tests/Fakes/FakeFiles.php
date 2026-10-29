@@ -62,6 +62,13 @@ class FakeFiles implements DaemonFileClient
     /** @var array<string, string> path => ISO time, for listDirectory */
     public array $mtimes = [];
 
+    public function downloadTo(string $serverUuid, string $path, string $localPath, int $maxBytes): bool
+    {
+        $c = $this->files['/' . ltrim($path, '/')] ?? null;
+
+        return $c !== null && strlen($c) <= $maxBytes && file_put_contents($localPath, $c) !== false;
+    }
+
     public function tailFile(string $serverUuid, string $path, int $bytes): ?array
     {
         $c = $this->files['/' . ltrim($path, '/')] ?? null;

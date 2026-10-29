@@ -85,6 +85,9 @@ final class PanelPermissions
         // Errors tab (#87): reading the log is reading server files.
         'errors' => ['file.read-content'], 'errorsCrash' => ['file.read-content'],
         'crashDisable' => ['mods.remove'], 'crashEnable' => ['mods.install'],
+        // Bedrock add-ons (#93): the Mods permissions.
+        'addons' => ['mods.read'], 'addonsFolder' => ['mods.install'], 'addonsInstall' => ['mods.install'], 'addonsRemove' => ['mods.remove'],
+        'addonsEnable' => ['mods.update'], 'addonsMove' => ['mods.update'], 'addonsTexturepack' => ['mods.update'],
         // Bedrock crossplay (#28)
         'crossplay' => ['mods.read'], 'crossplayInstall' => ['mods.install'], 'crossplayConfigure' => ['mods.install'],
         // Velocity networks (#30): writes to every server in the network, so
