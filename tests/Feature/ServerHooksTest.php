@@ -33,6 +33,10 @@ function hookedServer(): Server
     $alloc = Allocation::query()->create(['ip' => '203.0.113.10', 'port' => 25565]);
     $server = Server::query()->create(['uuid' => 'srv-h', 'allocation_id' => $alloc->id]);
 
+    // A Minecraft server (#79), so its subdomain gets the SRV record these tests move.
+    \ServerSuite\Services\GameDetectionService::flush();
+    \ServerSuite\Models\ModManagerSetting::forServer('srv-h')->forceFill(['loader' => 'paper'])->save();
+
     $svc = app(SubdomainService::class);
     $svc->setAllowance('srv-h', 1);
     $svc->saveOwnDomain($server->load('allocation'), 'own.example', 'own-token');
