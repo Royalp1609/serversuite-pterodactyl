@@ -155,6 +155,12 @@ it('replaces an older version in place, keeping its priority', function () {
     expect($this->svc->install('s', 'a2.mcaddon')['updated'])->toBe(['More Mobs 1.1.0', 'More Mobs Textures 1.1.0'])
         ->and($this->wings->readFile('s', '/behavior_packs/More_Mobs_a1b2c3d4/old-only.json'))->toBeNull()
         ->and(($this->list)('behavior'))->toBe([['pack_id' => $other, 'version' => [2, 0, 0]], ['pack_id' => ADDON_BP, 'version' => [1, 1, 0]]]);
+
+    // An update of a pack that is switched off leaves it off.
+    $this->svc->setEnabled('s', 'resource', ADDON_RP, false);
+    $this->wings->put('/addons/a3.mcaddon', addonArchive([1, 2, 0]));
+    $this->svc->install('s', 'a3.mcaddon');
+    expect(($this->list)('resource'))->toBe([]);
 });
 
 it('installs nested .mcpacks and a pack at the archive root', function () {

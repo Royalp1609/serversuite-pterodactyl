@@ -334,7 +334,7 @@ class BedrockAddonService
                 if ($at !== null) {
                     $list[$at]['version'] = $p['version'];   // an update keeps its place
                     $this->writeWorldList($uuid, $world, $p['type'], $list);
-                } elseif ($enable) {
+                } elseif ($enable && $p['old'] === null) {   // an update that was off stays off
                     $this->writeWorldList($uuid, $world, $p['type'], [['pack_id' => $p['uuid'], 'version' => $p['version']], ...$list]);
                 }
             }
