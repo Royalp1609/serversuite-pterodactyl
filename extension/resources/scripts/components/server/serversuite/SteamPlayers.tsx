@@ -66,7 +66,7 @@ export default ({ base, data, reload }: { base: string; data: SteamOverview; rel
     const keys = Object.keys(data.labels);
     const [list, setList] = useState<string>(keys[0]);
     const [who, setWho] = useState('');
-    const [name, setName] = useState('');
+    const [playerName, setPlayerName] = useState('');
     const [reason, setReason] = useState('');
     const [busy, setBusy] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -86,7 +86,7 @@ export default ({ base, data, reload }: { base: string; data: SteamOverview; rel
     };
     const add = (e: React.FormEvent) => {
         e.preventDefault();
-        run('add', base, { list, who, name, reason }, () => { setWho(''); setName(''); setReason(''); });
+        run('add', base, { list, who, name: playerName, reason }, () => { setWho(''); setPlayerName(''); setReason(''); });
     };
 
     return (
@@ -113,7 +113,7 @@ export default ({ base, data, reload }: { base: string; data: SteamOverview; rel
             <Panel>
                 <div className="flex gap-1 flex-wrap mb-3">
                     {keys.map((k) => (
-                        <Tab key={k} active={list === k} onClick={() => { setList(k); setWho(''); setName(''); setReason(''); }}>
+                        <Tab key={k} active={list === k} onClick={() => { setList(k); setWho(''); setPlayerName(''); setReason(''); }}>
                             {data.labels[k]} <span className="text-neutral-500">{(data.lists[k] || []).length}</span>
                         </Tab>
                     ))}
@@ -126,7 +126,7 @@ export default ({ base, data, reload }: { base: string; data: SteamOverview; rel
                     <form onSubmit={add} className="flex gap-2 flex-wrap mb-3">
                         <Input value={who} onChange={(e) => setWho(e.target.value)} maxLength={80} autoComplete={'off'} spellCheck={false}
                                placeholder={rust ? 'SteamID64' : 'SteamID64 or Platform User ID'} />
-                        {rust && <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder={'Name (optional, for your records)'} />}
+                        {rust && <Input value={playerName} onChange={(e) => setPlayerName(e.target.value)} maxLength={64} placeholder={'Name (optional, for your records)'} />}
                         {rust && <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={64} placeholder={ban ? 'Reason (optional)' : 'Note (optional)'} />}
                         <PrimaryButton type={'submit'} disabled={busy !== null || who.trim() === ''}>
                             {busy === 'add' && <FontAwesomeIcon icon={faSpinner} spin />} {ban ? 'Ban' : 'Add'}
