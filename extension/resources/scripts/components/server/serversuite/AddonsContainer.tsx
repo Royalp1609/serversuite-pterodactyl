@@ -7,6 +7,7 @@ import { faArrowDown, faArrowUp, faCube, faSpinner, faSync } from '@fortawesome/
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
 import { getClearance } from './prechange';
+import { BackupPromptHost } from './BackupPrompt';
 
 /*
  * Server Suite — Add-ons tab (#93; Pelican #97): behavior and resource packs
@@ -120,6 +121,8 @@ export default () => {
 
     return (
         <Wrapper>
+            {/* Asks "back up first?" in Ask mode; without it every install and removal was cancelled silently. */}
+            <BackupPromptHost />
             <Panel>
                 <div className="flex items-start gap-3 flex-wrap">
                     <FontAwesomeIcon icon={faCube} className="text-2xl text-indigo-400" />

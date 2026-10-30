@@ -6,6 +6,7 @@ import { faSlidersH } from '@fortawesome/free-solid-svg-icons';
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
 import ConfigsPanel from './ConfigsPanel';
+import { BackupPromptHost } from './BackupPrompt';
 
 /*
  * Server Suite — Configs tab (#86): the config browser and editor for games
@@ -37,6 +38,8 @@ export default () => {
 
     return (
         <Wrapper>
+            {/* Asks "back up first?" before a save in Ask mode (ConfigsPanel's getClearance). */}
+            <BackupPromptHost />
             <Panel>
                 <div className="flex items-center gap-3">
                     <FontAwesomeIcon icon={faSlidersH} className="text-2xl text-indigo-400" />
