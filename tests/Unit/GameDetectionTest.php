@@ -166,3 +166,39 @@ it('recognises an egg without SRCDS_APPID by its server binary', function () {
     expect(app(GameDetectionService::class)->for($old))->key->toBe('rust')->signal->toBe('startup')
         ->and(app(GameDetectionService::class)->variable($old, 'hostname'))->toBe('A Rust Server');
 });
+
+function bedrockServer(): object
+{
+    return gameServer('srv-bds', [
+        'name' => 'Vanilla Bedrock', 'docker_images' => ['Debian' => 'ghcr.io/parkervcp/yolks:debian'],
+        'startup' => './bedrock_server', 'nest' => (object) ['name' => 'Minecraft'],
+    ], ['BEDROCK_VERSION' => 'latest'], 21);
+}
+
+it('gives Bedrock Dedicated Server Add-ons and none of the Java-only tabs', function () {
+    // Players pinged Bedrock over TCP (a 2 s timeout) and edits Java's lists; Versions/Reset reinstall into a Java egg.
+    $features = GameGuard::features(bedrockServer());
+    expect($features)->toContain('addons', 'properties', 'backups', 'subdomains')
+        ->and(array_intersect($features, GameGuard::JAVA_ONLY))->toBe([])
+        ->and(GameGuard::features(paperServer()))->toContain('mods', 'players', 'versions')->not->toContain('addons');
+
+    foreach (['players', 'errors', 'loaderSwitch', 'serverVersionApply', 'serverVersionNuclear', 'modpackInstall', 'install', 'crossplayInstall'] as $endpoint) {
+        expect(GameGuard::endpointBlocker(bedrockServer(), $endpoint))->toBe('This only works on Minecraft Java Edition, and this is a Bedrock Dedicated Server.');
+    }
+    expect(GameGuard::endpointBlocker(bedrockServer(), 'addonsInstall'))->toBeNull()
+        ->and(GameGuard::endpointBlocker(bedrockServer(), 'properties'))->toBeNull()
+        ->and(GameGuard::endpointBlocker(paperServer(), 'addonsInstall'))->toBe('Add-ons are for Bedrock Dedicated Server.')
+        ->and(GameGuard::endpointBlocker(rustServer(), 'addons'))->toBe('Add-ons are for Bedrock Dedicated Server.');
+});
+
+it('refuses version and loader switches and resets on Bedrock Dedicated Server before touching anything', function () {
+    app()->instance(PanelServerOps::class, Mockery::mock(PanelServerOps::class));   // any call fails the test
+    app()->instance(DaemonFileClient::class, Mockery::mock(DaemonFileClient::class));
+
+    expect(fn () => app(LoaderSwitchService::class)->switchLoader(bedrockServer(), 1, '1.21.1', false))
+        ->toThrow(RuntimeException::class, 'Cannot switch loader: this only works on Minecraft Java Edition, and this is a Bedrock Dedicated Server. Nothing was changed.')
+        ->and(fn () => app(VersionSwitchService::class)->apply(bedrockServer(), '1.21.1', null, false, true, 'clean_slate'))
+        ->toThrow(RuntimeException::class, 'Bedrock Dedicated Server')
+        ->and(fn () => app(VersionSwitchService::class)->nuclear(bedrockServer(), 'clean_slate'))
+        ->toThrow(RuntimeException::class, 'Cannot reset the server: this only works on Minecraft Java Edition');
+});
