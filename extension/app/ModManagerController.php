@@ -504,12 +504,8 @@ class ModManagerController extends Controller
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $game = app(\ServerSuite\Services\GameDetectionService::class)->for($srv);
-        $features = $game->features;
-        if (\ServerSuite\Services\BedrockAddonService::isBedrock($srv)) {
-            // Bedrock Dedicated Server: the Add-ons tab instead of Mods (#93); Modpacks and
-            // the Velocity network are Java only.
-            $features = [...array_values(array_diff($features, ['mods', 'modpacks', 'network', 'crossplay'])), 'addons'];
-        }
+        // Bedrock Dedicated Server: Add-ons instead of Mods, and none of the Java-only tabs (#93).
+        $features = \ServerSuite\Support\GameGuard::features($srv);
 
         return response()->json(['data' => [
             'key' => $game->key, 'name' => $game->name, 'features' => $features, 'mods_label' => $game->modsLabel,

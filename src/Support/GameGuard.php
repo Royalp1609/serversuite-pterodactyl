@@ -37,10 +37,39 @@ class GameGuard
         'modpackPreview' => 'modpacks', 'modpackInstall' => 'modpacks', 'modpackRemove' => 'modpacks',
         'errors' => 'errors', 'errorsCrash' => 'errors',
         // Bedrock add-ons (#93): Bedrock counts as Minecraft; the endpoints also check it's BDS.
-        'addons' => 'mods', 'addonsFolder' => 'mods', 'addonsInstall' => 'mods', 'addonsRemove' => 'mods',
-        'addonsEnable' => 'mods', 'addonsMove' => 'mods', 'addonsTexturepack' => 'mods',
+        'addons' => 'addons', 'addonsFolder' => 'addons', 'addonsInstall' => 'addons', 'addonsRemove' => 'addons',
+        'addonsEnable' => 'addons', 'addonsMove' => 'addons', 'addonsTexturepack' => 'addons',
         'players' => 'players', 'playersAdd' => 'players', 'playersRemove' => 'players', 'playersWhitelist' => 'players',
     ];
+
+    /** Minecraft features that are Java Edition only: hidden and refused on Bedrock Dedicated Server. */
+    public const JAVA_ONLY = ['mods', 'modpacks', 'versions', 'reset', 'players', 'errors', 'network', 'crossplay'];
+
+    /**
+     * Whether $server's game has $feature. Bedrock Dedicated Server counts as
+     * Minecraft but has none of the JAVA_ONLY features; "addons" (#93) is
+     * Bedrock Dedicated Server's alone.
+     */
+    public static function supports(object $server, string $feature): bool
+    {
+        $bedrock = \ServerSuite\Services\BedrockAddonService::isBedrock($server);
+        if ($feature === 'addons') {
+            return $bedrock;
+        }
+        if ($bedrock && in_array($feature, self::JAVA_ONLY, true)) {
+            return false;
+        }
+
+        return app(GameDetectionService::class)->for($server)->supports($feature);
+    }
+
+    /** The features $server has, for the sidebar (GET /game). @return list<string> */
+    public static function features(object $server): array
+    {
+        $all = [...app(GameDetectionService::class)->for($server)->features, 'addons'];
+
+        return array_values(array_unique(array_filter($all, fn ($f) => self::supports($server, $f))));
+    }
 
     /**
      * Why $endpoint isn't available on $server's game, or null if it is.
@@ -54,9 +83,17 @@ class GameGuard
 
         $game = app(GameDetectionService::class)->for($server);
         foreach ($features as $feature) {
-            if ($game->supports($feature)) {
+            if (self::supports($server, $feature)) {
                 return null;
             }
+        }
+        if (\ServerSuite\Services\BedrockAddonService::isBedrock($server)) {
+            return in_array('addons', $features, true)
+                ? 'Add-ons are for Bedrock Dedicated Server.'
+                : 'This only works on Minecraft Java Edition, and this is a Bedrock Dedicated Server.';
+        }
+        if (in_array('addons', $features, true)) {
+            return 'Add-ons are for Bedrock Dedicated Server.';
         }
 
         return ($game->key === 'unknown'
@@ -75,6 +112,9 @@ class GameGuard
             $what = $game->key === 'unknown' ? 'a Minecraft server' : "a Minecraft server (this one runs {$game->name})";
 
             throw new \RuntimeException("Cannot {$action}: this only works on {$what}. Nothing was changed.");
+        }
+        if (\ServerSuite\Services\BedrockAddonService::isBedrock($server)) {
+            throw new \RuntimeException("Cannot {$action}: this only works on Minecraft Java Edition, and this is a Bedrock Dedicated Server. Nothing was changed.");
         }
     }
 }
