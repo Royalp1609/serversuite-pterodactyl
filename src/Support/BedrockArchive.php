@@ -152,9 +152,9 @@ final class BedrockArchive
         $prefix = $root === '' ? '' : $root . '/';
         $where = trim(($nested ?? '') . ' ' . ($root === '' ? '' : $root . '/')) . 'manifest.json';
         $raw = $zip->getFromName($prefix . 'manifest.json');
-        $m = $raw === false ? null : json_decode(self::stripComments($raw), true);
+        $m = $raw === false ? null : self::decode($raw);
         if (! is_array($m) || ! is_array($m['header'] ?? null)) {
-            throw new \RuntimeException("{$where} isn't valid JSON with a header.");
+            throw new \RuntimeException($m === null && $raw !== false ? "{$where} isn't valid JSON (" . json_last_error_msg() . ').' : "{$where} has no header.");
         }
         $kinds = [];
         foreach ((array) ($m['modules'] ?? []) as $mod) {
@@ -200,7 +200,7 @@ final class BedrockArchive
      */
     public static function manifest(string $raw): ?array
     {
-        $m = json_decode(self::stripComments($raw), true);
+        $m = self::decode($raw);
         $h = is_array($m) ? ($m['header'] ?? null) : null;
         if (! is_array($h)) {
             return null;
@@ -285,11 +285,59 @@ final class BedrockArchive
         return mb_substr(trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $s)), 0, 300);
     }
 
-    /** Manifests sometimes carry // and block comments, which the game accepts and json_decode doesn't. */
-    public static function stripComments(string $json): string
+    /**
+     * Decode a manifest or pack list the way the game reads it: as JSON, or
+     * failing that with // and block comments and trailing commas taken
+     * out (the game accepts them, json_decode doesn't). Null if neither works.
+     */
+    public static function decode(string $json): mixed
     {
         $json = (string) preg_replace('/^\xEF\xBB\xBF/', '', $json);
+        $out = json_decode($json, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $out;
+        }
+        $out = json_decode(self::stripComments($json), true);
 
-        return (string) preg_replace_callback('#"(?:[^"\\\\]|\\\\.)*"|//[^\n]*|/\*.*?\*/#s', fn ($m) => $m[0][0] === '"' ? $m[0] : '', $json);
+        return json_last_error() === JSON_ERROR_NONE ? $out : null;
+    }
+
+    /**
+     * $json without comments and trailing commas. A plain scan, not a regex:
+     * a regex over a long string value (a pack description of a few KB)
+     * ran out of PCRE's JIT stack and returned nothing.
+     */
+    public static function stripComments(string $json): string
+    {
+        $out = '';
+        $n = strlen($json);
+        for ($i = 0; $i < $n; $i++) {
+            $c = $json[$i];
+            if ($c === '"') {
+                // A whole string, escapes included.
+                $j = $i + 1;
+                while ($j < $n && $json[$j] !== '"') {
+                    $j += $json[$j] === '\\' ? 2 : 1;
+                }
+                $out .= substr($json, $i, $j - $i + 1);
+                $i = $j;
+            } elseif ($c === '/' && ($json[$i + 1] ?? '') === '/') {
+                $nl = strpos($json, "\n", $i);
+                $i = $nl === false ? $n : $nl - 1;
+            } elseif ($c === '/' && ($json[$i + 1] ?? '') === '*') {
+                $end = strpos($json, '*/', $i + 2);
+                $i = $end === false ? $n : $end + 1;
+            } elseif ($c === ']' || $c === '}') {
+                $out = rtrim($out);
+                if (str_ends_with($out, ',')) {
+                    $out = substr($out, 0, -1);
+                }
+                $out .= $c;
+            } else {
+                $out .= $c;
+            }
+        }
+
+        return $out;
     }
 }
