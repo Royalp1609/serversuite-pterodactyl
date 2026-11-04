@@ -17,7 +17,10 @@ import { faCheckCircle, faCircle, faExclamationTriangle, faPlay, faTerminal } fr
  * admin, a modpack switch, either Backups page): it follows the server's
  * status, not a button. Reinstall: reinstalling → starting → done, then it
  * goes to the console. Restore: restoring → done. If an install fails it
- * stays up with the error. Mounted next to the sidebar (Blueprint's
+ * stays up with the error. A new server's first install says "Installing" and
+ * goes to the console as soon as it finishes: the console is where the EULA
+ * prompt appears, and a server waiting on the EULA never reaches "running".
+ * Mounted next to the sidebar (Blueprint's
  * BeforeSubNavigation slot) and rendered into <body>, so neither the
  * sidebar's CSS nor its stacking order can hide it on any screen size.
  *
@@ -49,6 +52,7 @@ export default () => {
     const [offlineSince, setOfflineSince] = useState<number | null>(null);
     const [packRunning, setPackRunning] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [firstInstall, setFirstInstall] = useState<boolean | null>(null);
 
     /** Start the timer, or carry on the one from before a page change. */
     const begin = (next: Stage) => {
@@ -76,10 +80,16 @@ export default () => {
             begin('restoring');
         } else if (status && FAILED.includes(status)) {
             end();
+            setFirstInstall(status === 'install_failed');
             setStage('failed');
         } else if (status === null && stage === 'restoring') {
             end();
             setStage('restored');
+        } else if (status === null && stage === 'installing' && firstInstall) {
+            end();
+            setStage(null);
+            setFirstInstall(null);
+            history.push(`/server/${id}`);
         } else if (status === null && stage === 'installing') {
             end();
             setStage('starting');
@@ -89,6 +99,14 @@ export default () => {
                 .then((res) => setPackRunning(res.data.data?.status?.status === 'installing'))
                 .catch(() => setPackRunning(false));
         }
+    }, [uuid, status]);
+
+    // First install or reinstall? The client API doesn't expose installed_at.
+    useEffect(() => {
+        if (!uuid || status !== 'installing') return;
+        http.get(`/extensions/serversuite/${uuid}/game`)
+            .then((res) => setFirstInstall(res.data.data?.first_install === true))
+            .catch(() => setFirstInstall(false));
     }, [uuid, status]);
 
     // Poll the status: install and restore events may not reach subusers.
@@ -125,6 +143,7 @@ export default () => {
     }, [stage, power]);
 
     if (!stage || !uuid) return null;
+    if (stage === 'installing' && firstInstall === null) return null; // not known yet: don't flash the wrong wording
 
     const start = () => {
         setBusy(true);
@@ -138,13 +157,14 @@ export default () => {
 
     const steps = restore
         ? ['Restoring the backup', 'Done']
-        : ['Reinstalling', 'Starting the server', 'Done'];
+        : firstInstall ? ['Installing', 'Opening the console'] : ['Reinstalling', 'Starting the server', 'Done'];
     const at = { installing: 0, failed: 0, restoring: 0, starting: 1, restored: 1 }[stage];
     const image = stage === 'failed' ? ServerErrorSvg : restore ? ServerRestoreSvg : ServerInstallSvg;
-    const title = stage === 'failed' ? 'The reinstall failed'
+    const title = stage === 'failed' ? (firstInstall ? 'The install failed' : 'The reinstall failed')
         : stage === 'restoring' ? 'Restoring a backup'
             : stage === 'restored' ? 'Backup restored'
-                : packRunning && stage === 'starting' ? 'Reinstall finished' : 'Reinstalling the server';
+                : packRunning && stage === 'starting' ? 'Reinstall finished'
+                    : firstInstall ? 'Installing the server' : 'Reinstalling the server';
 
     return createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(2, 6, 23, 0.94)', overflowY: 'auto', display: 'flex' }}>
@@ -204,9 +224,8 @@ export default () => {
 
                 {stage === 'failed' && (
                     <div className="text-sm rounded-lg p-3 mb-4" style={{ background: 'rgba(239,68,68,0.12)', color: 'rgb(252,165,165)' }}>
-                        A panel admin can see the install log in the console. If this was a version or loader switch, the backup Server Suite
-                        took first has the old server: restore it from Backups once the server can be used again (a panel admin can reinstall
-                        or restore it now).
+                        A panel admin can see the install log in the console.
+                        {!firstInstall && ' If this was a version or loader switch, the backup Server Suite took first has the old server: restore it from Backups once the server can be used again (a panel admin can reinstall or restore it now).'}
                     </div>
                 )}
 
@@ -214,7 +233,7 @@ export default () => {
                     <Link to={`/server/${id}`} onClick={close} className="px-3 py-2 rounded-lg text-sm inline-flex items-center gap-2" style={{ background: 'rgba(30,41,59,0.8)', color: 'rgb(203,213,225)' }}>
                         <FontAwesomeIcon icon={faTerminal} /> Console
                     </Link>
-                    {stage === 'failed' && (
+                    {stage === 'failed' && !firstInstall && (
                         <Link to={`/server/${id}/backup-rotation`} onClick={close} className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(30,41,59,0.8)', color: 'rgb(203,213,225)' }}>
                             Backups
                         </Link>

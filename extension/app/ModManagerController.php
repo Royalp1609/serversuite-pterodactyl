@@ -510,6 +510,8 @@ class ModManagerController extends Controller
         return response()->json(['data' => [
             'key' => $game->key, 'name' => $game->name, 'features' => $features, 'mods_label' => $game->modsLabel,
             'config_roots' => $game->configRoots,
+            // The panel sets installed_at when an install ends, so null means the first one is running.
+            'first_install' => $srv->installed_at === null,
         ]]);
     }
 
