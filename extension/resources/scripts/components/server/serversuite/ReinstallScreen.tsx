@@ -30,6 +30,9 @@ import { faCheckCircle, faCircle, faExclamationTriangle, faPlay, faTerminal } fr
  * A page opened during a reinstall or restore has no websocket: the panel
  * answers the token request with 409 and doesn't ask again. So without a
  * connection the power state is polled too, and Start goes through the API.
+ * The panel caches that state for 20 seconds, so Start is offered later: a
+ * server that is auto-starting must not be reported as not started. A stale
+ * "running" only means going to the console early, which shows the real state.
  */
 
 type Stage = 'installing' | 'starting' | 'failed' | 'restoring' | 'restored' | null;
@@ -182,7 +185,7 @@ export default () => {
         if (!connected) history.push(`/server/${id}`);
     };
     // Not starting on its own: whoever reinstalled it doesn't start it (Settings → Reinstall, an admin).
-    const idle = (stage === 'starting' || stage === 'restored') && power === 'offline' && offlineSince !== null && now - offlineSince > 15000;
+    const idle = (stage === 'starting' || stage === 'restored') && power === 'offline' && offlineSince !== null && now - offlineSince > (connected ? 15000 : 35000);
     const restore = stage === 'restoring' || stage === 'restored';
 
     const steps = restore
