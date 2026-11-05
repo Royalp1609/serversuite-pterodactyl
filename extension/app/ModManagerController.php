@@ -1449,7 +1449,7 @@ class ModManagerController extends Controller
         if (! \ServerSuite\Services\NetworkService::isProxy($srv)) {
             $m = $svc->membership($srv->uuid);
 
-            return response()->json(['data' => ['proxy' => false, 'member' => $m ? ['proxy' => $m['proxy']] : null]]);
+            return response()->json(['data' => ['proxy' => false, 'member' => $m ? ['proxy' => $m['proxy'], 'ready' => $m['ready']] : null]]);
         }
 
         return response()->json(['data' => ['proxy' => true, 'candidates' => $svc->candidates($srv)]]);

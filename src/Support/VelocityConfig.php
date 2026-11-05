@@ -48,6 +48,23 @@ final class VelocityConfig
         return $out;
     }
 
+    /**
+     * The last backend left: no servers, no try list and no forced hosts, so
+     * the proxy doesn't keep sending players to a server that left.
+     *
+     * @throws \RuntimeException
+     */
+    public static function clear(string $raw): string
+    {
+        $nl = str_contains($raw, "\r\n") ? "\r\n" : "\n";
+        $lines = preg_split('/\r\n|\n/', $raw) ?: [];
+        $out = implode($nl, self::pruneForcedHosts(self::rewriteServers($lines, [], $nl), []));
+
+        self::verify($out, []);
+
+        return $out;
+    }
+
     /** The secret file velocity.toml names, relative to the server root. */
     public static function secretFile(string $raw): string
     {
