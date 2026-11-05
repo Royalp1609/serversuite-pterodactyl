@@ -97,7 +97,7 @@ export default () => {
                 {proxy === false && (
                     <p className="text-sm text-neutral-300">
                         {member && !member.ready ? `This server is in the network of ${member.proxy ?? 'a Velocity proxy'}, but its setup isn't finished, so players may not reach it. Press Apply on the proxy's Velocity tab to see what's left.`
-                            : member ? `This server is a backend behind ${member.proxy ?? 'a Velocity proxy'}. Players join through the proxy; manage the network from the proxy's Network tab.`
+                            : member ? `This server is a backend behind ${member.proxy ?? 'a Velocity proxy'}. Players join through the proxy; manage the network from the proxy's Velocity tab.`
                             : 'This server isn\'t a Velocity proxy. Switch a server to Velocity on its Versions tab to build a network from it.'}
                     </p>
                 )}
