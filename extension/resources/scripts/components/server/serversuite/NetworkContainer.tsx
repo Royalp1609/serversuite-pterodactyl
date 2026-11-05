@@ -48,7 +48,7 @@ export default () => {
     const uuid = ServerContext.useStoreState((state) => state.server.data?.uuid);
     const base = `/extensions/serversuite/${uuid}/network`;
     const [proxy, setProxy] = useState<boolean | null>(null);
-    const [member, setMember] = useState<{ proxy: string | null } | null>(null);
+    const [member, setMember] = useState<{ proxy: string | null; ready: boolean } | null>(null);
     const [cands, setCands] = useState<Candidate[]>([]);
     const [chosen, setChosen] = useState<Record<string, boolean>>({});
     const [names, setNames] = useState<Record<string, string>>({});
@@ -96,7 +96,8 @@ export default () => {
                 {proxy === null && !error && <p className="text-neutral-400 text-sm"><FontAwesomeIcon icon={faSpinner} spin /> Loading…</p>}
                 {proxy === false && (
                     <p className="text-sm text-neutral-300">
-                        {member ? `This server is a backend behind ${member.proxy ?? 'a Velocity proxy'}. Players join through the proxy; manage the network from the proxy's Network tab.`
+                        {member && !member.ready ? `This server is in the network of ${member.proxy ?? 'a Velocity proxy'}, but its setup isn't finished, so players may not reach it. Press Apply on the proxy's Velocity tab to see what's left.`
+                            : member ? `This server is a backend behind ${member.proxy ?? 'a Velocity proxy'}. Players join through the proxy; manage the network from the proxy's Network tab.`
                             : 'This server isn\'t a Velocity proxy. Switch a server to Velocity on its Versions tab to build a network from it.'}
                     </p>
                 )}

@@ -8,6 +8,7 @@ use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Models\Network;
 use ServerSuite\Models\NetworkMember;
 use ServerSuite\Support\Config\ConfigEditor;
+use ServerSuite\Support\GameGuard;
 use ServerSuite\Support\VelocityConfig;
 
 /**
@@ -38,7 +39,7 @@ class NetworkService
 
     public static function isProxy(object $server): bool
     {
-        return in_array(self::loader((string) $server->uuid), self::PROXIES, true);
+        return in_array(self::loaderOf($server), self::PROXIES, true);
     }
 
     public function networkFor(string $proxyUuid): ?Network
@@ -46,7 +47,7 @@ class NetworkService
         return Network::query()->where('proxy_uuid', $proxyUuid)->first();
     }
 
-    /** The network a backend is in, with its proxy's name. @return array{network: Network, proxy: ?string}|null */
+    /** The network a backend is in, with its proxy's name, and whether its setup finished. @return array{network: Network, proxy: ?string, ready: bool}|null */
     public function membership(string $serverUuid): ?array
     {
         $m = NetworkMember::query()->where('server_uuid', $serverUuid)->first();
@@ -55,7 +56,7 @@ class NetworkService
             return null;
         }
 
-        return ['network' => $n, 'proxy' => \Pterodactyl\Models\Server::query()->where('uuid', $n->proxy_uuid)->value('name')];
+        return ['network' => $n, 'proxy' => \Pterodactyl\Models\Server::query()->where('uuid', $n->proxy_uuid)->value('name'), 'ready' => in_array($m->setup_status, [null, 'ok'], true)];
     }
 
     /**
@@ -70,8 +71,9 @@ class NetworkService
         $taken = NetworkMember::query()->when($network, fn ($q) => $q->where('network_id', '!=', $network->id))->pluck('server_uuid')->all();
 
         return \Pterodactyl\Models\Server::query()->where('owner_id', $proxy->owner_id)->where('uuid', '!=', $proxy->uuid)->orderBy('name')->get()
+            ->filter(fn ($s) => GameGuard::supports($s, 'network'))
             ->map(function ($s) use ($members, $taken) {
-                $loader = self::loader($s->uuid);
+                $loader = self::loaderOf($s);
                 [$host, $port] = $this->cards->target($s->uuid);
 
                 return [
@@ -102,12 +104,15 @@ class NetworkService
         if (! self::isProxy($proxy)) {
             throw new \RuntimeException('Networks are set up from a Velocity server.');
         }
-        $owned = \Pterodactyl\Models\Server::query()->where('owner_id', $proxy->owner_id)->whereIn('uuid', array_keys($backends))->pluck('uuid')->all();
+        $owned = \Pterodactyl\Models\Server::query()->where('owner_id', $proxy->owner_id)->whereIn('uuid', array_keys($backends))->get()->keyBy('uuid');
         $names = [];
         foreach ($backends as $uuid => $name) {
             $name = strtolower(trim($name));
-            if (! in_array($uuid, $owned, true) || $uuid === $proxy->uuid) {
+            if (! isset($owned[$uuid]) || $uuid === $proxy->uuid) {
                 throw new \RuntimeException('Only servers with the same owner as the proxy can join its network.');
+            }
+            if (! GameGuard::supports($owned[$uuid], 'network')) {
+                throw new \RuntimeException("\"{$owned[$uuid]->name}\" can't join: Velocity only carries Minecraft Java Edition servers.");
             }
             if (! preg_match(self::NAME, $name) || $name === 'try') {
                 throw new \RuntimeException("\"{$name}\" can't be a server name in Velocity: use 1-32 of a-z, 0-9, - and _.");
@@ -115,7 +120,7 @@ class NetworkService
             if (in_array($name, $names, true)) {
                 throw new \RuntimeException("Two servers are both called \"{$name}\".");
             }
-            if (in_array(self::loader($uuid), self::NOT_BACKENDS, true)) {
+            if (in_array(self::loaderOf($owned[$uuid]), self::NOT_BACKENDS, true)) {
                 throw new \RuntimeException('A proxy can\'t be a backend.');
             }
             $names[$uuid] = $name;
@@ -127,6 +132,8 @@ class NetworkService
         }
 
         $left = [];
+        $existing = $this->networkFor($proxy->uuid);
+        $before = $existing?->members()->get()->map(fn ($m) => $m->only(['server_uuid', 'name', 'position', 'setup_status']))->all();
         $network = DB::transaction(function () use ($proxy, $names, &$left) {
             $network = $this->networkFor($proxy->uuid) ?? Network::query()->create(['owner_id' => $proxy->owner_id, 'proxy_uuid' => $proxy->uuid]);
             $left = NetworkMember::query()->where('network_id', $network->id)->whereNotIn('server_uuid', array_keys($names))->pluck('server_uuid')->all();
@@ -139,7 +146,17 @@ class NetworkService
             return $network;
         });
 
-        $results = $this->apply($network);
+        if ($names === []) {
+            $results = [$this->clearProxy($proxy->uuid)];
+        } else {
+            [$applied, $results] = $this->apply($network);
+            if (! $applied) {
+                // Nothing was written anywhere, so the network stays as it was.
+                $this->restore($network, $before);
+
+                return $results;
+            }
+        }
         foreach ($left as $uuid) {
             $results[] = $this->leave($uuid);
         }
@@ -153,20 +170,18 @@ class NetworkService
     /**
      * Write the network's settings to the proxy and every backend.
      *
-     * @return list<array{server: string, status: string, message: string}>
+     * @return array{0: bool, 1: list<array{server: string, status: string, message: string}>} false: the proxy wasn't changed, so nothing was
      */
-    public function apply(Network $network): array
+    private function apply(Network $network): array
     {
         $members = $network->members()->get();
-        if ($members->isEmpty()) {
-            return [];
-        }
         $servers = [];
         $results = [];
         foreach ($members as $m) {
             [$host, $port] = $this->cards->target($m->server_uuid);
             if ($host === null) {
                 $results[] = $this->line($m->server_uuid, 'failed', 'Has no primary allocation (or is suspended), so the proxy can\'t reach it. Left out.');
+                $m->forceFill(['setup_status' => 'failed'])->save();
                 continue;
             }
             $servers[$m->name] = "{$host}:{$port}";
@@ -176,17 +191,59 @@ class NetworkService
             [$secret, $proxyLine] = $this->applyProxy($network->proxy_uuid, $servers);
             $results = array_merge([$proxyLine], $results);
         } catch (\RuntimeException $e) {
-            return array_merge([$this->line($network->proxy_uuid, 'failed', $e->getMessage() . ' Nothing was changed on the backends.')], $results);
+            return [false, array_merge([$this->line($network->proxy_uuid, 'failed', $e->getMessage() . ' Nothing was saved or changed.')], $results)];
         }
 
         foreach ($members as $m) {
             if (isset($servers[$m->name])) {
-                $results[] = $this->join($m->server_uuid, $secret);
+                $line = $this->join($m->server_uuid, $secret);
+                $m->forceFill(['setup_status' => $line['status']])->save();
+                $results[] = $line;
             }
         }
         $network->forceFill(['applied_at' => now()])->save();
 
-        return $results;
+        return [true, $results];
+    }
+
+    /**
+     * Put a network back after an Apply that changed nothing.
+     *
+     * @param list<array<string, mixed>>|null $before its members, null: it didn't exist
+     */
+    private function restore(Network $network, ?array $before): void
+    {
+        DB::transaction(function () use ($network, $before) {
+            NetworkMember::query()->where('network_id', $network->id)->delete();
+            if ($before === null) {
+                $network->delete();
+
+                return;
+            }
+            foreach ($before as $member) {
+                NetworkMember::query()->create($member + ['network_id' => $network->id]);
+            }
+        });
+    }
+
+    /**
+     * The last backend left the network.
+     *
+     * @return array{server: string, status: string, message: string}
+     */
+    private function clearProxy(string $uuid): array
+    {
+        try {
+            $raw = $this->daemon->readFile($uuid, '/velocity.toml', self::MAX_READ);
+            if ($raw === null) {
+                return $this->line($uuid, 'ok', 'No backends left.');
+            }
+            $this->write($uuid, '/velocity.toml', VelocityConfig::clear($raw));
+        } catch (\RuntimeException $e) {
+            return $this->line($uuid, 'action', 'The backends left, but velocity.toml still lists them: ' . $e->getMessage());
+        }
+
+        return $this->line($uuid, 'ok', 'velocity.toml: no servers left, so players have nowhere to go until you add one.');
     }
 
     // -------------------------------------------------------------------------
@@ -299,8 +356,27 @@ class NetworkService
 
     private static function loader(string $uuid): ?string
     {
-        $l = ModManagerSetting::query()->where('server_uuid', $uuid)->value('loader');
+        $server = \Pterodactyl\Models\Server::query()->where('uuid', $uuid)->first();
 
-        return $l ? strtolower((string) $l) : null;
+        return $server ? self::loaderOf($server) : null;
+    }
+
+    /**
+     * The stored loader, else the egg's when it's clear enough to store: a
+     * new server has nothing stored until its Mods page has been opened.
+     */
+    private static function loaderOf(object $server): ?string
+    {
+        $stored = ModManagerSetting::query()->where('server_uuid', (string) $server->uuid)->value('loader');
+        if ($stored) {
+            return strtolower((string) $stored);
+        }
+        try {
+            $egg = app(LoaderDetectionService::class)->eggLoader($server);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $egg->isConfident() ? strtolower((string) $egg->loader) : null;
     }
 }

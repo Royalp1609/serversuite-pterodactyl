@@ -93,6 +93,74 @@ it('keeps forced hosts for servers that exist', function () {
     expect($out)->toContain('"play.example.com" = ["survival"]')->not->toContain('lobby.example.com');
 });
 
+it('saves nothing when the proxy step fails', function () {
+    $svc = app(NetworkService::class);
+    $this->files->for($this->proxy->uuid)->files = [];
+
+    $lines = $svc->save($this->proxy, [$this->paper->uuid => 'survival']);
+
+    expect($lines[0]['status'])->toBe('failed')
+        ->and($svc->membership($this->paper->uuid))->toBeNull()
+        ->and($svc->networkFor($this->proxy->uuid))->toBeNull();
+});
+
+it('keeps the old network when a later Apply fails', function () {
+    $svc = app(NetworkService::class);
+    $svc->save($this->proxy, [$this->paper->uuid => 'survival']);
+    $this->files->for($this->proxy->uuid)->files = [];
+
+    $lines = $svc->save($this->proxy, [$this->fabric->uuid => 'creative']);
+
+    expect($lines[0]['status'])->toBe('failed')
+        ->and($svc->membership($this->paper->uuid)['ready'])->toBeTrue()
+        ->and($svc->membership($this->fabric->uuid))->toBeNull();
+});
+
+it('says a backend is not ready until its setup finished', function () {
+    $svc = app(NetworkService::class);
+    $paperFiles = $this->files->for($this->paper->uuid)->files;
+    $this->files->for($this->paper->uuid)->files = [];
+
+    $svc->save($this->proxy, [$this->paper->uuid => 'survival']);
+    expect($svc->membership($this->paper->uuid)['ready'])->toBeFalse();
+
+    $this->files->for($this->paper->uuid)->files = $paperFiles;
+    $svc->save($this->proxy, [$this->paper->uuid => 'survival']);
+    expect($svc->membership($this->paper->uuid)['ready'])->toBeTrue();
+});
+
+it('clears the proxy when the last backend leaves', function () {
+    $svc = app(NetworkService::class);
+    $svc->save($this->proxy, [$this->paper->uuid => 'survival']);
+
+    $lines = $svc->save($this->proxy, []);
+
+    $toml = nfile($this, $this->proxy, '/velocity.toml');
+    expect(array_column($lines, 'status'))->toBe(['ok', 'ok'])
+        ->and($toml)->not->toContain('survival')
+        ->and($toml)->toContain('try = []')
+        ->and($toml)->toContain('# What port should the proxy be bound to?');
+});
+
+it('does not offer or accept a server that is not Java Minecraft', function () {
+    Illuminate\Support\Facades\Schema::table('servers', function ($t) {
+        $t->string('startup')->nullable();
+    });
+    $bedrock = netServer($this, 'bedrock', [], 'Bedrock Home', 1, 19132);
+    Server::query()->whereKey($bedrock->id)->update(['startup' => './bedrock_server']);
+    $svc = app(NetworkService::class);
+
+    expect(array_column($svc->candidates($this->proxy), 'name'))->not->toContain('Bedrock Home')
+        ->and(fn () => $svc->save($this->proxy, [$bedrock->uuid => 'bedrock']))->toThrow(RuntimeException::class, 'Java Edition');
+});
+
+it('uses the egg when no loader is stored yet', function () {
+    ModManagerSetting::forServer($this->proxy->uuid)->forceFill(['loader' => null])->save();
+
+    expect(NetworkService::isProxy((object) ['uuid' => $this->proxy->uuid, 'egg' => (object) ['name' => 'Velocity']]))->toBeTrue()
+        ->and(NetworkService::isProxy((object) ['uuid' => $this->proxy->uuid, 'egg' => (object) ['name' => 'Paper']]))->toBeFalse();
+});
+
 it('is for the owner or a root admin only', function () {
     $owner = (object) ['id' => 1, 'root_admin' => false];
     $admin = (object) ['id' => 9, 'root_admin' => true];
