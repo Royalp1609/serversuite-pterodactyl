@@ -89,6 +89,8 @@ Pelican plugin.
 - Every switch is **gated on a recent completed backup** and refuses up front if
   the server can't be reinstalled (e.g. *Skip Egg Install Script* is on), so a
   server is never left wiped.
+- On a server with **no backup allocation**, version, loader and modpack
+  switches still go ahead. The confirm dialog warns you that no backup is taken.
 - **Reset** the server: world only, or a clean slate.
 - Switches point the egg's `DL_PATH` at the exact server jar from
   [MCJars](https://mcjars.app) (Paper, Purpur, Folia, Fabric, Velocity, ...;

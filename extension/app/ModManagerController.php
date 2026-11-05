@@ -426,8 +426,9 @@ class ModManagerController extends Controller
         $available = $svc->available($current['loader']);
 
         return response()->json(['data' => [
-            'current'   => $current,
-            'available' => $available,
+            'current'     => $current,
+            'available'   => $available,
+            'backups_off' => $this->backupsOff($srv),
         ]]);
     }
 
@@ -547,7 +548,7 @@ class ModManagerController extends Controller
                 $srv,
                 (int) $data['egg_id'],
                 $data['version'] ?? null,
-                true,   // backup-gated
+                ! $this->backupsOff($srv),   // backup-gated, unless the server has no backup allocation
             );
         } catch (\Throwable $e) {
             app(\ServerSuite\Services\Notifier::class)->notify($srv->uuid, 'switch', 'Loader switch failed', $e->getMessage(), 'error');
@@ -605,7 +606,7 @@ class ModManagerController extends Controller
                 $srv,
                 $data['version'],
                 $data['build'] ?? null,
-                true,                                   // requireBackup — always gated from the UI
+                ! $this->backupsOff($srv),              // requireBackup, unless the server has no backup allocation
                 (bool) ($data['delete_plugins'] ?? true),
                 $data['wipe_mode'] ?? 'none',
             );
@@ -1250,6 +1251,22 @@ class ModManagerController extends Controller
      *
      * @return array{ok: bool, backup: ?string, message: ?string}|JsonResponse
      */
+    /**
+     * The panel gives this server no backups (backup_limit 0), so a switch goes
+     * ahead without one; the confirm dialog says so. An unknown limit counts as
+     * allowed, so the backup is still required.
+     */
+    private function backupsOff(Server $srv): bool
+    {
+        try {
+            $limit = app(PanelServerOps::class)->serverBackupLimit($srv->uuid);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $limit !== null && $limit <= 0;
+    }
+
     protected function requireClearance(Request $request, Server $srv): array|JsonResponse
     {
         $c = app(\ServerSuite\Services\PreChangeBackup::class)->redeem($srv->uuid, $request->input('clearance'));

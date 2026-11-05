@@ -15,8 +15,8 @@ import styled from 'styled-components/macro';
  * Shows the running loader/version + the versions its loader publishes, and
  * drives a backup-gated version switch: pick a target -> preflight preview ->
  * pre-switch backup -> apply -> reinstall. Every switch takes a real backup
- * first (server-side gated) and clears plugin jars by default (they routinely
- * halt boot across versions). Endpoints under /extensions/serversuite/<uuid>.
+ * first (server-side gated), unless the server has no backup allocation, and
+ * clears plugin jars by default (they routinely halt boot across versions). Endpoints under /extensions/serversuite/<uuid>.
  */
 
 const Wrapper = styled.div`${tw`p-6 max-w-7xl mx-auto`};`;  // same page margins as the Mods tab
@@ -137,6 +137,8 @@ export default () => {
     const [wipeMode, setWipeMode] = useState<'none' | 'reset_world' | 'clean_slate'>('none');
     const [phase, setPhase] = useState<Phase>('idle');
     const [phaseMsg, setPhaseMsg] = useState('');
+    // No backup allocation: switches go ahead without a backup, and the dialogs say so.
+    const [backupsOff, setBackupsOff] = useState(false);
 
     const [nukeMode, setNukeMode] = useState<'keep_plugins' | 'clean_slate'>('keep_plugins');
     const [nukeBackup, setNukeBackup] = useState(true);
@@ -159,7 +161,7 @@ export default () => {
             .then(({ data }) => { setLoaderList(data.data.installable || []); setLoaderCurrent(data.data.current?.loader ?? null); })
             .catch(() => { setLoaderList([]); });
         http.get(`${base}/server-versions`)
-            .then(({ data }) => { setCurrent(data.data.current); setAvailable(data.data.available); setError(null); })
+            .then(({ data }) => { setCurrent(data.data.current); setAvailable(data.data.available); setBackupsOff(!!data.data.backups_off); setError(null); })
             .catch((e) => setError(e?.response?.data?.error || 'Failed to load version information.'))
             .finally(() => setLoading(false));
     }, [base]);
@@ -271,12 +273,14 @@ export default () => {
         const build = preflight.target?.build ?? null;
         const body = { version: targetVer, build, delete_plugins: deletePlugins, wipe_mode: wipeMode };
         try {
-            setPhase('backing_up'); setPhaseMsg('Taking a pre-switch backup…');
-            const { data: bud } = await http.post(`${base}/backups/create`, { name: `Pre-switch to ${targetVer}` });
-            const backupUuid = bud?.data?.created?.uuid;
-            if (!backupUuid) throw new Error(bud?.data?.message || 'Could not create the pre-switch backup — aborting.');
-            setPhaseMsg('Backing up — waiting for it to complete…');
-            await pollBackup(backupUuid);
+            if (!backupsOff) {
+                setPhase('backing_up'); setPhaseMsg('Taking a pre-switch backup…');
+                const { data: bud } = await http.post(`${base}/backups/create`, { name: `Pre-switch to ${targetVer}` });
+                const backupUuid = bud?.data?.created?.uuid;
+                if (!backupUuid) throw new Error(bud?.data?.message || 'Could not create the pre-switch backup — aborting.');
+                setPhaseMsg('Backing up — waiting for it to complete…');
+                await pollBackup(backupUuid);
+            }
 
             setPhase('applying');
             setPhaseMsg(wipeMode === 'none' ? 'Pinning the version and triggering the reinstall…' : 'Stopping the server to wipe files…');
@@ -297,7 +301,7 @@ export default () => {
             load();
         } catch (e: any) {
             setPhase('failed');
-            setPhaseMsg(e?.response?.data?.error || e?.message || 'The version change failed. Your backup is safe.');
+            setPhaseMsg(e?.response?.data?.error || e?.message || (backupsOff ? 'The version change failed.' : 'The version change failed. Your backup is safe.'));
         }
     };
 
@@ -318,13 +322,16 @@ export default () => {
         const body = { egg_id: loaderTarget.egg_id, version: loaderVersion.trim() || undefined, confirm_name: loaderConfirm.trim() };
         try {
             setLoaderPhase('working');
-            // Always: the panel refuses a loader switch without a completed backup.
-            setLoaderMsg('Taking a safety backup…');
-            const { data: bud } = await http.post(`${base}/backups/create`, { name: `Pre-loader ${loaderTarget.loader}` });
-            const bu = bud?.data?.created?.uuid;
-            if (!bu) throw new Error(bud?.data?.message || 'Could not create the safety backup — aborting.');
-            setLoaderMsg('Backing up — waiting for it to complete…');
-            await pollBackup(bu);
+            // The panel refuses a loader switch without a completed backup, unless
+            // the server has no backup allocation.
+            if (!backupsOff) {
+                setLoaderMsg('Taking a safety backup…');
+                const { data: bud } = await http.post(`${base}/backups/create`, { name: `Pre-loader ${loaderTarget.loader}` });
+                const bu = bud?.data?.created?.uuid;
+                if (!bu) throw new Error(bud?.data?.message || 'Could not create the safety backup — aborting.');
+                setLoaderMsg('Backing up — waiting for it to complete…');
+                await pollBackup(bu);
+            }
             setLoaderMsg('Stopping the server…');
             let r = await http.post(`${base}/loader-switch`, body);
             if (r.data.data?.status === 'stopping') {
@@ -340,7 +347,7 @@ export default () => {
             load();
         } catch (e: any) {
             setLoaderPhase('failed');
-            setLoaderMsg(e?.response?.data?.error || e?.message || 'The loader switch failed. Your backup is safe.');
+            setLoaderMsg(e?.response?.data?.error || e?.message || (backupsOff ? 'The loader switch failed.' : 'The loader switch failed. Your backup is safe.'));
         }
     };
 
@@ -413,8 +420,10 @@ export default () => {
                                     <FontAwesomeIcon icon={faExclamationTriangle} style={{ marginTop: 2 }} />
                                     <span>
                                         <strong>Downgrading can corrupt your world.</strong> An older version may be unable
-                                        to read a world saved by a newer one, and newer format changes can be one-way. The
-                                        pre-switch backup taken below is your safety net — keep it.
+                                        to read a world saved by a newer one, and newer format changes can be one-way.{' '}
+                                        {backupsOff
+                                            ? 'This server has no backup allocation, so there is no backup to come back to.'
+                                            : 'The pre-switch backup taken below is your safety net — keep it.'}
                                     </span>
                                 </Banner>
                             )}
@@ -469,12 +478,12 @@ export default () => {
 
                             <Banner tone="info">
                                 <FontAwesomeIcon icon={faArchive} style={{ marginTop: 2 }} />
-                                <span>A full backup named “Pre-switch → {selected}” is taken and confirmed complete before anything changes.</span>
+                                <span>{backupsOff ? 'This server has no backup allocation, so no backup is taken before this change.' : `A full backup named “Pre-switch → ${selected}” is taken and confirmed complete before anything changes.`}</span>
                             </Banner>
 
                             <Actions>
                                 <Can action={['startup.update', 'startup.docker-image', 'settings.reinstall', 'backup.create']}><Btn onClick={confirmSwitch} disabled={!preflight.can_proceed || blockers.length > 0}>
-                                    <FontAwesomeIcon icon={faSyncAlt} /> Back up &amp; change to {selected}
+                                    <FontAwesomeIcon icon={faSyncAlt} /> {backupsOff ? 'Change' : 'Back up & change'} to {selected}
                                 </Btn></Can>
                                 <Btn variant="ghost" onClick={reset}>Cancel</Btn>
                             </Actions>
@@ -548,14 +557,14 @@ export default () => {
                                 <>
                                     <Banner tone="warn">
                                         <FontAwesomeIcon icon={faExclamationTriangle} style={{ marginTop: 2 }} />
-                                        <span><strong>This wipes everything.</strong> Switching loader deletes all files (world, plugins/mods, configs) and reinstalls fresh — the old loader's content isn't compatible. Only your backup can bring the old world back.</span>
+                                        <span><strong>This wipes everything.</strong> Switching loader deletes all files (world, plugins/mods, configs) and reinstalls fresh — the old loader's content isn't compatible. {backupsOff ? "This server has no backup allocation, so the old world can't be brought back." : 'Only your backup can bring the old world back.'}</span>
                                     </Banner>
 
                                     <Note style={{ marginTop: 12, marginBottom: 2 }}>Minecraft version for the new loader:</Note>
                                     <NameInput value={loaderVersion} onChange={(e) => setLoaderVersion(e.target.value)} placeholder="e.g. 1.21.1" />
 
                                     <Note style={{ marginTop: 12 }}>
-                                        A full backup named “Pre-loader {loaderTarget.loader}” is taken and confirmed complete before anything is wiped.
+                                        {backupsOff ? 'No backup is taken before the wipe.' : `A full backup named “Pre-loader ${loaderTarget.loader}” is taken and confirmed complete before anything is wiped.`}
                                     </Note>
 
                                     <Note style={{ marginTop: 12 }}>Type the server name <strong tw="text-neutral-100">{serverName}</strong> to confirm:</Note>
