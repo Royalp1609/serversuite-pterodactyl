@@ -26,6 +26,13 @@ import { faCheckCircle, faCircle, faExclamationTriangle, faPlay, faTerminal } fr
  *
  * Install and restore events may not reach subusers over the websocket, so
  * the status is also polled from the client API.
+ *
+ * A page opened during a reinstall or restore has no websocket: the panel
+ * answers the token request with 409 and doesn't ask again. So without a
+ * connection the power state is polled too, and Start goes through the API.
+ * The panel caches that state for 20 seconds, so Start is offered later: a
+ * server that is auto-starting must not be reported as not started. A stale
+ * "running" only means going to the console early, which shows the real state.
  */
 
 type Stage = 'installing' | 'starting' | 'failed' | 'restoring' | 'restored' | null;
@@ -42,8 +49,9 @@ export default () => {
     const uuid = ServerContext.useStoreState((state) => state.server.data?.uuid);
     const id = ServerContext.useStoreState((state) => state.server.data?.id);
     const status = ServerContext.useStoreState((state) => state.server.data?.status || null);
-    const power = ServerContext.useStoreState((state) => state.status.value);
+    const socketPower = ServerContext.useStoreState((state) => state.status.value);
     const socket = ServerContext.useStoreState((state) => state.socket.instance);
+    const connected = ServerContext.useStoreState((state) => state.socket.connected);
     const setServerFromState = ServerContext.useStoreActions((actions) => actions.server.setServerFromState);
 
     const [stage, setStage] = useState<Stage>(null);
@@ -53,6 +61,8 @@ export default () => {
     const [packRunning, setPackRunning] = useState(false);
     const [busy, setBusy] = useState(false);
     const [firstInstall, setFirstInstall] = useState<boolean | null>(null);
+    const [polledPower, setPolledPower] = useState<string | null>(null);
+    const power = connected ? socketPower : (polledPower ?? socketPower);
 
     /** Start the timer, or carry on the one from before a page change. */
     const begin = (next: Stage) => {
@@ -122,6 +132,20 @@ export default () => {
         return () => clearInterval(t);
     }, [uuid, status, stage]);
 
+    // No websocket: read the power state from the client API instead.
+    useEffect(() => {
+        if (!uuid || connected || (stage !== 'starting' && stage !== 'restored')) {
+            setPolledPower(null);
+            return;
+        }
+        const poll = () => http.get(`/api/client/servers/${uuid}/resources`)
+            .then((res) => setPolledPower(res.data?.attributes?.current_state ?? null))
+            .catch(() => undefined);
+        poll();
+        const t = setInterval(poll, 5000);
+        return () => clearInterval(t);
+    }, [uuid, connected, stage]);
+
     useEffect(() => {
         if (!stage) return;
         const t = setInterval(() => setNow(Date.now()), 1000);
@@ -147,12 +171,21 @@ export default () => {
 
     const start = () => {
         setBusy(true);
-        socket?.send('set state', 'start');
+        if (connected && socket) {
+            socket.send('set state', 'start');
+        } else {
+            http.post(`/api/client/servers/${uuid}/power`, { signal: 'start' }).catch(() => undefined);
+        }
         setTimeout(() => setBusy(false), 3000);
     };
     const close = () => setStage(null);
+    // Going to the console is what reopens a websocket that was never made.
+    const dismiss = () => {
+        close();
+        if (!connected) history.push(`/server/${id}`);
+    };
     // Not starting on its own: whoever reinstalled it doesn't start it (Settings → Reinstall, an admin).
-    const idle = (stage === 'starting' || stage === 'restored') && power === 'offline' && offlineSince !== null && now - offlineSince > 15000;
+    const idle = (stage === 'starting' || stage === 'restored') && power === 'offline' && offlineSince !== null && now - offlineSince > (connected ? 15000 : 35000);
     const restore = stage === 'restoring' || stage === 'restored';
 
     const steps = restore
@@ -244,7 +277,7 @@ export default () => {
                         </Link>
                     )}
                     {stage !== 'installing' && stage !== 'restoring' && (
-                        <button onClick={close} className="px-3 py-2 rounded-lg text-sm" style={{ color: 'rgb(148,163,184)' }}>Close</button>
+                        <button onClick={dismiss} className="px-3 py-2 rounded-lg text-sm" style={{ color: 'rgb(148,163,184)' }}>Close</button>
                     )}
                 </div>
             </div>
