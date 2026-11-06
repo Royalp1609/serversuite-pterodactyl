@@ -93,6 +93,9 @@ return [
         'fabric_meta'     => env('SERVER_SUITE_FABRIC_META', 'https://meta.fabricmc.net/v2'),
         // Set a real contact (URL or email). Paper may reject generic UAs.
         'user_agent' => env('SERVER_SUITE_USER_AGENT', 'ServerSuite/0.13 (+set SERVER_SUITE_USER_AGENT with a contact)'),
+        // #22: on a version or loader switch, point the egg's DL_PATH at the
+        // direct jar from MCJars (mcjars.app), around broken install scripts.
+        'mcjars' => env('SERVERSUITE_MCJARS', true),
     ],
 
     /*
@@ -389,12 +392,6 @@ return [
 
     // Public status cards (#29): /status/<fqdn> and /status/<fqdn>/badge.svg,
     // for subdomains whose owner switched them on. Off here hides them all.
-    // #22: on a version or loader switch, point the egg's DL_PATH at the
-    // direct jar from MCJars (mcjars.app), around broken install scripts.
-    'versions' => [
-        'mcjars' => env('SERVERSUITE_MCJARS', true),
-    ],
-
     'status_cards' => [
         'enabled'       => env('SERVERSUITE_STATUS_CARDS', true),
         'cache_seconds' => env('SERVERSUITE_STATUS_CARD_CACHE', 30),
