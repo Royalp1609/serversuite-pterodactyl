@@ -275,6 +275,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 RotateBackupsCommand::class,
                 MoveSubdomainsCommand::class,
                 \ServerSuite\Console\Commands\WatchCrashesCommand::class,
+                \ServerSuite\Console\Commands\AutoUpgradesCommand::class,
             ]);
         }
     }
@@ -311,6 +312,8 @@ class ModManagerServiceProvider extends ServiceProvider
                 'backup_schedule'          => ['serversuite.backups.schedule',               'string'],
                 'backup_default_interval_hours' => ['serversuite.backups.default_interval_hours', 'string'],
                 'backup_timezone'          => ['serversuite.backups.timezone',               'string'],
+                'auto_upgrades_enabled'    => ['serversuite.auto_upgrades.enabled',          'bool'],
+                'auto_upgrades_min_age_days' => ['serversuite.auto_upgrades.min_age_days',   'string'],
             ];
 
             foreach (ModManagerGlobalSetting::allSettings() as $key => $value) {
@@ -346,6 +349,13 @@ class ModManagerServiceProvider extends ServiceProvider
             $schedule->command(\ServerSuite\Console\Commands\WatchCrashesCommand::class)
                 ->everyFiveMinutes()
                 ->withoutOverlapping();
+
+            // Opt-in version upgrades (#111). In the background because plugin
+            // updates can take a while; the lock outlives a crash by 30 minutes.
+            $schedule->command(\ServerSuite\Console\Commands\AutoUpgradesCommand::class)
+                ->everyMinute()
+                ->withoutOverlapping(30)
+                ->runInBackground();
 
             // Rolling-backup rotation — only scheduled when the master switch is
             // on. Runs on a fixed, frequent TICK; the command itself decides

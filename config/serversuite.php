@@ -132,6 +132,20 @@ return [
     | notify_only: when true the scheduler flags pending updates but does NOT
     |              apply them automatically; admins use the bulk-update button.
     */
+    // Opt-in automatic version upgrades (#111). The admin page's values for the
+    // first two win over these.
+    'auto_upgrades' => [
+        'enabled' => env('SERVER_SUITE_AUTO_UPGRADES', true),
+        // A release has to have had a stable build for this long.
+        'min_age_days' => env('SERVER_SUITE_AUTO_UPGRADE_MIN_AGE_DAYS', 7),
+        // How often a held server is looked at again during its chosen hour.
+        'check_minutes' => 10,
+        'max_concurrent' => env('SERVER_SUITE_AUTO_UPGRADE_MAX_CONCURRENT', 5),
+        'backup_timeout_minutes' => 60,
+        'install_timeout_minutes' => 30,
+        'boot_timeout_minutes' => 15,
+    ],
+
     'scheduler' => [
         'interval'    => env('MOD_MANAGER_UPDATE_INTERVAL', '0 3 * * *'),
         'notify_only' => env('MOD_MANAGER_NOTIFY_ONLY', true),

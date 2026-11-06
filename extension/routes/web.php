@@ -204,6 +204,10 @@ Route::post('/{server}/version-preflight', [ModManagerController::class, 'server
     ->name('extension.serversuite.version-preflight');
 Route::post('/{server}/version-apply', [ModManagerController::class, 'serverVersionApply'])
     ->name('extension.serversuite.version-apply');
+Route::get('/{server}/auto-upgrade', [ModManagerController::class, 'autoUpgradeState'])
+    ->name('extension.serversuite.auto-upgrade');
+Route::post('/{server}/auto-upgrade', [ModManagerController::class, 'autoUpgradeSave'])
+    ->name('extension.serversuite.auto-upgrade-save');
 Route::get('/{server}/server-status', [ModManagerController::class, 'serverStatus'])
     ->name('extension.serversuite.server-status');
 Route::post('/{server}/version-nuclear', [ModManagerController::class, 'serverVersionNuclear'])

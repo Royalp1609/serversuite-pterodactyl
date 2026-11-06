@@ -90,3 +90,8 @@ it('hides each tab behind the permission its endpoints use', function () {
     preg_match_all("/Path: '([^']+)'/", $yml, $m);
     expect(array_intersect($m[1], ['/', '/files', '/databases', '/schedules', '/users', '/backups', '/network', '/startup', '/settings', '/activity']))->toBe([]);
 });
+
+it('needs the same permissions to set up automatic upgrades as to switch by hand (#111)', function () {
+    expect(PanelPermissions::required('autoUpgradeState'))->toBe(['startup.read'])
+        ->and(PanelPermissions::required('autoUpgradeSave'))->toBe(PanelPermissions::required('serverVersionApply'));
+});

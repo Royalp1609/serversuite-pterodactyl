@@ -28,11 +28,12 @@ class Notifier
         'backup'    => 'A scheduled backup failed or was skipped',
         'crash'     => 'The server crashed after a mod change',
         'switch'    => 'A version or loader switch started or failed',
+        'autoupgrade' => 'An automatic version upgrade finished, failed or is on hold',
         'subdomain' => 'A subdomain was claimed or released',
     ];
 
     /** Minutes before the same message for an event is sent again. */
-    private const COOLDOWN = ['updates' => 1440, 'backup' => 360, 'crash' => 60, 'switch' => 1, 'subdomain' => 1];
+    private const COOLDOWN = ['updates' => 1440, 'backup' => 360, 'crash' => 60, 'switch' => 1, 'autoupgrade' => 1, 'subdomain' => 1];
 
     private const HOURLY_CAP = 30;
     private const DEFAULT_KEY = 'notify.default';

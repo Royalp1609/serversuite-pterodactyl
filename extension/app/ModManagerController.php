@@ -125,11 +125,17 @@ class ModManagerController extends Controller
             'backup_keep_default'       => ['nullable', 'integer', 'min:1', 'max:500'],
             'backup_default_interval_hours' => ['nullable', 'integer', \Illuminate\Validation\Rule::in((array) config('serversuite.backups.interval_presets', [6, 12, 24, 48, 168]))],
             'backup_timezone'           => ['nullable', 'timezone'],
+            'auto_upgrades_enabled'     => ['nullable'],
+            'auto_upgrades_min_age_days' => ['nullable', 'integer', 'min:0', 'max:365'],
         ]);
 
         // Checkboxes: absent = off. Stored as '1'/'0'.
-        foreach (['repo_modrinth_enabled', 'repo_curseforge_enabled', 'repo_hangar_enabled', 'auto_update_on_conflict', 'backup_rotation_enabled'] as $box) {
+        foreach (['repo_modrinth_enabled', 'repo_curseforge_enabled', 'repo_hangar_enabled', 'auto_update_on_conflict', 'backup_rotation_enabled', 'auto_upgrades_enabled'] as $box) {
             ModManagerGlobalSetting::setValue($box, $request->has($box) ? '1' : '0');
+        }
+
+        if (isset($data['auto_upgrades_min_age_days'])) {
+            ModManagerGlobalSetting::setValue('auto_upgrades_min_age_days', (string) (int) $data['auto_upgrades_min_age_days']);
         }
 
         // Auto-apply inverts to the stored/notify_only semantics.
@@ -430,6 +436,44 @@ class ModManagerController extends Controller
             'available'   => $available,
             'backups_off' => $this->backupsOff($srv),
         ]]);
+    }
+
+    /**
+     * GET /{server}/auto-upgrade
+     * Automatic upgrades (#111): this server's settings and what last happened.
+     */
+    public function autoUpgradeState(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        return response()->json(['data' => app(\ServerSuite\Services\AutoUpgradeService::class)->overview($srv)]);
+    }
+
+    /**
+     * POST /{server}/auto-upgrade   { enabled, range, hour }
+     * Saving with it on also clears a pause after a failed upgrade.
+     */
+    public function autoUpgradeSave(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+            'range'   => ['required', 'string', 'in:line,latest'],
+            'hour'    => ['required', 'integer', 'min:0', 'max:23'],
+        ]);
+
+        $upgrades = app(\ServerSuite\Services\AutoUpgradeService::class);
+        try {
+            $upgrades->configure($srv, (bool) $data['enabled'], $data['range'], (int) $data['hour']);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $this->audit($srv, 'auto-upgrade-settings', $data);
+
+        return response()->json(['data' => $upgrades->overview($srv)]);
     }
 
     /**

@@ -42,6 +42,13 @@ class ModManagerSetting extends Model
         'own_dns_zone_id',
         'own_dns_token',
         'notify',
+        'auto_upgrade_enabled',
+        'auto_upgrade_range',
+        'auto_upgrade_hour',
+        'auto_upgrade_run',
+        'auto_upgrade_status',
+        'auto_upgrade_checked_at',
+        'auto_upgrade_paused_at',
     ];
 
     /** The own-domain Cloudflare token is write-only: never serialised. */
@@ -61,6 +68,12 @@ class ModManagerSetting extends Model
         'subdomain_limit'         => 'integer',
         'last_change'             => 'array',
         'notify'                  => 'encrypted:array',
+        'auto_upgrade_enabled'    => 'boolean',
+        'auto_upgrade_hour'       => 'integer',
+        'auto_upgrade_run'        => 'array',
+        'auto_upgrade_status'     => 'array',
+        'auto_upgrade_checked_at' => 'datetime',
+        'auto_upgrade_paused_at'  => 'datetime',
         'own_dns_token'           => 'encrypted',
     ];
 

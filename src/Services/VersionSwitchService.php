@@ -38,9 +38,11 @@ class VersionSwitchService
      * @param int|null $targetBuild  specific build, or null = preferred stable
      * @param bool $requireBackup    enforce a recent completed backup first
      *
+     * @param string|null $downloadUrl  this exact jar instead of asking MCJars for the newest (#111)
+     *
      * @return array  the action taken (for the caller to begin polling install)
      */
-    public function apply(object $server, string $targetVersion, ?int $targetBuild = null, bool $requireBackup = true, bool $deletePlugins = true, string $wipeMode = 'none'): array
+    public function apply(object $server, string $targetVersion, ?int $targetBuild = null, bool $requireBackup = true, bool $deletePlugins = true, string $wipeMode = 'none', ?string $downloadUrl = null): array
     {
         $uuid = $server->uuid;
         $wipeMode = in_array($wipeMode, ['reset_world', 'clean_slate'], true) ? $wipeMode : 'none';
@@ -115,11 +117,11 @@ class VersionSwitchService
         //    With a direct jar from MCJars (#22), DL_PATH points straight at it,
         //    which gets around broken install scripts; eggs without DL_PATH
         //    ignore it (only the egg's own variables are written).
-        $pin = app(McJarsService::class)->pinFor(\ServerSuite\Models\ModManagerSetting::forServer($uuid)->loader, $targetVersion);
+        $pin = $downloadUrl === null ? app(McJarsService::class)->pinFor(\ServerSuite\Models\ModManagerSetting::forServer($uuid)->loader, $targetVersion) : null;
         $this->ops->setServerVariables($uuid, [
             'MINECRAFT_VERSION' => $targetVersion,
             'BUILD_NUMBER'      => (string) $build,
-        ] + ($pin ? ['DL_PATH' => $pin['url'], 'SERVER_JARFILE' => $pin['file']] : []));
+        ] + ($downloadUrl !== null ? ['DL_PATH' => $downloadUrl] : []) + ($pin ? ['DL_PATH' => $pin['url'], 'SERVER_JARFILE' => $pin['file']] : []));
 
         // 2. Move the Docker image only when the Java requirement actually changes.
         $imageChanged = false;

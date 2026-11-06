@@ -72,6 +72,7 @@ final class PanelPermissions
         // After a restore (#60): the Mods tab's banner
         'restoreSync' => ['mods.read'], 'restoreSyncDismiss' => ['mods.read'],
         // Versions
+        'autoUpgradeState' => ['startup.read'], 'autoUpgradeSave' => self::VERSION_CHANGE,
         'serverVersions' => ['startup.read'], 'serverStatus' => ['startup.read'], 'loaders' => ['startup.read'],
         'serverVersionPreflight' => ['startup.read'],
         'serverVersionApply' => self::VERSION_CHANGE, 'loaderSwitch' => self::VERSION_CHANGE,

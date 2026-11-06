@@ -21,6 +21,11 @@ class Server extends Model
         return $this->belongsTo(Allocation::class);
     }
 
+    public function egg(): BelongsTo
+    {
+        return $this->belongsTo(Egg::class);
+    }
+
     public function node(): BelongsTo
     {
         return $this->belongsTo(Node::class);
