@@ -142,6 +142,7 @@ class ModpackInstaller
                 return 60;
             }
             if (! $res->isFailed() && $res->reason === 'backups_disabled') {
+                $pack->mergeState(['backups' => 'disabled']);
                 $pack->phase = $this->afterBackup($pack);
 
                 return 0;
@@ -241,7 +242,7 @@ class ModpackInstaller
         $server = \Pterodactyl\Models\Server::query()->where('uuid', $pack->server_uuid)->firstOrFail();
 
         try {
-            $out = $this->loaderSwitch->switchLoader($server, (int) $sw['egg_id'], (string) ($pack->target['minecraft'] ?? ''), true, (array) ($sw['env'] ?? []));
+            $out = $this->loaderSwitch->switchLoader($server, (int) $sw['egg_id'], (string) ($pack->target['minecraft'] ?? ''), ($pack->state['backups'] ?? 'yes') !== 'disabled', (array) ($sw['env'] ?? []));
         } catch (\RuntimeException $e) {
             throw new ModpackException('Could not switch the server: ' . $e->getMessage());
         }

@@ -13,6 +13,7 @@ use ServerSuite\Models\Modpack;
 use ServerSuite\Models\ServerMod;
 use ServerSuite\Modpacks\MrpackIndex;
 use ServerSuite\Services\BackupRotationService;
+use ServerSuite\Services\LoaderSwitchService;
 use ServerSuite\Services\ModpackInstaller;
 use ServerSuite\Services\ModpackService;
 use ServerSuite\Services\ReconciliationService;
@@ -524,7 +525,7 @@ it('pins Forge as mc-loader and NeoForge as the loader version', function () {
         ->and(mpSvc()->preview($this->server, 'PACK', 'neo', true)['plan']['switch']['env'])->toBe(['NEOFORGE_VERSION' => '21.1.77']);
 });
 
-it("won't switch without an egg for the loader, with backups off, or with install scripts skipped", function () {
+it("won't switch without an egg for the loader or with install scripts skipped, but no backups doesn't stop it", function () {
     mpPanel($this);
     mpPublish($this, 'neo', ['mods/a.jar' => []], [], ['minecraft' => '1.21.1', 'neoforge' => '21.1.77']);
     expect(mpSvc()->preview($this->server, 'PACK', 'neo', true)['blockers'][0])->toContain('no Neoforge egg');
@@ -540,8 +541,84 @@ it("won't switch without an egg for the loader, with backups off, or with instal
     $ops->shouldReceive('serverBackupLimit')->andReturn(0);
     app()->instance(PanelServerOps::class, $ops);
     $p = mpSvc()->preview($this->server, 'PACK', 'v121', true);
-    expect($p['switch'])->toBeNull()
-        ->and($p['blockers'][0])->toContain('backups turned off');
+    expect($p['switch'])->not->toBeNull()
+        ->and($p['blockers'])->toBe([])
+        ->and($p['backups'])->toBe('disabled');
+});
+
+it('switches the server on a server with no backup allocation', function () {
+    mpPanel($this);
+    mpFabricEgg();
+    mpPublish($this, 'v121', ['mods/a.jar' => ['mod' => 'MODA']], [], ['minecraft' => '1.21.1', 'fabric-loader' => '0.16.5']);
+
+    $ops = Mockery::mock(PanelServerOps::class);
+    $ops->shouldReceive('runtimeState')->andReturnUsing(function () {
+        $install = $this->installing > 0 ? 'installing' : null;
+        $this->installing = max(0, $this->installing - 1);
+
+        return ['power' => $this->power, 'install' => $install];
+    });
+    $ops->shouldReceive('power')->with('srv-mp', 'stop')->andReturnUsing(function () {
+        $this->power = 'offline';
+    });
+    $ops->shouldReceive('power')->with('srv-mp', 'start');
+    $ops->shouldReceive('serverBackupLimit')->andReturn(0);
+    $ops->shouldReceive('listBackups')->andReturn([]);   // a required backup would never be found
+    $ops->shouldReceive('changeEgg')->once();
+    $ops->shouldReceive('setDockerImage');
+    $ops->shouldReceive('setServerVariables');
+    $ops->shouldReceive('reinstall')->once()->andReturnUsing(function () {
+        $this->installing = 2;
+        $this->wings->put('/fabric-server-launch.jar', 'launcher');
+    });
+    app()->instance(PanelServerOps::class, $ops);
+    foreach ([LoaderSwitchService::class, ModpackInstaller::class, ModpackService::class] as $service) {
+        app()->forgetInstance($service);
+    }
+
+    mpSvc()->start($this->server, 'PACK', 'v121', 1, true, true);
+    $pack = mpRun();
+
+    expect($pack->status)->toBe(Modpack::STATUS_INSTALLED, (string) $pack->error)
+        ->and($this->backupNames)->toBe([]);
+});
+
+it('still switches if the backup allocation is removed after the install was planned', function () {
+    mpPanel($this);
+    mpFabricEgg();
+    mpPublish($this, 'v121', ['mods/a.jar' => ['mod' => 'MODA']], [], ['minecraft' => '1.21.1', 'fabric-loader' => '0.16.5']);
+
+    // Planned with an allocation (state: backups yes), then the panel reports none left.
+    $this->rotation->shouldReceive('backupNow')->andReturn(RotationResult::skipped('backups_disabled'));
+    $ops = Mockery::mock(PanelServerOps::class);
+    $ops->shouldReceive('runtimeState')->andReturnUsing(function () {
+        $install = $this->installing > 0 ? 'installing' : null;
+        $this->installing = max(0, $this->installing - 1);
+
+        return ['power' => $this->power, 'install' => $install];
+    });
+    $ops->shouldReceive('power')->with('srv-mp', 'stop')->andReturnUsing(function () {
+        $this->power = 'offline';
+    });
+    $ops->shouldReceive('power')->with('srv-mp', 'start');
+    $ops->shouldReceive('serverBackupLimit')->andReturn(5, 0);
+    $ops->shouldReceive('listBackups')->andReturn([]);
+    $ops->shouldReceive('changeEgg')->once();
+    $ops->shouldReceive('setDockerImage');
+    $ops->shouldReceive('setServerVariables');
+    $ops->shouldReceive('reinstall')->once()->andReturnUsing(function () {
+        $this->installing = 2;
+        $this->wings->put('/fabric-server-launch.jar', 'launcher');
+    });
+    app()->instance(PanelServerOps::class, $ops);
+    foreach ([LoaderSwitchService::class, ModpackInstaller::class, ModpackService::class] as $service) {
+        app()->forgetInstance($service);
+    }
+
+    mpSvc()->start($this->server, 'PACK', 'v121', 1, true, true);
+    $pack = mpRun();
+
+    expect($pack->status)->toBe(Modpack::STATUS_INSTALLED, (string) $pack->error);
 });
 
 it('fails the install, keeping the backup as the way back, when the reinstall fails', function () {

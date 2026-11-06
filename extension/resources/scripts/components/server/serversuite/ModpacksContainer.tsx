@@ -525,7 +525,9 @@ const ReviewPanel = ({ preview: p, confirmed, setConfirmed, wipeConfirmed, setWi
                     <strong>This switches the server:</strong> {ucfirst(p.switch.from.loader) || 'unknown loader'} {p.switch.from.minecraft || ''} &rarr;{' '}
                     {ucfirst(p.requires.loader)} {p.requires.minecraft}{p.requires.loader_version ? `, loader ${p.requires.loader_version}` : ''} ({p.switch.egg_name} egg).
                     {' '}Everything on the server is deleted first (worlds, configs, mods and plugins; only eula.txt is kept), then it is reinstalled and the pack goes on.
-                    The &quot;Pre-modpack&quot; backup is the way back.
+                    {p.backups === 'disabled'
+                        ? " This server has no backup allocation, so they can't be restored."
+                        : ' The "Pre-modpack" backup is the way back.'}
                 </Bad>
             )}
 

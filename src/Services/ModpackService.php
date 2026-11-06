@@ -281,11 +281,6 @@ class ModpackService
         } catch (\Throwable) {
         }
 
-        if ($switch !== null && $backupLimit === 0) {
-            $blockers[] = 'Switching the server needs a backup first, and this server has backups turned off.';
-            $switch = null;
-        }
-
         return [
             'pack' => [
                 'project_id' => $projectId,
