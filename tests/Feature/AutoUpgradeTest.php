@@ -47,7 +47,7 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
     private array $order = [];
     private ?string $dlPath = null;
     private array $preflightBlockers = [];
-    private array $updated = ['updated' => [], 'failed' => []];
+    private bool $updateError = false;
     /** @var array<string, bool> plugin source id => has a build for the target */
     private array $pluginBuilds = [];
 
@@ -116,17 +116,21 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
         $this->app->instance(BackupRotationService::class, $rotation);
 
         $mods = \Mockery::mock(ModManagerService::class);
-        $mods->shouldReceive('checkUpdates')->andReturn(['checked' => 0, 'updates' => 0, 'up_to_date' => 0, 'errors' => 0]);
-        $mods->shouldReceive('updateAll')->andReturnUsing(function () {
+        $mods->shouldReceive('update')->andReturnUsing(function ($mod) {
             $this->order[] = 'plugins';
+            if ($this->updateError) {
+                throw new \RuntimeException('delivery failed');
+            }
 
-            return $this->updated;
+            return $mod;
         });
         $this->app->instance(ModManagerService::class, $mods);
 
         $driver = \Mockery::mock(RepositoryContract::class);
         $driver->shouldReceive('latestVersion')->andReturnUsing(function ($id) {
-            return ($this->pluginBuilds[$id] ?? true) ? (new \ReflectionClass(ModVersion::class))->newInstanceWithoutConstructor() : null;
+            return ($this->pluginBuilds[$id] ?? true)
+                ? new ModVersion(versionId: 'v2', versionNumber: '2', loaders: ['paper'], gameVersions: ['1.21.5'], downloadUrl: 'https://x.test/a.jar', filename: 'a.jar', fileSize: 1, changelog: null)
+                : null;
         });
         $repositories = \Mockery::mock(RepositoryManager::class);
         $repositories->shouldReceive('driver')->andReturn($driver);
@@ -233,7 +237,7 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
 
         $this->state = ['power' => 'offline', 'install' => null];
         $this->status = null;
-        $this->updated = ['updated' => [['mod_name' => 'EssentialsX', 'installed_version' => '2']], 'failed' => []];
+        ServerMod::query()->forceCreate(['server_uuid' => $this->server->uuid, 'source' => 'modrinth', 'source_id' => 'ess', 'mod_name' => 'EssentialsX', 'installed_version' => '1', 'target_filename' => 'Essentials.jar']);
         app(AutoUpgradeService::class)->tick();
         $this->assertSame('booting', $this->setting()->auto_upgrade_run['phase']);
         $this->assertSame(['apply', 'plugins', 'power:start'], $this->order, 'plugins before the first boot');
@@ -510,6 +514,30 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
         $this->status = ['players' => ['online' => 0], 'version' => ['name' => 'Paper 1.21.4']];
         app(AutoUpgradeService::class)->tick();
         $this->assertNotNull($this->setting()->auto_upgrade_paused_at);
+    }
+
+    public function test_a_plugin_update_that_fails_is_reported_but_the_server_still_starts(): void
+    {
+        $this->tick();
+        $this->finishBackup();
+        app(AutoUpgradeService::class)->tick();
+        ServerMod::query()->forceCreate(['server_uuid' => $this->server->uuid, 'source' => 'modrinth', 'source_id' => 'ess', 'mod_name' => 'EssentialsX', 'installed_version' => '1', 'target_filename' => 'Essentials.jar']);
+        $this->updateError = true;
+        $this->state = ['power' => 'offline', 'install' => null];
+        app(AutoUpgradeService::class)->tick();
+        $this->assertSame(['start'], $this->signals);
+        $this->assertStringContainsString('Still on the old build: EssentialsX', $this->setting()->auto_upgrade_run['plugins']);
+    }
+
+    public function test_a_plugin_already_on_the_build_is_left_alone(): void
+    {
+        $this->tick();
+        $this->finishBackup();
+        app(AutoUpgradeService::class)->tick();
+        ServerMod::query()->forceCreate(['server_uuid' => $this->server->uuid, 'source' => 'modrinth', 'source_id' => 'ess', 'mod_name' => 'EssentialsX', 'installed_version' => '2', 'target_filename' => 'Essentials.jar']);
+        $this->state = ['power' => 'offline', 'install' => null];
+        app(AutoUpgradeService::class)->tick();
+        $this->assertNotContains('plugins', $this->order);
     }
 
     public function test_a_failed_reinstall_pauses(): void

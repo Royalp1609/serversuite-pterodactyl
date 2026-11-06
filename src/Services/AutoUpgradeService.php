@@ -509,27 +509,37 @@ class AutoUpgradeService
         }
 
         $this->post->finish($s->server_uuid);
-        $run['plugins'] = $this->updatePlugins($server);
+        $run['plugins'] = $this->updatePlugins($server, $run['to']);
         $this->ops->power($s->server_uuid, 'start');
         $this->advance($s, $run, 'booting');
         $this->status($s, 'booting', "Upgrading to {$run['to']}: waiting for the server to start.");
     }
 
     /** Move plugins to their builds for the new version. A failure is reported, not fatal: most keep working. */
-    private function updatePlugins(object $server): string
+    private function updatePlugins(object $server, string $target): string
     {
-        try {
-            $this->mods->checkUpdates($server);
-            $done = $this->mods->updateAll($server);
-        } catch (\Throwable $e) {
-            return 'Plugin updates didn\'t run: ' . $e->getMessage();
+        $updated = $failed = [];
+        foreach (ServerMod::query()->where('server_uuid', $server->uuid)->get() as $mod) {
+            if ($mod->modpack_id !== null || $mod->disabled_at !== null) {
+                continue;
+            }
+            try {
+                $latest = $this->repositories->driver($mod->source)->latestVersion($mod->source_id, 'paper', $target);
+                if ($latest !== null && $latest->versionNumber !== $mod->installed_version) {
+                    $this->mods->update($mod, $server);
+                    $updated[] = $mod->mod_name;
+                }
+            } catch (\Throwable) {
+                $failed[] = $mod->mod_name;
+            }
         }
+
         $parts = [];
-        if ($done['updated'] !== []) {
-            $parts[] = 'Updated plugins: ' . implode(', ', array_column($done['updated'], 'mod_name')) . '.';
+        if ($updated !== []) {
+            $parts[] = 'Updated plugins: ' . implode(', ', $updated) . '.';
         }
-        if ($done['failed'] !== []) {
-            $parts[] = 'Still on the old build: ' . implode(', ', array_column($done['failed'], 'mod_name')) . '.';
+        if ($failed !== []) {
+            $parts[] = 'Still on the old build: ' . implode(', ', $failed) . '.';
         }
 
         return implode(' ', $parts);
