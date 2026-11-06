@@ -127,7 +127,7 @@ class ServerVersionService
      * embedded download URL (Fill v3 supplies it — never construct it yourself).
      * Used by the version detail / Phase 2 switch, not the list view.
      *
-     * @return array<int, array{build: int, channel: string, download_url: ?string}>
+     * @return array<int, array{build: int, channel: string, download_url: ?string, time: ?string}>
      */
     public function paperBuilds(string $version): array
     {
@@ -152,6 +152,7 @@ class ServerVersionService
                         'build'        => (int) ($b['id'] ?? 0),
                         'channel'      => (string) ($b['channel'] ?? 'STABLE'),
                         'download_url' => $url,
+                        'time'         => isset($b['time']) ? (string) $b['time'] : null,
                     ];
                 }
 

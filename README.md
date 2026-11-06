@@ -89,6 +89,15 @@ Pelican plugin.
 - Every switch is **gated on a recent completed backup** and refuses up front if
   the server can't be reinstalled (e.g. *Skip Egg Install Script* is on), so a
   server is never left wiped.
+- **Automatic upgrades** — opt in per server on a Paper server with a backup
+  allocation. At the hour you pick, with no players online, it takes a backup
+  and upgrades to a release that has been out for 7 days (admin setting),
+  within the current line by default. Plugins are kept and moved to builds for
+  the new version; it waits if one has no build or can't be identified. Servers
+  in a Velocity network are skipped. If the server doesn't come back up,
+  upgrades pause for it and you're told which backup to restore. It relies on
+  the server answering status pings, so a Paper server with
+  `hide-online-players` on reads as empty.
 - On a server with **no backup allocation**, version, loader and modpack
   switches still go ahead. The confirm dialog warns you that no backup is taken.
 - **Reset** the server: world only, or a clean slate.

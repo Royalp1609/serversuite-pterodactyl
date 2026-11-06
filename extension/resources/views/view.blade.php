@@ -59,6 +59,17 @@
                         </label>
                     </div>
 
+                    <h4>Automatic version upgrades</h4>
+                    <div class="form-group">
+                        <label style="font-weight:normal;">
+                            <input type="checkbox" name="auto_upgrades_enabled" value="1" {{ config('serversuite.auto_upgrades.enabled', true) ? 'checked' : '' }}>
+                            Allow automatic upgrades on this panel (each server still opts in on its Versions tab; only Paper servers with a backup allocation can)
+                        </label>
+                        <label style="display:block; margin-top:8px;">Days a release must be out first</label>
+                        <input type="number" min="0" max="365" class="form-control" style="max-width:120px;" name="auto_upgrades_min_age_days" value="{{ config('serversuite.auto_upgrades.min_age_days', 7) }}">
+                        <p class="text-muted small">Turning this off stops new upgrades on every server. One already past its backup finishes.</p>
+                    </div>
+
                     <h4>Install behaviour</h4>
                     <div class="form-group">
                         <label style="font-weight:normal;">

@@ -106,6 +106,18 @@ const DangerBtn = styled.button`
     &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
+interface AutoUpgrade {
+    enabled: boolean;
+    range: 'line' | 'latest';
+    hour: number;
+    timezone: string;
+    panel_enabled: boolean;
+    min_age_days: number;
+    paused: boolean;
+    running: { phase: string; to: string } | null;
+    status: { text: string; at: string | null } | null;
+    blocked: string | null;
+}
 interface Current { loader: string | null; game_version: string | null; confidence: number | null; }
 interface Available { supported: boolean; loader: string | null; versions: string[]; }
 interface Preflight {
@@ -155,8 +167,29 @@ export default () => {
     const [loaderPhase, setLoaderPhase] = useState<'idle' | 'working' | 'done' | 'failed'>('idle');
     const [loaderMsg, setLoaderMsg] = useState('');
 
+    // Automatic upgrades (#111). Null when the settings couldn't load, or this user can't read them.
+    const [auto, setAuto] = useState<AutoUpgrade | null>(null);
+    const [autoForm, setAutoForm] = useState<{ enabled: boolean; range: 'line' | 'latest'; hour: number }>({ enabled: false, range: 'line', hour: 4 });
+    const [autoMsg, setAutoMsg] = useState<string | null>(null);
+    const [autoBusy, setAutoBusy] = useState(false);
+
+    const applyAuto = (a: AutoUpgrade) => { setAuto(a); setAutoForm({ enabled: a.enabled, range: a.range, hour: a.hour }); };
+    const saveAuto = async () => {
+        setAutoBusy(true); setAutoMsg(null);
+        try {
+            const { data } = await http.post(`${base}/auto-upgrade`, autoForm);
+            applyAuto(data.data);
+            setAutoMsg(autoForm.enabled ? 'Automatic upgrades are on.' : 'Automatic upgrades are off.');
+        } catch (e: any) {
+            setAutoMsg(e?.response?.data?.error || 'Could not save.');
+        } finally {
+            setAutoBusy(false);
+        }
+    };
+
     const load = useCallback(() => {
         setLoading(true);
+        http.get(`${base}/auto-upgrade`).then(({ data }) => applyAuto(data.data)).catch(() => setAuto(null));
         http.get(`${base}/loaders`)
             .then(({ data }) => { setLoaderList(data.data.installable || []); setLoaderCurrent(data.data.current?.loader ?? null); })
             .catch(() => { setLoaderList([]); });
@@ -582,6 +615,47 @@ export default () => {
                     )}
 
                     <Note style={{ marginTop: 12 }}>Missing a loader (e.g. Fabric)? Import its egg via the admin Egg Manager and it appears here.</Note>
+                </Panel>
+            )}
+
+            {/* Automatic upgrades */}
+            {!loading && !error && auto && (
+                <Panel>
+                    <Header>
+                        <div>
+                            <Title><FontAwesomeIcon icon={faSyncAlt} /> Automatic upgrades</Title>
+                            <Subtitle>
+                                Upgrade this Paper server when a new Minecraft release has been out for {auto.min_age_days} days. It runs at your chosen hour with no players online, after a backup. Plugins are kept, and it waits until each has a build for the new version.
+                            </Subtitle>
+                        </div>
+                    </Header>
+                    {!auto.panel_enabled && <Note tw="text-yellow-400">Your host has turned automatic upgrades off on this panel.</Note>}
+                    {auto.panel_enabled && auto.blocked && <Note tw="text-yellow-400">{auto.blocked}</Note>}
+                    {auto.paused && <Note tw="text-red-400">Paused after a failed upgrade. Save with automatic upgrades on to start again.</Note>}
+                    {auto.running && <Note>Upgrading to {auto.running.to} now.</Note>}
+                    <div tw="flex flex-col gap-3 mt-3">
+                        <label tw="flex items-center gap-2 text-sm text-neutral-100">
+                            <input type="checkbox" checked={autoForm.enabled} onChange={(e) => { const enabled = e.currentTarget.checked; setAutoForm((f) => ({ ...f, enabled })); }} />
+                            Upgrade this server automatically
+                        </label>
+                        <label tw="text-sm text-neutral-300">
+                            How far to upgrade
+                            <select tw="block mt-1 w-full rounded-lg px-3 py-2 text-sm text-neutral-100 bg-neutral-800" value={autoForm.range} onChange={(e) => { const range = e.currentTarget.value as 'line' | 'latest'; setAutoForm((f) => ({ ...f, range })); }}>
+                                <option value="line">Within the current line (such as 1.21.4 to 1.21.5)</option>
+                                <option value="latest">Newest version, including new lines (more likely to break plugins and older clients)</option>
+                            </select>
+                        </label>
+                        <label tw="text-sm text-neutral-300">
+                            Hour to run ({auto.timezone})
+                            <select tw="block mt-1 w-full rounded-lg px-3 py-2 text-sm text-neutral-100 bg-neutral-800" value={autoForm.hour} onChange={(e) => { const hour = Number(e.currentTarget.value); setAutoForm((f) => ({ ...f, hour })); }}>
+                                {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                            </select>
+                        </label>
+                    </div>
+                    <div tw="flex items-center justify-between gap-3 mt-3">
+                        <Note tw="mt-0">{autoMsg ?? (auto.status ? `Last check: ${auto.status.text}` : 'Not checked yet.')}</Note>
+                        <Btn variant="primary" disabled={autoBusy} onClick={saveAuto}>Save</Btn>
+                    </div>
                 </Panel>
             )}
 

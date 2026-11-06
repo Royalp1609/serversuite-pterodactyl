@@ -29,6 +29,7 @@ class GameGuard
         // Minecraft edits configs in the Mods tab, Rust and Valheim in their Configs tab (#86).
         'configs' => ['mods', 'configs'], 'configsOpen' => ['mods', 'configs'], 'configsRender' => ['mods', 'configs'], 'configsSave' => ['mods', 'configs'],
         'crossplay' => 'crossplay', 'crossplayInstall' => 'crossplay', 'crossplayConfigure' => 'crossplay',
+        'autoUpgradeState' => 'versions', 'autoUpgradeSave' => 'versions',
         'serverVersions' => 'versions', 'loaders' => 'versions', 'serverVersionPreflight' => 'versions',
         'serverVersionApply' => 'versions', 'loaderSwitch' => 'versions', 'serverVersionNuclear' => 'reset',
         'network' => 'network', 'networkApply' => 'network',
