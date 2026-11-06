@@ -194,7 +194,9 @@ class AutoUpgradeService
             return;
         }
 
-        $current = $s->game_version ?: $this->versions->current($server)['game_version'];
+        // What the switch itself will compare against, not only the stored value,
+        // which can go stale if the version is changed outside this suite.
+        $current = $this->versions->current($server)['game_version'] ?: $s->game_version;
         if (! $current) {
             $this->hold($s, 'version', 'Can\'t tell which Minecraft version this server runs.', true);
 
@@ -249,7 +251,8 @@ class AutoUpgradeService
 
         $pf = $this->versions->preflight($server, $target, $pick['build']);
         if (! ($pf['can_proceed'] ?? false) || ($pf['direction'] ?? '') !== 'upgrade') {
-            $this->hold($s, 'preflight', "Can't upgrade to {$target}: " . implode(' ', $pf['blockers'] ?? ['it isn\'t an upgrade from this version.']), true, $target);
+            $why = implode(' ', $pf['blockers'] ?? []) ?: "it isn't an upgrade from {$current}.";
+            $this->hold($s, 'preflight', "Can't upgrade to {$target}: {$why}", true, $target);
 
             return;
         }
@@ -454,7 +457,7 @@ class AutoUpgradeService
         }
 
         // Things can change while a backup runs. Each of these backs out cleanly.
-        if (($s->fresh()->game_version ?: $run['from']) !== $run['from']) {
+        if (($this->versions->current($server)['game_version'] ?: $run['from']) !== $run['from']) {
             $this->cancel($s, 'cancelled', 'The upgrade was cancelled: the server\'s version was changed by someone else.');
 
             return;

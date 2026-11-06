@@ -46,6 +46,7 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
     private array $notified = [];
     private array $order = [];
     private ?string $dlPath = null;
+    private ?string $detected = null;
     private array $preflightBlockers = [];
     private bool $updateError = false;
     /** @var array<string, bool> plugin source id => has a build for the target */
@@ -86,7 +87,7 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
         $versions = \Mockery::mock(ServerVersionService::class);
         $versions->shouldReceive('available')->andReturnUsing(fn () => ['supported' => true, 'versions' => $this->versionList]);
         $versions->shouldReceive('paperBuilds')->andReturnUsing(fn ($v) => $this->builds[$v] ?? []);
-        $versions->shouldReceive('current')->andReturn(['loader' => 'paper', 'game_version' => '1.21.4']);
+        $versions->shouldReceive('current')->andReturnUsing(fn () => ['loader' => 'paper', 'game_version' => $this->detected ?? ModManagerSetting::forServer($this->server->uuid)->game_version]);
         $versions->shouldReceive('preflight')->andReturnUsing(fn ($server, $v, $build) => [
             'can_proceed' => $this->preflightBlockers === [], 'blockers' => $this->preflightBlockers, 'direction' => 'upgrade',
             'target' => ['version' => $v, 'build' => $build, 'download_url' => $this->builds[$v][0]['download_url'] ?? null],
@@ -404,6 +405,14 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
     {
         $this->jarsError = new \RuntimeException('wings down');
         $this->assertHeld('plugins');
+    }
+
+    public function test_a_stale_stored_version_does_not_get_in_the_way(): void
+    {
+        $this->optIn(['game_version' => '1.21.3']);
+        $this->detected = '1.21.4';
+        $this->tick();
+        $this->assertSame('1.21.4', $this->setting()->auto_upgrade_run['from']);
     }
 
     public function test_a_failed_preflight_holds(): void
