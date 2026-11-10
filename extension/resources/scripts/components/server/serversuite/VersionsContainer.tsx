@@ -272,7 +272,7 @@ export default () => {
         const label = nukeMode === 'clean_slate' ? 'clean slate' : 'reset world';
         try {
             setNukePhase('working');
-            if (nukeBackup) {
+            if (nukeBackup && !backupsOff) {
                 setNukeMsg('Taking a safety backup…');
                 const { data: bud } = await http.post(`${base}/backups/create`, { name: `Pre-wipe (${label})` });
                 const backupUuid = bud?.data?.created?.uuid;
@@ -736,13 +736,17 @@ export default () => {
                                 </span>
                             </RadioRow>
 
-                            <ToggleRow>
-                                <input type="checkbox" checked={nukeBackup} onChange={(e) => setNukeBackup(e.target.checked)} style={{ marginTop: 3 }} />
-                                <span>
-                                    <strong tw="text-neutral-100">Take a backup first (recommended)</strong>
-                                    <Note style={{ marginTop: 2 }}>Saves a full backup before wiping, so you can restore if this was a mistake.</Note>
-                                </span>
-                            </ToggleRow>
+                            {backupsOff ? (
+                                <Note style={{ marginTop: 14 }}>This server has no backup allocation, so no backup is taken before the wipe.</Note>
+                            ) : (
+                                <ToggleRow>
+                                    <input type="checkbox" checked={nukeBackup} onChange={(e) => setNukeBackup(e.target.checked)} style={{ marginTop: 3 }} />
+                                    <span>
+                                        <strong tw="text-neutral-100">Take a backup first (recommended)</strong>
+                                        <Note style={{ marginTop: 2 }}>Saves a full backup before wiping, so you can restore if this was a mistake.</Note>
+                                    </span>
+                                </ToggleRow>
+                            )}
 
                             <Note style={{ marginTop: 14 }}>Type the server name <strong tw="text-neutral-100">{serverName}</strong> to confirm:</Note>
                             <NameInput value={nukeConfirm} onChange={(e) => setNukeConfirm(e.target.value)} placeholder={serverName} />
