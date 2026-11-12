@@ -23,22 +23,38 @@ interface DnsProvider
     public function verify(): string;
 
     /**
-     * Create the A record for $label, and the SRV record for $srvService
-     * (null = A record only, #83). Rolls back the A record if the SRV record
-     * fails, so a name is never left half-configured.
+     * The types of any records already at $label or its SRV name, whoever
+     * made them (#117). Empty = free.
+     *
+     * @return list<string>
+     *
+     * @throws \RuntimeException when the provider can't be asked
+     */
+    public function existingRecords(string $label, ?string $srvService = '_minecraft._tcp'): array;
+
+    /**
+     * Create the address record for $label (A, AAAA or CNAME, from $target:
+     * an IPv4 or IPv6 address, or a host name, #132) and the SRV record for
+     * $srvService (null = address record only, #83). Rolls back the address
+     * record if the SRV record fails, so a name is never left half-configured.
+     * The address record's id is returned as a_record_id whatever its type.
      *
      * @return array{fqdn: string, a_record_id: string, srv_record_id: ?string}
      *
      * @throws \RuntimeException
      */
-    public function createRecords(string $label, string $ip, int $port, ?string $srvService = '_minecraft._tcp'): array;
+    public function createRecords(string $label, string $target, int $port, ?string $srvService = '_minecraft._tcp'): array;
 
     /**
-     * Point existing records at a new IP / port.
+     * Point existing records at a new address / port. A change of record
+     * type (say IPv4 to a host name) replaces the address record, so its id
+     * can change: store what comes back.
+     *
+     * @return array{a_record_id: ?string, srv_record_id: ?string}
      *
      * @throws \RuntimeException
      */
-    public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $ip, int $port, string $srvService = '_minecraft._tcp'): void;
+    public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $target, int $port, string $srvService = '_minecraft._tcp'): array;
 
     /**
      * What the provider says about the credentials (#139): status is active,
@@ -49,6 +65,10 @@ interface DnsProvider
      */
     public function tokenStatus(): array;
 
-    /** Best-effort cleanup; must not throw on records that are already gone. */
-    public function deleteRecords(?string $aRecordId, ?string $srvRecordId): void;
+    /**
+     * Remove the records. Never throws. True when they are all gone (deleted
+     * now, or already gone); false when any is still there or the provider
+     * couldn't be reached (#117), so the caller can keep its row and retry.
+     */
+    public function deleteRecords(?string $aRecordId, ?string $srvRecordId): bool;
 }

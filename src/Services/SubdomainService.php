@@ -2,6 +2,7 @@
 
 namespace ServerSuite\Services;
 
+use Illuminate\Support\Facades\DB;
 use ServerSuite\Contracts\DnsProvider;
 use ServerSuite\Dns\CloudflareDnsProvider;
 use ServerSuite\Exceptions\DnsAuthException;
@@ -141,12 +142,37 @@ class SubdomainService
             throw new SubdomainException('This server has no primary allocation to point the subdomain at.');
         }
 
+        $srvService = $this->game($server)->srvService;
+
         try {
-            $res = $dns->createRecords($label, $ip, $port, $this->game($server)->srvService);
+            // #117: the zone may already use the name (the admin's shop, wiki,
+            // or records an earlier release couldn't remove). Never add to it.
+            $existing = $dns->existingRecords($label, $srvService);
+        } catch (\Throwable $e) {
+            throw $this->dnsFailure($e, $d);
+        }
+        if ($existing !== []) {
+            throw new SubdomainException("{$label}.{$zone} already has DNS records (" . implode(', ', $existing) . ') in the zone, so it can\'t be claimed. Pick another name.');
+        }
+
+        try {
+            $res = $dns->createRecords($label, $ip, $port, $srvService);
         } catch (\Throwable $e) {
             throw $this->dnsFailure($e, $d);
         }
 
+        try {
+            return $this->saveClaim($server, $dns, $domainId, $label, $zone, $res, $ip, $port, $userId);
+        } catch (\Throwable $e) {
+            // The records are made but nothing in the panel knows them: remove them.
+            $dns->deleteRecords($res['a_record_id'], $res['srv_record_id']);
+            throw $e;
+        }
+    }
+
+    /** @param array{fqdn: string, a_record_id: string, srv_record_id: ?string} $res */
+    private function saveClaim(object $server, DnsProvider $dns, ?int $domainId, string $label, string $zone, array $res, string $ip, int $port, ?int $userId): Subdomain
+    {
         return Subdomain::query()->create([
             'server_uuid'   => $server->uuid,
             'domain_id'     => $domainId,
@@ -162,11 +188,20 @@ class SubdomainService
         ]);
     }
 
-    /** @throws SubdomainException */
+    /**
+     * Remove a subdomain. Its row goes only once the records are gone (#117):
+     * a row deleted while the records stay leaves the name stuck in DNS with
+     * nothing in the panel able to remove it.
+     *
+     * @throws SubdomainException
+     */
     public function release(object $server, int $id): void
     {
         $sub = $this->ownedBy($server, $id);
-        $this->providerFor($sub)?->deleteRecords($sub->a_record_id, $sub->srv_record_id);
+        $dns = $this->providerFor($sub);
+        if ($dns !== null && ! $dns->deleteRecords($sub->a_record_id, $sub->srv_record_id)) {
+            throw new SubdomainException("Couldn't remove the DNS records for {$sub->fqdn} at Cloudflare, so the subdomain is kept. Try again in a few minutes. If it keeps failing, the domain's API token may need replacing.");
+        }
         $sub->delete();
     }
 
@@ -191,12 +226,13 @@ class SubdomainService
         try {
             // A name with a SRV record keeps it; its service is the game's
             // (Minecraft for every record made before #79).
-            $dns->updateRecords($sub->fqdn, $sub->a_record_id, $sub->srv_record_id, $ip, $port, $this->game($server)->srvService ?? '_minecraft._tcp');
+            $ids = $dns->updateRecords($sub->fqdn, $sub->a_record_id, $sub->srv_record_id, $ip, $port, $this->game($server)->srvService ?? '_minecraft._tcp');
         } catch (\Throwable $e) {
             throw $this->dnsFailure($e, $sub->domain_id !== null ? SubdomainDomain::query()->find($sub->domain_id) : null);
         }
 
-        $sub->forceFill(['ip' => $ip, 'port' => $port, 'move_pending_since' => null])->save();
+        // A change of record type (#132) gives the address record a new id.
+        $sub->forceFill(['ip' => $ip, 'port' => $port, 'move_pending_since' => null, 'a_record_id' => $ids['a_record_id'] ?? $sub->a_record_id])->save();
 
         return $sub;
     }
@@ -292,21 +328,45 @@ class SubdomainService
 
     /**
      * Remove a deleted server's records and rows, then forget its own-domain
-     * token so no credential outlives the server (#35). Best effort.
+     * token so no credential outlives the server (#35). A subdomain whose
+     * records couldn't be removed keeps its row (and the own-domain token
+     * when it's on that domain), so serversuite:retry-subdomain-cleanup can
+     * try again later instead of leaving the names stuck in DNS (#117).
      */
     public function cleanupServer(string $serverUuid): void
     {
+        $ownLeft = false;
         foreach (Subdomain::query()->where('server_uuid', $serverUuid)->get() as $sub) {
-            try {
-                $this->providerFor($sub)?->deleteRecords($sub->a_record_id, $sub->srv_record_id);
-            } catch (\Throwable) {
-                // nothing more we can do for a server that's gone
+            $dns = $this->providerFor($sub);
+            if ($dns !== null && ! $dns->deleteRecords($sub->a_record_id, $sub->srv_record_id)) {
+                $ownLeft = $ownLeft || $sub->domain_id === null;
+                logger()->warning('[Server Suite] DNS records of a deleted server could not be removed; kept for serversuite:retry-subdomain-cleanup', ['fqdn' => $sub->fqdn]);
+
+                continue;
             }
             $sub->delete();
         }
 
         ModManagerSetting::query()->where('server_uuid', $serverUuid)
-            ->update(['own_dns_zone' => null, 'own_dns_zone_id' => null, 'own_dns_token' => null, 'subdomain_limit' => 0]);
+            ->update($ownLeft ? ['subdomain_limit' => 0] : ['own_dns_zone' => null, 'own_dns_zone_id' => null, 'own_dns_token' => null, 'subdomain_limit' => 0]);
+    }
+
+    /**
+     * Subdomains of servers that no longer exist (deleted while the plugin
+     * was off, or whose records couldn't be removed then, #117): clean each
+     * as if it had just been deleted. With $dryRun only the count is returned.
+     */
+    public function cleanupOrphans(bool $dryRun = false): int
+    {
+        $orphans = Subdomain::query()->whereNotIn('server_uuid', DB::table('servers')->select('uuid'));
+        $count = (clone $orphans)->count();
+        if (! $dryRun) {
+            foreach ((clone $orphans)->distinct()->pluck('server_uuid') as $uuid) {
+                $this->cleanupServer((string) $uuid);
+            }
+        }
+
+        return $count;
     }
 
     /**

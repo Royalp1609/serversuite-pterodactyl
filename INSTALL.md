@@ -165,8 +165,11 @@ Backend compatibility: 0.17.0+ supports Pterodactyl 1.14 (Laravel 11) and
 
 ## Subdomains (Cloudflare)
 
-Servers can claim `name.yourdomain` from their **Subdomains** tab (an A record
-for the server's IP plus a `_minecraft._tcp` SRV record for the port).
+Servers can claim `name.yourdomain` from their **Subdomains** tab: a record for
+the server's address (A for IPv4, AAAA for IPv6, or a CNAME when the
+allocation's alias is a host name) plus a `_minecraft._tcp` SRV record for the
+port. A name that already has any record in the zone (yours or anyone's) can't
+be claimed.
 
 1. In Cloudflare, create an API token with **Zone → DNS → Edit** for the domain
    only (My Profile → API Tokens → Create Token → "Edit zone DNS"). Never use
@@ -179,7 +182,9 @@ for the server's IP plus a `_minecraft._tcp` SRV record for the port).
 
 Owners can also add their own Cloudflare domain and token on the tab; those
 subdomains count towards the same allowance. Records are deleted when a server
-is deleted, along with the server's own-domain token. When a server's primary
+is deleted, along with the server's own-domain token. If Cloudflare doesn't
+remove them then, the subdomains are kept and `serversuite:retry-subdomain-cleanup`
+(hourly) tries again. When a server's primary
 allocation changes, its records move within a minute of the server starting on
 the new address (`serversuite:move-subdomains`, run every minute by the
 scheduler), so players aren't sent to a port the game isn't on yet. **Move now**
