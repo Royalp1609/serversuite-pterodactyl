@@ -2409,6 +2409,13 @@ class ModManagerController extends Controller
             abort(403, 'You do not have permission to do this on this server (needs ' . implode(', ', PanelPermissions::required($endpoint)) . ').');
         }
 
+        // Suspended, or node in maintenance (#116): refused for everyone,
+        // with the panel's own 409 and wording, as its client API does.
+        $state = \ServerSuite\Support\ServerState::blocker($server);
+        if ($state !== null) {
+            abort(409, $state);
+        }
+
         // Minecraft-only endpoints on other games (#78): the tabs are hidden,
         // and the server refuses too.
         $blocker = \ServerSuite\Support\GameGuard::endpointBlocker($server, $endpoint);
