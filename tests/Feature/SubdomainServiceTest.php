@@ -46,7 +46,10 @@ function fakeCloudflare(): void
             return Http::response(['success' => false, 'errors' => [['code' => 0, 'message' => 'Service unavailable']]], 503);
         }
         if ($authFails && ! str_ends_with($url, '/user/tokens/verify')) {
-            return Http::response(['success' => false, 'errors' => [['code' => 10000, 'message' => 'Authentication error']]], 403);
+            // What Cloudflare returns for an expired token, and for one that isn't a token at all.
+            return $authFails === 'malformed'
+                ? Http::response(['success' => false, 'errors' => [['code' => 9106, 'message' => 'Authentication failed (status: 400)']]], 400)
+                : Http::response(['success' => false, 'errors' => [['code' => 10000, 'message' => 'Authentication error']]], 403);
         }
         if (str_ends_with($url, '/user/tokens/verify')) {
             return match (true) {
@@ -471,6 +474,16 @@ it('tells the owner to ask an admin when the panel token is rejected, and record
     expect($d->fresh()->token_status)->toBe('expired')
         ->and(Subdomain::count())->toBe(0);
     Queue::assertPushed(SendNotificationJob::class, 1);
+});
+
+it('treats a malformed token (HTTP 400, code 9106) as rejected (#139)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $GLOBALS['cfAuthFails'] = 'malformed';
+
+    expect(fn () => cfService()->claim(cfServer(), 'smp', $d->id))
+        ->toThrow(SubdomainException::class, 'Ask a panel admin to replace the token');
+    expect($d->fresh()->token_status)->toBe('invalid');
 });
 
 it("tells the owner to replace their own domain's token when Cloudflare rejects it (#139)", function () {

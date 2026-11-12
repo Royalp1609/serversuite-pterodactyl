@@ -198,7 +198,7 @@ class CloudflareDnsProvider implements DnsProvider
     private static function isAuthFailure(\Illuminate\Http\Client\Response $res): bool
     {
         return in_array($res->status(), [401, 403], true)
-            || in_array((int) $res->json('errors.0.code'), [1000, 6003, 6111, 9109, 10000], true);
+            || in_array((int) $res->json('errors.0.code'), [1000, 6003, 6111, 9106, 9109, 10000], true);
     }
 
     private static function error(\Illuminate\Http\Client\Response $res): string
