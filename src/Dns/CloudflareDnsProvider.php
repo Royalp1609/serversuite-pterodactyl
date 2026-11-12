@@ -5,6 +5,7 @@ namespace ServerSuite\Dns;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use ServerSuite\Contracts\DnsProvider;
+use ServerSuite\Exceptions\DnsAuthException;
 
 /**
  * Cloudflare DNS for one zone. Ported from the Pelican plugin.
@@ -47,10 +48,9 @@ class CloudflareDnsProvider implements DnsProvider
         $id = $res->json('result.0.id');
 
         if (! $res->successful() || ! $id) {
-            throw new \RuntimeException(
-                "Cloudflare couldn't find the zone {$this->zone} with this token. "
-                . 'Check the zone name and that the token has Zone > DNS > Edit for it.'
-            );
+            $msg = "Cloudflare couldn't find the zone {$this->zone} with this token. "
+                . 'Check the zone name and that the token has Zone > DNS > Edit for it.';
+            throw self::isAuthFailure($res) ? new DnsAuthException($msg) : new \RuntimeException($msg);
         }
 
         return $this->zoneId = (string) $id;
@@ -64,7 +64,7 @@ class CloudflareDnsProvider implements DnsProvider
 
         $a = $this->http()->post($base, $this->aRecord($fqdn, $ip));
         if (! $a->successful() || ! $a->json('success')) {
-            throw new \RuntimeException('Cloudflare A record failed: ' . self::error($a));
+            throw self::failure('Cloudflare A record failed', $a);
         }
         $aId = (string) $a->json('result.id');
 
@@ -76,7 +76,7 @@ class CloudflareDnsProvider implements DnsProvider
         if (! $srv->successful() || ! $srv->json('success')) {
             // Roll back rather than leave a half-configured name.
             $this->deleteRecords($aId, null);
-            throw new \RuntimeException('Cloudflare SRV record failed: ' . self::error($srv));
+            throw self::failure('Cloudflare SRV record failed', $srv);
         }
 
         return ['fqdn' => $fqdn, 'a_record_id' => $aId, 'srv_record_id' => (string) $srv->json('result.id')];
@@ -89,16 +89,43 @@ class CloudflareDnsProvider implements DnsProvider
         if ($aRecordId) {
             $res = $this->http()->patch("{$base}/{$aRecordId}", $this->aRecord($fqdn, $ip));
             if (! $res->successful() || ! $res->json('success')) {
-                throw new \RuntimeException('Cloudflare A record update failed: ' . self::error($res));
+                throw self::failure('Cloudflare A record update failed', $res);
             }
         }
 
         if ($srvRecordId) {
             $res = $this->http()->patch("{$base}/{$srvRecordId}", $this->srvRecord($fqdn, $port, $srvService));
             if (! $res->successful() || ! $res->json('success')) {
-                throw new \RuntimeException('Cloudflare SRV record update failed: ' . self::error($res));
+                throw self::failure('Cloudflare SRV record update failed', $res);
             }
         }
+    }
+
+    public function tokenStatus(): array
+    {
+        try {
+            $v = $this->http()->get(self::API . '/user/tokens/verify');
+            $status = $v->successful() && $v->json('success') && is_string($v->json('result.status')) ? (string) $v->json('result.status') : null;
+            $expires = $status !== null ? ($v->json('result.expires_on') ?: null) : null;
+            if ($status !== null && $status !== 'active') {
+                return ['status' => $status, 'expires_on' => $expires];
+            }
+
+            // Also read the zone: an active token can still lack access to
+            // it, and account-owned tokens can't use /user/tokens/verify.
+            $z = $this->http()->get(self::API . '/zones', ['name' => $this->zone, 'per_page' => 1]);
+        } catch (\Throwable) {
+            return ['status' => 'unknown', 'expires_on' => null];
+        }
+
+        if ($z->successful() && $z->json('result.0.id')) {
+            return ['status' => 'active', 'expires_on' => $expires];
+        }
+        if ($z->successful() || self::isAuthFailure($z) || self::isAuthFailure($v)) {
+            return ['status' => 'invalid', 'expires_on' => null];
+        }
+
+        return ['status' => 'unknown', 'expires_on' => null];
     }
 
     public function deleteRecords(?string $aRecordId, ?string $srvRecordId): void
@@ -158,6 +185,20 @@ class CloudflareDnsProvider implements DnsProvider
             'data' => ['priority' => 0, 'weight' => 5, 'port' => $port, 'target' => $fqdn],
             'ttl' => 300, 'comment' => self::COMMENT,
         ];
+    }
+
+    private static function failure(string $what, \Illuminate\Http\Client\Response $res): \RuntimeException
+    {
+        $msg = $what . ': ' . self::error($res);
+
+        return self::isAuthFailure($res) ? new DnsAuthException($msg) : new \RuntimeException($msg);
+    }
+
+    /** 401/403, or Cloudflare's codes for a bad, expired or unauthorised token. */
+    private static function isAuthFailure(\Illuminate\Http\Client\Response $res): bool
+    {
+        return in_array($res->status(), [401, 403], true)
+            || in_array((int) $res->json('errors.0.code'), [1000, 6003, 6111, 9109, 10000], true);
     }
 
     private static function error(\Illuminate\Http\Client\Response $res): string

@@ -66,6 +66,24 @@ class Notifier
     }
 
     /**
+     * A message for the panel admin, sent to the admin's default targets
+     * (#139: DNS token warnings). The fingerprint is sent at most once a day.
+     * Never throws.
+     */
+    public function notifyAdmin(string $title, string $body, string $level, string $fingerprint): void
+    {
+        try {
+            $targets = $this->defaults()['targets'];
+            if ($targets === [] || ! Cache::add('serversuite:notify:admin:' . sha1($fingerprint), 1, now()->addDay())) {
+                return;
+            }
+            SendNotificationJob::dispatch($targets, $this->message('', $title, $body, $level), false);
+        } catch (\Throwable $e) {
+            logger()->warning('[Server Suite] admin notification not queued', ['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
      * What a server sends to: its own settings, else the admin default.
      *
      * @return array{targets: list<array<string, string>>, events: array<string, bool>, own: bool}

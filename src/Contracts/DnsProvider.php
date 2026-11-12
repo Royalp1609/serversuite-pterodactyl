@@ -40,6 +40,15 @@ interface DnsProvider
      */
     public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $ip, int $port, string $srvService = '_minecraft._tcp'): void;
 
+    /**
+     * What the provider says about the credentials (#139): status is active,
+     * expired, disabled, invalid (rejected, or can't see the zone) or unknown
+     * (provider unreachable). Never throws.
+     *
+     * @return array{status: string, expires_on: ?string}
+     */
+    public function tokenStatus(): array;
+
     /** Best-effort cleanup; must not throw on records that are already gone. */
     public function deleteRecords(?string $aRecordId, ?string $srvRecordId): void;
 }

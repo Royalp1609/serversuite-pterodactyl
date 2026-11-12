@@ -276,6 +276,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 MoveSubdomainsCommand::class,
                 \ServerSuite\Console\Commands\WatchCrashesCommand::class,
                 \ServerSuite\Console\Commands\AutoUpgradesCommand::class,
+                \ServerSuite\Console\Commands\CheckDnsTokensCommand::class,
             ]);
         }
     }
@@ -343,6 +344,12 @@ class ModManagerServiceProvider extends ServiceProvider
             // allocation (#37). Cheap when nothing is waiting.
             $schedule->command(MoveSubdomainsCommand::class)
                 ->everyMinute()
+                ->withoutOverlapping();
+
+            // Admin domains' Cloudflare tokens: warn before they expire and
+            // after they stop working (#139). Two requests per domain.
+            $schedule->command(\ServerSuite\Console\Commands\CheckDnsTokensCommand::class)
+                ->dailyAt('06:10')
                 ->withoutOverlapping();
 
             // Crash after a mod change, for servers with notifications (#26).

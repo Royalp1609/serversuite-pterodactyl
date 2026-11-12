@@ -281,15 +281,38 @@
                     <div class="alert alert-danger">{{ request()->query('subdomains_error') }}</div>
                 @endif
 
+                @foreach ($ssDomains as $d)
+                    @php($ssWarn = \ServerSuite\Services\SubdomainService::tokenWarning($d))
+                    @if ($ssWarn)
+                        <div class="alert alert-{{ $ssWarn['level'] === 'error' ? 'danger' : 'warning' }}">
+                            <strong>{{ $ssWarn['title'] }}.</strong> {{ $ssWarn['body'] }}
+                        </div>
+                    @endif
+                @endforeach
+
                 <h4>Domains offered to servers</h4>
                 <table class="table table-condensed">
-                    <thead><tr><th>Domain</th><th>Subdomains</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>Domain</th><th>Subdomains</th><th>Status</th><th>Token</th><th></th></tr></thead>
                     <tbody>
                     @forelse ($ssDomains as $d)
                         <tr>
                             <td><code>{{ $d->zone }}</code></td>
                             <td>{{ $ssDomainUse[$d->id] ?? 0 }}</td>
                             <td>{!! $d->enabled ? '<span class="label label-success">offered</span>' : '<span class="label label-default">disabled</span>' !!}</td>
+                            @php($ssWarn = \ServerSuite\Services\SubdomainService::tokenWarning($d))
+                            <td>
+                                @if ($ssWarn)
+                                    <span class="label label-{{ $ssWarn['level'] === 'error' ? 'danger' : 'warning' }}">{{ $ssWarn['short'] }}</span>
+                                @elseif ($d->token_status === 'active')
+                                    <span class="label label-success">OK</span>
+                                    <span class="text-muted small">{{ $d->token_expires_at ? 'expires ' . $d->token_expires_at->format('Y-m-d') : 'no expiry' }}</span>
+                                @else
+                                    <span class="text-muted small">not checked yet</span>
+                                @endif
+                                @if ($d->token_checked_at)
+                                    <br><span class="text-muted small">checked {{ $d->token_checked_at->diffForHumans() }}</span>
+                                @endif
+                            </td>
                             <td class="text-right">
                                 <form method="POST" action="/extensions/serversuite/admin/domains/{{ $d->id }}/toggle" style="display:inline-block;">
                                     @csrf
@@ -304,7 +327,7 @@
                             </td>
                         </tr>
                         <tr id="ss-token-{{ $d->id }}" class="collapse">
-                            <td colspan="4">
+                            <td colspan="5">
                                 <form method="POST" action="/extensions/serversuite/admin/domains/{{ $d->id }}/token" class="form-inline" autocomplete="off">
                                     @csrf
                                     <input type="password" name="token" class="form-control input-sm" placeholder="New Cloudflare API token for {{ $d->zone }}" autocomplete="new-password" required style="min-width:280px;">
@@ -314,7 +337,7 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="4" class="text-muted">No domains yet.</td></tr>
+                        <tr><td colspan="5" class="text-muted">No domains yet.</td></tr>
                     @endforelse
                     </tbody>
                 </table>

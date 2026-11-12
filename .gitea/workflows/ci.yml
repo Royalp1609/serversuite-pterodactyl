@@ -105,7 +105,7 @@ jobs:
         run: |
           php artisan package:discover
           php artisan list --raw > "$RUNNER_TEMP/commands.txt"
-          for c in serversuite:check-updates serversuite:rotate-backups serversuite:move-subdomains; do
+          for c in serversuite:check-updates serversuite:rotate-backups serversuite:move-subdomains serversuite:check-dns-tokens; do
             grep -q "^$c " "$RUNNER_TEMP/commands.txt" || { echo "::error::$c not registered"; exit 1; }
           done
       - name: Server Suite permission groups are grantable (#17), activity labels merge (#19), billing API routes (#38)

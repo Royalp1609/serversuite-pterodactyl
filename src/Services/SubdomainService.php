@@ -4,6 +4,7 @@ namespace ServerSuite\Services;
 
 use ServerSuite\Contracts\DnsProvider;
 use ServerSuite\Dns\CloudflareDnsProvider;
+use ServerSuite\Exceptions\DnsAuthException;
 use ServerSuite\Exceptions\SubdomainException;
 use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Models\Subdomain;
@@ -24,6 +25,9 @@ use ServerSuite\Models\SubdomainDomain;
  */
 class SubdomainService
 {
+    /** Warn this many days before an admin domain's token expires (#139). */
+    public const TOKEN_WARN_DAYS = 14;
+
     /** @var (callable(string, string, ?string): DnsProvider)|null */
     private $factory;
 
@@ -116,6 +120,7 @@ class SubdomainService
                 throw new SubdomainException('Set up your own domain first.');
             }
             $domainId = null;
+            $d = null;
             $dns = $this->provider($setting->own_dns_token, $setting->own_dns_zone, $setting->own_dns_zone_id);
         } else {
             $d = SubdomainDomain::query()->where('enabled', true)->find((int) $domain);
@@ -139,7 +144,7 @@ class SubdomainService
         try {
             $res = $dns->createRecords($label, $ip, $port, $this->game($server)->srvService);
         } catch (\Throwable $e) {
-            throw new SubdomainException($e->getMessage(), previous: $e);
+            throw $this->dnsFailure($e, $d);
         }
 
         return Subdomain::query()->create([
@@ -188,7 +193,7 @@ class SubdomainService
             // (Minecraft for every record made before #79).
             $dns->updateRecords($sub->fqdn, $sub->a_record_id, $sub->srv_record_id, $ip, $port, $this->game($server)->srvService ?? '_minecraft._tcp');
         } catch (\Throwable $e) {
-            throw new SubdomainException($e->getMessage(), previous: $e);
+            throw $this->dnsFailure($e, $sub->domain_id !== null ? SubdomainDomain::query()->find($sub->domain_id) : null);
         }
 
         $sub->forceFill(['ip' => $ip, 'port' => $port, 'move_pending_since' => null])->save();
@@ -358,9 +363,11 @@ class SubdomainService
             throw new SubdomainException("{$zone} is already listed.");
         }
 
-        return SubdomainDomain::query()->create([
+        $d = SubdomainDomain::query()->create([
             'zone' => $zone, 'zone_id' => $this->verified($token, $zone), 'token' => $token, 'enabled' => true,
         ]);
+
+        return $this->checkDomainToken($d);
     }
 
     /**
@@ -376,9 +383,122 @@ class SubdomainService
         $inUse = Subdomain::query()->where('domain_id', $d->id)->exists();
 
         [$token, $zoneId] = $this->replacementToken($token, $d->zone, $d->zone_id, $inUse);
-        $d->forceFill(['token' => $token, 'zone_id' => $zoneId])->save();
+        $d->forceFill(['token' => $token, 'zone_id' => $zoneId, 'token_status' => null, 'token_expires_at' => null, 'token_warned' => null])->save();
+
+        return $this->checkDomainToken($d);
+    }
+
+    /**
+     * Check every admin domain's token with Cloudflare and warn the admin
+     * once per problem (#139). Run daily; returns the domains that need a
+     * new token.
+     *
+     * @return list<SubdomainDomain>
+     */
+    public function checkDomainTokens(): array
+    {
+        $out = [];
+        foreach (SubdomainDomain::query()->orderBy('zone')->get() as $d) {
+            if (self::tokenWarning($this->checkDomainToken($d)) !== null) {
+                $out[] = $d;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Store what Cloudflare says about one admin domain's token, and notify
+     * the admin's default targets when a new warning appears. Never throws;
+     * an unreachable Cloudflare leaves the stored state as it was.
+     */
+    public function checkDomainToken(SubdomainDomain $d): SubdomainDomain
+    {
+        try {
+            $st = $this->provider($d->token, $d->zone, $d->zone_id)->tokenStatus();
+            if ($st['status'] === 'unknown') {
+                return $d;
+            }
+
+            $d->forceFill([
+                'token_status'     => $st['status'],
+                'token_expires_at' => $st['expires_on'] !== null ? \Illuminate\Support\Carbon::parse($st['expires_on']) : null,
+                'token_checked_at' => now(),
+            ]);
+            $warn = self::tokenWarning($d);
+            if ($warn !== null && $warn['key'] !== $d->token_warned) {
+                app(Notifier::class)->notifyAdmin($warn['title'], $warn['body'], $warn['level'], "dns-token:{$d->zone}:{$warn['key']}");
+            }
+            $d->forceFill(['token_warned' => $warn['key'] ?? null])->save();
+        } catch (\Throwable $e) {
+            logger()->warning('[Server Suite] DNS token check failed', ['zone' => $d->zone, 'error' => $e->getMessage()]);
+        }
 
         return $d;
+    }
+
+    /**
+     * What's wrong with an admin domain's token, from the last check: null
+     * when nothing is. `key` changes with each new problem (a new expiry date
+     * is a new warning).
+     *
+     * @return array{key: string, level: string, title: string, short: string, body: string}|null
+     */
+    public static function tokenWarning(SubdomainDomain $d): ?array
+    {
+        $fix = 'Create a new Cloudflare API token (Zone > DNS > Edit for this domain) and use "Replace token" under Subdomains on the Server Suite admin page.';
+        $expires = $d->token_expires_at;
+        $status = $d->token_status;
+        if ($status === 'active' && $expires !== null && $expires->getTimestamp() <= time()) {
+            $status = 'expired';
+        }
+
+        $broken = ['expired' => 'has expired', 'disabled' => 'is disabled in Cloudflare', 'invalid' => 'was rejected by Cloudflare'];
+        if (isset($broken[$status])) {
+            return [
+                'key'   => $status,
+                'level' => 'error',
+                'title' => "The Cloudflare token for {$d->zone} {$broken[$status]}",
+                'short' => 'Token ' . $broken[$status],
+                'body'  => "New subdomains and moves on {$d->zone} fail until the token is replaced. Existing records keep resolving. {$fix}",
+            ];
+        }
+
+        if ($status === 'active' && $expires !== null) {
+            $days = intdiv($expires->getTimestamp() - time(), 86400);
+            if ($days < self::TOKEN_WARN_DAYS) {
+                $when = $days < 1 ? 'today' : ($days === 1 ? 'in 1 day' : "in {$days} days");
+
+                return [
+                    'key'   => 'expiring:' . $expires->format('Y-m-d'),
+                    'level' => 'warn',
+                    'title' => "The Cloudflare token for {$d->zone} expires {$when} ({$expires->format('Y-m-d')})",
+                    'short' => "Token expires {$when}",
+                    'body'  => "After that, new subdomains and moves on {$d->zone} fail. {$fix}",
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * A DNS error for the server owner. A rejected token can only be fixed
+     * by whoever owns it, so say who (#139) instead of passing on
+     * Cloudflare's "Authentication error".
+     */
+    private function dnsFailure(\Throwable $e, ?SubdomainDomain $d): SubdomainException
+    {
+        if (! $e instanceof DnsAuthException) {
+            return new SubdomainException($e->getMessage(), previous: $e);
+        }
+        if ($d === null) {
+            return new SubdomainException("Cloudflare rejected your own domain's API token (it may have expired). Enter a new token for your domain, then try again.", previous: $e);
+        }
+
+        $this->checkDomainToken($d);
+
+        return new SubdomainException("DNS changes on {$d->zone} are failing because Cloudflare rejected the panel's token for it (it may have expired). Ask a panel admin to replace the token.", previous: $e);
     }
 
     /**
