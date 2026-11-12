@@ -23,6 +23,10 @@ beforeEach(function () {
         if (str_contains($r->url(), '/zones?')) {
             return Http::response(['success' => true, 'result' => [['id' => 'zone-1']]]);
         }
+        // A name lookup (#117): the name is free.
+        if ($r->method() === 'GET' && str_ends_with((string) parse_url($r->url(), PHP_URL_PATH), '/dns_records')) {
+            return Http::response(['success' => true, 'result' => []]);
+        }
 
         return Http::response(['success' => true, 'result' => ['id' => strtolower((string) ($r['type'] ?? 'x')) . '-' . $GLOBALS['hookCalls']]]);
     });

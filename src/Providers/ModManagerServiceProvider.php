@@ -274,6 +274,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 CheckUpdatesCommand::class,
                 RotateBackupsCommand::class,
                 MoveSubdomainsCommand::class,
+                \ServerSuite\Console\Commands\RetrySubdomainCleanupCommand::class,
                 \ServerSuite\Console\Commands\WatchCrashesCommand::class,
                 \ServerSuite\Console\Commands\AutoUpgradesCommand::class,
                 \ServerSuite\Console\Commands\CheckDnsTokensCommand::class,
@@ -344,6 +345,11 @@ class ModManagerServiceProvider extends ServiceProvider
             // allocation (#37). Cheap when nothing is waiting.
             $schedule->command(MoveSubdomainsCommand::class)
                 ->everyMinute()
+                ->withoutOverlapping();
+
+            // Records of deleted servers Cloudflare didn't remove then (#117).
+            $schedule->command(\ServerSuite\Console\Commands\RetrySubdomainCleanupCommand::class)
+                ->hourlyAt(23)
                 ->withoutOverlapping();
 
             // Admin domains' Cloudflare tokens: warn before they expire and

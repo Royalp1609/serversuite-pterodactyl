@@ -35,6 +35,9 @@ function fakeCloudflare(): void
     $GLOBALS['cfSrvFails'] = false;
     $GLOBALS['cfVerify'] = null;
     $GLOBALS['cfAuthFails'] = false;
+    // Records in the fake zone (#117/#132): id => [type, name]; and a switch for failing DELETEs.
+    $GLOBALS['cfRecords'] = [];
+    $GLOBALS['cfDeleteFails'] = false;
     Http::fake(function (Request $r) use (&$n) {
         $srvFails = $GLOBALS['cfSrvFails'];
         $url = $r->url();
@@ -67,13 +70,45 @@ function fakeCloudflare(): void
 
             return Http::response(['success' => true, 'result' => [['id' => 'zone-' . $id]]]);
         }
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        if ($r->method() === 'GET' && str_ends_with($path, '/dns_records')) {
+            parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+            $rows = array_values(array_filter($GLOBALS['cfRecords'], fn ($rec) => $rec[1] === ($q['name'] ?? null)));
+
+            return Http::response(['success' => true, 'result' => array_map(fn ($rec) => ['type' => $rec[0], 'name' => $rec[1]], $rows)]);
+        }
+        $id = preg_match('#/dns_records/([^/?]+)$#', $path, $m) ? $m[1] : null;
+        if ($r->method() === 'DELETE' && $id !== null && $GLOBALS['cfDeleteFails']) {
+            return Http::response(['success' => false, 'errors' => [['code' => 0, 'message' => 'Internal error']]], 500);
+        }
+        if ($id !== null && $r->method() !== 'POST' && ! isset($GLOBALS['cfRecords'][$id])) {
+            return Http::response(['success' => false, 'errors' => [['code' => 81044, 'message' => 'Record does not exist.']]], 404);
+        }
+        if ($r->method() === 'GET' && $id !== null) {
+            return Http::response(['success' => true, 'result' => ['id' => $id, 'type' => $GLOBALS['cfRecords'][$id][0], 'name' => $GLOBALS['cfRecords'][$id][1]]]);
+        }
+        if ($r->method() === 'DELETE' && $id !== null) {
+            unset($GLOBALS['cfRecords'][$id]);
+
+            return Http::response(['success' => true, 'result' => ['id' => $id]]);
+        }
+        if ($r->method() === 'PATCH' && $id !== null) {
+            $GLOBALS['cfRecords'][$id] = [$r['type'], $r['name']];
+
+            return Http::response(['success' => true, 'result' => ['id' => $id]]);
+        }
         if ($r->method() === 'POST') {
             $type = $r['type'];
             if ($type === 'SRV' && $srvFails) {
                 return Http::response(['success' => false, 'errors' => [['message' => 'SRV rejected']]], 400);
             }
+            if ($type === 'A' && filter_var($r['content'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+                return Http::response(['success' => false, 'errors' => [['code' => 9005, 'message' => 'Content for A record must be a valid IPv4 address.']]], 400);
+            }
+            $newId = strtolower($type) . '-' . (++$n);
+            $GLOBALS['cfRecords'][$newId] = [$type, $r['name']];
 
-            return Http::response(['success' => true, 'result' => ['id' => strtolower($type) . '-' . (++$n)]]);
+            return Http::response(['success' => true, 'result' => ['id' => $newId]]);
         }
 
         return Http::response(['success' => true, 'result' => ['id' => 'x']]);
@@ -303,7 +338,7 @@ it("removes a deleted server's records and rows", function () {
     cfService()->cleanupServer('srv-1');
 
     expect(Subdomain::count())->toBe(0);
-    Http::assertSentCount(1 + 2 + 4 + 4); // zone lookup, token check (#139), 2x(A+SRV) create, 2x(A+SRV) delete
+    Http::assertSentCount(1 + 2 + 4 + 4 + 4); // zone lookup, token check (#139), 2x(name + SRV name) lookup (#117), 2x(A+SRV) create, 2x(A+SRV) delete
 });
 
 it("forgets a deleted server's own domain, token and allowance (#35)", function () {
@@ -512,4 +547,142 @@ it('runs the daily token check from the scheduler command (#139)', function () {
     $GLOBALS['cfVerify'] = ['status' => 'expired'];
 
     $this->artisan('serversuite:check-dns-tokens')->expectsOutputToContain('play.example.com has expired')->assertSuccessful();
+});
+
+// ---- #117: names already in the zone, deletes that didn't happen ----------
+
+it('does not claim a name the zone already uses (#117)', function () {
+    $d = panelDomain();
+    allow('srv-1', 2);
+    $GLOBALS['cfRecords']['admin-a'] = ['A', 'shop.play.example.com'];
+    $GLOBALS['cfRecords']['admin-srv'] = ['SRV', '_minecraft._tcp.wiki.play.example.com'];
+
+    expect(fn () => cfService()->claim(cfServer(), 'shop', $d->id))->toThrow(SubdomainException::class, 'shop.play.example.com already has DNS records (A)')
+        ->and(fn () => cfService()->claim(cfServer(), 'wiki', $d->id))->toThrow(SubdomainException::class, 'wiki.play.example.com already has DNS records (SRV)');
+    expect(Subdomain::count())->toBe(0);
+    Http::assertNotSent(fn (Request $r) => $r->method() === 'POST');
+
+    expect(cfService()->claim(cfServer(), 'free', $d->id)->fqdn)->toBe('free.play.example.com');
+});
+
+it('refuses the claim when the name check fails (#117)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $GLOBALS['cfVerify'] = 'down';
+
+    expect(fn () => cfService()->claim(cfServer(), 'smp', $d->id))->toThrow(SubdomainException::class, "Couldn't check smp.play.example.com");
+    Http::assertNotSent(fn (Request $r) => $r->method() === 'POST');
+});
+
+it('keeps the subdomain when Cloudflare does not delete its records (#117)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(cfServer(), 'smp', $d->id);
+
+    $GLOBALS['cfDeleteFails'] = true;
+    expect(fn () => cfService()->release(cfServer(), $sub->id))->toThrow(SubdomainException::class, "Couldn't remove the DNS records for smp.play.example.com");
+    expect(Subdomain::count())->toBe(1);
+
+    $GLOBALS['cfDeleteFails'] = false;
+    cfService()->release(cfServer(), $sub->id);
+    expect(Subdomain::count())->toBe(0)->and($GLOBALS['cfRecords'])->toBe([]);
+});
+
+it('releases records that were already removed by hand (#117)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(cfServer(), 'smp', $d->id);
+    $GLOBALS['cfRecords'] = [];
+
+    cfService()->release(cfServer(), $sub->id);
+    expect(Subdomain::count())->toBe(0);
+});
+
+it("retries a deleted server's records that could not be removed (#117)", function () {
+    panelTables();
+    $d = panelDomain();
+    allow('srv-1', 2);
+    cfService()->saveOwnDomain(cfServer(), 'own.example', 'own-token');
+    cfService()->claim(cfServer(), 'one', $d->id);
+    cfService()->claim(cfServer(), 'two', 'own');
+
+    $GLOBALS['cfDeleteFails'] = true;
+    cfService()->cleanupServer('srv-1');
+    expect(Subdomain::count())->toBe(2)
+        ->and(ModManagerSetting::forServer('srv-1')->own_dns_token)->not->toBeNull();
+
+    $GLOBALS['cfDeleteFails'] = false;
+    $this->artisan('serversuite:retry-subdomain-cleanup')->assertSuccessful();
+    expect(Subdomain::count())->toBe(0)
+        ->and($GLOBALS['cfRecords'])->toBe([])
+        ->and(ModManagerSetting::forServer('srv-1')->own_dns_token)->toBeNull();
+});
+
+it('removes the records when saving the claim fails (#117)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    Subdomain::creating(fn () => throw new RuntimeException('database went away'));
+
+    try {
+        expect(fn () => cfService()->claim(cfServer(), 'smp', $d->id))->toThrow(RuntimeException::class, 'database went away');
+    } finally {
+        Subdomain::flushEventListeners();
+    }
+    expect($GLOBALS['cfRecords'])->toBe([]);
+});
+
+// ---- #132: IPv6 and host name aliases -------------------------------------
+
+it('gives an IPv6 allocation an AAAA record (#132)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+
+    expect(cfService()->claim(cfServer(ip: '2001:db8::10'), 'smp', $d->id)->ip)->toBe('2001:db8::10');
+    Http::assertSent(fn (Request $r) => $r->method() === 'POST' && $r['type'] === 'AAAA' && $r['content'] === '2001:db8::10' && $r['proxied'] === false);
+    Http::assertSent(fn (Request $r) => $r->method() === 'POST' && $r['type'] === 'SRV' && $r['data']['target'] === 'smp.play.example.com');
+});
+
+it('gives a host name alias a CNAME, and the SRV record targets it (#132)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+
+    cfService()->claim(cfServer(alias: 'Node1.Host.net.'), 'smp', $d->id);
+    Http::assertSent(fn (Request $r) => $r->method() === 'POST' && $r['type'] === 'CNAME' && $r['name'] === 'smp.play.example.com' && $r['content'] === 'node1.host.net' && $r['proxied'] === false);
+    Http::assertSent(fn (Request $r) => $r->method() === 'POST' && $r['type'] === 'SRV' && $r['data']['target'] === 'node1.host.net');
+});
+
+it('refuses an alias that is neither an IP nor a host name before any record (#132)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+
+    expect(fn () => cfService()->claim(cfServer(alias: 'not a host'), 'smp', $d->id))->toThrow(SubdomainException::class, 'is not an IP address or a host name');
+    Http::assertNotSent(fn (Request $r) => $r->method() === 'POST');
+});
+
+it('replaces the A record with a CNAME when the server moves to a host name (#132)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(cfServer(), 'smp', $d->id);
+
+    cfService()->repoint(cfServer(alias: 'node1.host.net', port: 25570), $sub->id);
+    $sub->refresh();
+    expect($GLOBALS['cfRecords'])->not->toHaveKey('a-1')
+        ->and($GLOBALS['cfRecords'][$sub->a_record_id])->toBe(['CNAME', 'smp.play.example.com'])
+        ->and([$sub->ip, $sub->port])->toBe(['node1.host.net', 25570]);
+    Http::assertSent(fn (Request $r) => $r->method() === 'PATCH' && str_ends_with($r->url(), '/srv-2') && $r['data']['target'] === 'node1.host.net');
+
+    $id = $sub->a_record_id;
+    cfService()->repoint(cfServer(alias: 'node2.host.net', port: 25570), $sub->id);
+    expect($sub->fresh()->a_record_id)->toBe($id);
+});
+
+it('recreates an address record removed by hand on the next move (#132)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(cfServer(), 'smp', $d->id);
+    unset($GLOBALS['cfRecords']['a-1']);
+
+    cfService()->repoint(cfServer(ip: '198.51.100.7'), $sub->id);
+    $id = $sub->fresh()->a_record_id;
+    expect($id)->not->toBe('a-1')->and($GLOBALS['cfRecords'][$id])->toBe(['A', 'smp.play.example.com']);
 });
