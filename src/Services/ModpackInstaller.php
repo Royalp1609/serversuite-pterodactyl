@@ -127,7 +127,7 @@ class ModpackInstaller
 
         if (empty($state['backup_uuid'])) {
             $name = ($this->isRemoval($pack) ? "Pre-remove \u{2192} " : "Pre-modpack \u{2192} ") . ($pack->target['name'] ?? 'pack') . ' ' . ($pack->target['version_number'] ?? '');
-            $res = $this->rotation->backupNow($pack->server_uuid, mb_substr($name, 0, 180));
+            $res = $this->rotation->backupNow($pack->server_uuid, mb_substr($name, 0, 180), (bool) ($state['may_evict'] ?? true));
 
             if ($res->isRotated() && $res->created !== null) {
                 $pack->mergeState(['backup_uuid' => $res->created->uuid]);

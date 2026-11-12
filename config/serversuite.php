@@ -188,6 +188,9 @@ return [
         // Allowed cadences (hours). Every value is well above the throttle
         // window, so a server admin can never pick an unsafe interval.
         'interval_presets'       => [6, 12, 24, 48, 168],
+        // A backup still "running" after this many hours never finished
+        // (Wings restarted, the node went away) and stops blocking rotation.
+        'stale_after_hours'      => (int) env('MOD_MANAGER_BACKUP_STALE_HOURS', 24),
     ],
 
     /*

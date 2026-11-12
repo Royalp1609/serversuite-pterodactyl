@@ -248,6 +248,36 @@ class PterodactylPanelServerOps implements PanelServerOps
         }
     }
 
+    /**
+     * Same count as InitiateBackupService's throttle: backups created in the
+     * last backups.throttles.period seconds, deleted ones included, that are
+     * running or succeeded.
+     */
+    public function backupThrottleWait(string $serverUuid): int
+    {
+        $limit = (int) config('backups.throttles.limit', 2);
+        $period = (int) config('backups.throttles.period', 600);
+        if ($period <= 0 || ! class_exists(self::BACKUP_MODEL)) {
+            return 0;
+        }
+        $server = $this->serverFor($serverUuid);
+        $model = self::BACKUP_MODEL;
+        $recent = $model::query()->withTrashed()
+            ->where('server_id', $server->id)
+            ->where(fn ($q) => $q->whereNull('completed_at')->orWhere('is_successful', true))
+            ->where('created_at', '>=', now()->subSeconds($period))
+            ->orderBy('created_at')
+            ->get(['created_at']);
+        if ($recent->count() < $limit) {
+            return 0;
+        }
+
+        // Free once enough of them have aged out of the window.
+        $freeAt = \Illuminate\Support\Carbon::parse($recent[$recent->count() - $limit]->created_at)->addSeconds($period);
+
+        return max(1, (int) ceil(now()->diffInSeconds($freeAt, false)));
+    }
+
     public function serverBackupLimit(string $serverUuid): ?int
     {
         $server = $this->serverFor($serverUuid);

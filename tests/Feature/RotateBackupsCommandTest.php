@@ -119,3 +119,20 @@ it('stores the true last run when the backup timezone differs from the app timez
 
     \Carbon\Carbon::setTestNow();
 });
+
+it('retries a throttled or busy run on the next tick instead of a whole interval later (#129)', function () {
+    $fake = bindRotationFake();
+    $fake->setLimit('busy', 10);
+    $fake->seed('busy', [['uuid' => 'running', 'successful' => false, 'created' => now()->subMinutes(5)->toIso8601String()]]);
+    $s = ModManagerSetting::forServer('busy');
+    $s->forceFill(['backup_rotation_enabled' => true])->save();
+
+    $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
+    expect(ModManagerSetting::forServer('busy')->backup_last_run_at)->toBeNull();
+
+    // A reason that holds until someone changes something does count as the run.
+    $fake->backups['busy'] = [];
+    $fake->setLimit('busy', 0);
+    $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
+    expect(ModManagerSetting::forServer('busy')->backup_last_run_at)->not->toBeNull();
+});
