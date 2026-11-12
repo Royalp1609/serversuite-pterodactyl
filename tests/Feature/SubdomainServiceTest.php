@@ -33,9 +33,13 @@ function fakeCloudflare(): void
         $srvFails = $GLOBALS['cfSrvFails'];
         $url = $r->url();
         if (str_starts_with($url, CF . '/zones?')) {
-            return str_contains($url, 'name=bad.example')
-                ? Http::response(['success' => true, 'result' => []])
-                : Http::response(['success' => true, 'result' => [['id' => 'zone-' . (str_contains($url, 'own.example') ? 'own' : 'panel')]]]);
+            if (str_contains($url, 'name=bad.example')) {
+                return Http::response(['success' => true, 'result' => []]);
+            }
+            // A token for a zone deleted and added again: same name, new id (#140).
+            $id = $r->hasHeader('Authorization', 'Bearer recreated-token') ? 'recreated' : (str_contains($url, 'own.example') ? 'own' : 'panel');
+
+            return Http::response(['success' => true, 'result' => [['id' => 'zone-' . $id]]]);
         }
         if ($r->method() === 'POST') {
             $type = $r['type'];
@@ -295,6 +299,46 @@ it("won't remove an admin domain that still has subdomains", function () {
     cfService()->claim(cfServer(), 'smp', $d->id);
 
     expect(fn () => cfService()->removeDomain($d->id))->toThrow(SubdomainException::class, 'still has 1');
+});
+
+it("replaces an admin domain's token and keeps its subdomains (#140)", function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(cfServer(), 'smp', $d->id);
+
+    expect(fn () => cfService()->replaceDomainToken($d->id, '  '))->toThrow(SubdomainException::class, 'Enter the new Cloudflare API token')
+        ->and(fn () => cfService()->replaceDomainToken($d->id, 'recreated-token'))->toThrow(SubdomainException::class, 'different play.example.com zone')
+        ->and(fn () => cfService()->replaceDomainToken(999, 'x'))->toThrow(SubdomainException::class, 'Domain not found');
+
+    cfService()->replaceDomainToken($d->id, ' rotated-panel-token ');
+
+    expect(SubdomainDomain::find($d->id)->token)->toBe('rotated-panel-token')
+        ->and(DB::table('server_suite_domains')->where('id', $d->id)->value('token'))->not->toBe('rotated-panel-token')
+        ->and(Subdomain::count())->toBe(1);
+
+    cfService()->release(cfServer(), $sub->id);
+    Http::assertSent(fn (Request $r) => $r->method() === 'DELETE' && str_ends_with($r->url(), '/a-1') && $r->hasHeader('Authorization', 'Bearer rotated-panel-token'));
+    Http::assertSent(fn (Request $r) => $r->method() === 'DELETE' && str_ends_with($r->url(), '/srv-2') && $r->hasHeader('Authorization', 'Bearer rotated-panel-token'));
+});
+
+it('lets a token for a recreated zone replace one on a domain with no subdomains (#140)', function () {
+    $d = panelDomain();
+
+    cfService()->replaceDomainToken($d->id, 'recreated-token');
+
+    expect(SubdomainDomain::find($d->id)->zone_id)->toBe('zone-recreated');
+});
+
+it("checks a new own-domain token against the zone its subdomains are in (#140)", function () {
+    allow('srv-1', 1);
+    cfService()->saveOwnDomain(cfServer(), 'own.example', 'own-token');
+    cfService()->claim(cfServer(), 'smp', 'own');
+
+    expect(fn () => cfService()->saveOwnDomain(cfServer(), 'own.example', 'recreated-token'))
+        ->toThrow(SubdomainException::class, 'different own.example zone');
+
+    cfService()->saveOwnDomain(cfServer(), 'own.example', 'rotated-own-token');
+    expect(ModManagerSetting::forServer('srv-1')->own_dns_token)->toBe('rotated-own-token');
 });
 
 it('lists domains and allowance for the Subdomains screen, without tokens', function () {
