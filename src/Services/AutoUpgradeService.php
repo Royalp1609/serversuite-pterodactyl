@@ -188,6 +188,13 @@ class AutoUpgradeService
             return;
         }
 
+        // Suspended, or node in maintenance (#116): wait, without telling the owner.
+        if (\ServerSuite\Support\ServerState::blocker($server) !== null) {
+            $this->hold($s, 'unavailable', 'Waiting: the server is suspended or its node is in maintenance.');
+
+            return;
+        }
+
         if (($no = $this->ineligible($server, $s)) !== null) {
             $this->hold($s, $no['code'], $no['text'], true);
 
@@ -438,6 +445,11 @@ class AutoUpgradeService
         // Nothing has changed on the server yet, so it can still back out.
         if (! $s->auto_upgrade_enabled || ! self::panelEnabled()) {
             $this->cancel($s, 'cancelled', 'The upgrade was cancelled: automatic upgrades were turned off.');
+
+            return;
+        }
+        if (\ServerSuite\Support\ServerState::blocker($server) !== null) {
+            $this->cancel($s, 'cancelled', 'The upgrade was cancelled: the server was suspended or its node went into maintenance. Nothing was changed.');
 
             return;
         }

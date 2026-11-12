@@ -261,6 +261,38 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
         app(AutoUpgradeService::class)->configure($this->server, true, 'line', 4);
     }
 
+    public function test_a_suspended_server_or_node_in_maintenance_is_not_upgraded(): void
+    {
+        // #116: like the panel's own schedules, nothing runs on a suspended server.
+        $this->optIn();
+        $this->server->forceFill(['status' => 'suspended'])->save();
+        $this->assertHeld('unavailable');
+        $this->assertSame([], $this->notified, 'the owner is not told');
+
+        $this->server->forceFill(['status' => null])->save();
+        $node = \Pterodactyl\Models\Node::query()->forceCreate(['name' => 'n1', 'fqdn' => 'n1.test', 'maintenance_mode' => true]);
+        $this->server->forceFill(['node_id' => $node->id])->save();
+        $this->assertHeld('unavailable');
+
+        $node->forceFill(['maintenance_mode' => false])->save();
+        $this->tick();
+        $this->assertSame('backing_up', $this->setting()->auto_upgrade_run['phase'] ?? null, 'upgrades again once it is back');
+    }
+
+    public function test_suspending_during_the_backup_cancels_the_upgrade(): void
+    {
+        $this->optIn();
+        $this->tick();
+        $this->assertSame('backing_up', $this->setting()->auto_upgrade_run['phase']);
+
+        $this->server->forceFill(['status' => 'suspended'])->save();
+        $this->finishBackup();
+        app(AutoUpgradeService::class)->tick();
+        $this->assertNull($this->setting()->auto_upgrade_run);
+        $this->assertSame('cancelled', $this->code());
+        $this->assertSame([], $this->applied, 'no reinstall');
+    }
+
     public function test_a_hold_is_only_notified_once(): void
     {
         $this->limit = 0;

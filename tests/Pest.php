@@ -10,6 +10,7 @@ function panelTables(): void
         $t->id();
         $t->string('name');
         $t->string('fqdn');
+        $t->boolean('maintenance_mode')->default(false);
         $t->timestamps();
     });
     $schema->create('allocations', function (Illuminate\Database\Schema\Blueprint $t) {
