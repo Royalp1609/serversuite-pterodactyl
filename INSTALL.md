@@ -184,7 +184,10 @@ Owners can also add their own Cloudflare domain and token on the tab; those
 subdomains count towards the same allowance. Records are deleted when a server
 is deleted, along with the server's own-domain token. If Cloudflare doesn't
 remove them then, the subdomains are kept and `serversuite:retry-subdomain-cleanup`
-(hourly) tries again. When a server's primary
+(hourly) tries again. The same delete removes the server's mod list, settings,
+install tasks and modpack; the hourly job also clears anything servers deleted
+earlier left behind, and `php artisan serversuite:prune-orphans` (`--dry-run`
+to only count) does it by hand. When a server's primary
 allocation changes, its records move within a minute of the server starting on
 the new address (`serversuite:move-subdomains`, run every minute by the
 scheduler), so players aren't sent to a port the game isn't on yet. **Move now**

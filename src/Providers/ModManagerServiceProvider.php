@@ -110,7 +110,8 @@ class ModManagerServiceProvider extends ServiceProvider
 
     /**
      * Keep subdomain DNS in step with the panel (#14): remove the records when
-     * a server is deleted, and when its primary allocation changes, mark them
+     * a server is deleted, along with its mod list, settings, tasks and
+     * modpack (#149), and when its primary allocation changes, mark them
      * to move once the server has started on it (#37,
      * serversuite:move-subdomains). Moving straight away broke the address
      * until the next restart, since the game still listens on the old port.
@@ -133,6 +134,13 @@ class ModManagerServiceProvider extends ServiceProvider
                     app(\ServerSuite\Services\SubdomainService::class)->cleanupServer($uuid);
                 } catch (\Throwable $e) {
                     logger()->warning('[Server Suite] subdomain cleanup failed', ['server' => $uuid, 'error' => $e->getMessage()]);
+                }
+                // After the subdomains: the settings row holds the own-domain
+                // token until their DNS records are gone (#149).
+                try {
+                    app(\ServerSuite\Services\ServerDataCleaner::class)->forServer($uuid);
+                } catch (\Throwable $e) {
+                    logger()->warning('[Server Suite] mod data cleanup failed', ['server' => $uuid, 'error' => $e->getMessage()]);
                 }
             });
         });
@@ -275,6 +283,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 RotateBackupsCommand::class,
                 MoveSubdomainsCommand::class,
                 \ServerSuite\Console\Commands\RetrySubdomainCleanupCommand::class,
+                \ServerSuite\Console\Commands\PruneOrphansCommand::class,
                 \ServerSuite\Console\Commands\WatchCrashesCommand::class,
                 \ServerSuite\Console\Commands\AutoUpgradesCommand::class,
                 \ServerSuite\Console\Commands\CheckDnsTokensCommand::class,
