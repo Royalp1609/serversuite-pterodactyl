@@ -32,7 +32,7 @@ class PreChangeBackup
      *           disabled - the server can't have backups; go ahead
      *           failed   - couldn't take one; don't change anything
      */
-    public function start(string $serverUuid, string $label): array
+    public function start(string $serverUuid, string $label, bool $mayEvict = true): array
     {
         try {
             if ($this->ops->serverBackupLimit($serverUuid) === 0) {
@@ -49,7 +49,7 @@ class PreChangeBackup
             }
 
             $name = mb_substr("Pre-mod-change \u{2192} {$label}", 0, 180);
-            $res = $this->rotation->backupNow($serverUuid, $name);
+            $res = $this->rotation->backupNow($serverUuid, $name, $mayEvict);
         } catch (\Throwable $e) {
             return ['status' => 'failed', 'message' => $e->getMessage()];
         }
@@ -78,13 +78,13 @@ class PreChangeBackup
      *
      * @return array{token: ?string, status: string, backup: ?string, message?: string}
      */
-    public function clear(string $serverUuid, string $label, ?bool $take): array
+    public function clear(string $serverUuid, string $label, ?bool $take, bool $mayEvict = true): array
     {
         $mode = self::mode($serverUuid);
         if ($mode === 'ask' && $take === null) {
             return ['token' => null, 'status' => 'ask', 'backup' => null];
         }
-        $r = ($mode === 'never' || ($mode === 'ask' && $take === false)) ? ['status' => 'skipped'] : $this->start($serverUuid, $label);
+        $r = ($mode === 'never' || ($mode === 'ask' && $take === false)) ? ['status' => 'skipped'] : $this->start($serverUuid, $label, $mayEvict);
         if ($r['status'] === 'failed') {
             return ['token' => null, 'status' => 'failed', 'backup' => null, 'message' => $r['message'] ?? 'unknown error'];
         }

@@ -336,6 +336,20 @@ class ModpackService
      *
      * @throws ModpackException
      */
+    /**
+     * Whether the backup before the change may delete the oldest one to make
+     * room at the limit (#130): only for a user who may delete backups.
+     */
+    private function mayEvict(object $server, int $userId): bool
+    {
+        $model = '\\Pterodactyl\\Models\\User';
+        if (! class_exists($model)) {
+            return true;
+        }
+
+        return \ServerSuite\Support\PanelPermissions::holds($model::query()->find($userId), $server, ['backup.delete']);
+    }
+
     public function start(object $server, string $projectId, string $versionId, int $userId, bool $canSwitch = false, bool $wipeConfirmed = false, string $source = 'modrinth'): Modpack
     {
         try {
@@ -366,7 +380,7 @@ class ModpackService
             'progress_done'  => 0,
             'progress_total' => count($p['plan']['install']),
             'failures'       => [],
-            'state'          => ['backups' => $p['backups']],
+            'state'          => ['backups' => $p['backups'], 'may_evict' => $this->mayEvict($server, $userId)],
             'error'          => null,
             'requested_by'   => $userId,
             'started_at'     => now(),
@@ -409,7 +423,7 @@ class ModpackService
             'progress_done'  => 0,
             'progress_total' => count((array) ($pack->files ?? [])),
             'failures'       => [],
-            'state'          => ['backups' => $backupLimit === 0 ? 'disabled' : 'yes'],
+            'state'          => ['backups' => $backupLimit === 0 ? 'disabled' : 'yes', 'may_evict' => $this->mayEvict($server, $userId)],
             'error'          => null,
             'requested_by'   => $userId,
             'started_at'     => now(),

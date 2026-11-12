@@ -116,6 +116,13 @@ interface PanelServerOps
     public function serverBackupLimit(string $serverUuid): ?int;
 
     /**
+     * Seconds until the panel's backup rate limit would let a new backup be
+     * created (0 = now). Lets rotation check before it deletes a backup to
+     * make room (#129). Best effort: 0 when the panel has no such limit.
+     */
+    public function backupThrottleWait(string $serverUuid): int;
+
+    /**
      * Best-effort loader + Minecraft version for a server, used to stamp every
      * backup with the world's format version (so a restore can't be silently
      * applied across an incompatible version). Returns nulls when detection is

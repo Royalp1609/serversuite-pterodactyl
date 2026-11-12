@@ -308,3 +308,58 @@ it('renames a backup via the seam', function () {
     $names = array_map(fn ($b) => $b->name, $ops->listBackups('s'));
     expect($names)->toContain('Renamed snapshot');
 });
+
+// ---- #129 / #130 -----------------------------------------------------------
+
+it('does not delete a backup to make room when the create would be throttled (#129)', function () {
+    $ops = new FakePanelServerOps();
+    $ops->setLimit('s', 3);
+    seedSuccessful($ops, 's', 3);
+    $ops->throttleWait = 240;
+
+    $result = rotationService($ops)->rotate('s');
+
+    expect($result->isSkipped())->toBeTrue()->and($result->reason)->toBe('throttled')
+        ->and($ops->listBackups('s'))->toHaveCount(3)
+        ->and(array_filter($ops->log, fn ($e) => $e[0] === 'delete'))->toBe([]);
+});
+
+it('ignores a backup stuck in progress for longer than the stale limit (#129)', function () {
+    $ops = new FakePanelServerOps();
+    $ops->setLimit('s', 10);
+    seedSuccessful($ops, 's', 2);
+    $ops->seed('s', [['uuid' => 'stuck', 'successful' => false, 'created' => now()->subHours(30)->toIso8601String()]]);
+
+    expect(rotationService($ops)->rotate('s')->isRotated())->toBeTrue();
+
+    // One that started recently still blocks.
+    $ops->seed('s', [['uuid' => 'running', 'successful' => false, 'created' => now()->subMinutes(10)->toIso8601String()]]);
+    expect(rotationService($ops)->rotate('s')->reason)->toBe('backup_in_progress');
+});
+
+it('a backup asked for without the delete permission never deletes one (#130)', function () {
+    $ops = new FakePanelServerOps();
+    $ops->setLimit('s', 3);
+    seedSuccessful($ops, 's', 3);
+
+    $at = rotationService($ops)->backupNow('s', 'Before a change', mayEvict: false);
+    expect($at->isSkipped())->toBeTrue()->and($at->reason)->toBe('at_limit_needs_delete')
+        ->and($at->message)->toContain('permission to delete backups')
+        ->and($ops->listBackups('s'))->toHaveCount(3)
+        ->and(createCount($ops))->toBe(0);
+
+    // Below the limit it backs up, and leaves any trimming to someone who may delete.
+    $ops->setLimit('s', 10);
+    $below = rotationService($ops)->rotate('s', keepOverride: 3, mayEvict: false);
+    expect($below->isRotated())->toBeTrue()->and($below->evictedCount())->toBe(0)
+        ->and($ops->successfulCount('s'))->toBe(3);
+});
+
+it('with the delete permission a manual backup at the limit still makes room (#130)', function () {
+    $ops = new FakePanelServerOps();
+    $ops->setLimit('s', 3);
+    seedSuccessful($ops, 's', 3);
+
+    $r = rotationService($ops)->backupNow('s', 'Manual', mayEvict: true);
+    expect($r->isRotated())->toBeTrue()->and($r->evicted[0]->uuid)->toBe('c1');
+});

@@ -117,6 +117,14 @@ class FakePanelServerOps implements PanelServerOps
         throw BackupException::notFound($serverUuid, $backupUuid);
     }
 
+    /** Seconds the panel's backup rate limit would make a create wait (#129). */
+    public int $throttleWait = 0;
+
+    public function backupThrottleWait(string $serverUuid): int
+    {
+        return $this->throttleWait;
+    }
+
     public function serverBackupLimit(string $serverUuid): ?int
     {
         return $this->limits[$serverUuid] ?? null;

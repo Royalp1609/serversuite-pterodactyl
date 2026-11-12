@@ -11,6 +11,9 @@ use ServerSuite\Support\BackupSchedule;
 
 class RotateBackupsCommand extends Command
 {
+    /** Skips that clear by themselves: tried again on the next tick (#129). */
+    private const RETRY_NEXT_TICK = ['throttled', 'backup_in_progress'];
+
     protected $signature = 'serversuite:rotate-backups
                             {--server= : Only rotate this server UUID (bypasses opt-in AND the schedule due-check)}
                             {--keep=   : Override the retention target (keep-N) for this run}';
@@ -106,12 +109,15 @@ class RotateBackupsCommand extends Command
                 default              => $skipped++,
             };
 
-            // Advance the schedule clock on a deliberate outcome (rotated or
-            // skipped). Failures are left to retry on the next tick.
+            // Advance the schedule clock on a deliberate outcome (rotated, or
+            // skipped for a reason that holds until someone changes
+            // something). Failures, and skips that clear by themselves (the
+            // panel's rate limit, a backup still running), retry on the next
+            // tick instead of waiting a whole interval (#129).
             // Stored in the app timezone: Eloquent writes a Carbon's wall-clock
             // time without converting it, so saving $now as-is would read back
             // shifted by the backup timezone's offset.
-            if (! $result->isFailed()) {
+            if (! $result->isFailed() && ! in_array($result->reason, self::RETRY_NEXT_TICK, true)) {
                 $setting->forceFill(['backup_last_run_at' => $now->setTimezone(config('app.timezone'))])->save();
             }
             if (! $result->isRotated()) {

@@ -1085,7 +1085,8 @@ class ModManagerController extends Controller
         ]);
 
         try {
-            $result = app(BackupRotationService::class)->backupNow($server, $data['name'] ?? null);
+            // #130: at the limit this deletes the oldest backup, so only for those who may delete.
+            $result = app(BackupRotationService::class)->backupNow($server, $data['name'] ?? null, PanelPermissions::holds($request->user(), $srv, ['backup.delete']));
         } catch (BackupException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
@@ -1275,7 +1276,8 @@ class ModManagerController extends Controller
             abort(403, 'You do not have permission to change mods on this server.');
         }
         $data = $request->validate(['label' => ['required', 'string', 'max:150'], 'take' => ['nullable', 'boolean']]);
-        $r = app(\ServerSuite\Services\PreChangeBackup::class)->clear($srv->uuid, $data['label'], array_key_exists('take', $data) && $data['take'] !== null ? (bool) $data['take'] : null);
+        $r = app(\ServerSuite\Services\PreChangeBackup::class)->clear($srv->uuid, $data['label'], array_key_exists('take', $data) && $data['take'] !== null ? (bool) $data['take'] : null,
+            PanelPermissions::holds($request->user(), $srv, ['backup.delete']));   // #130
 
         return response()->json(['data' => $r], $r['status'] === 'failed' ? 422 : 200);
     }

@@ -95,3 +95,16 @@ it('needs the same permissions to set up automatic upgrades as to switch by hand
     expect(PanelPermissions::required('autoUpgradeState'))->toBe(['startup.read'])
         ->and(PanelPermissions::required('autoUpgradeSave'))->toBe(PanelPermissions::required('serverVersionApply'));
 });
+
+it('only lets a backup delete one to make room for a user who may delete backups (#130)', function () {
+    $src = file_get_contents(__DIR__ . '/../../extension/app/ModManagerController.php');
+    foreach (['backupsCreate', 'prechange'] as $endpoint) {
+        $fn = substr($src, strpos($src, "public function {$endpoint}("));
+        $fn = substr($fn, 0, strpos($fn, "\n    }\n"));
+        expect($fn)->toContain("PanelPermissions::holds(\$request->user(), \$srv, ['backup.delete'])");
+    }
+
+    $modpacks = file_get_contents(__DIR__ . '/../../src/Services/ModpackService.php');
+    expect(substr_count($modpacks, "'may_evict' => \$this->mayEvict(\$server, \$userId)"))->toBe(2, 'install and remove');
+    expect(file_get_contents(__DIR__ . '/../../src/Services/ModpackInstaller.php'))->toContain("(bool) (\$state['may_evict'] ?? true)");
+});

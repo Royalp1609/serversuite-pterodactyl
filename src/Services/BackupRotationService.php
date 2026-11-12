@@ -43,13 +43,13 @@ class BackupRotationService
      * limit, honours the throttle) but names the backup with the user's custom
      * name, or "Manual <timestamp>" when none is given — never "Auto".
      */
-    public function backupNow(string $serverUuid, ?string $name = null): RotationResult
+    public function backupNow(string $serverUuid, ?string $name = null, bool $mayEvict = true): RotationResult
     {
         $clean = $name !== null ? trim($name) : '';
 
         return $clean !== ''
-            ? $this->rotate($serverUuid, null, null, $clean)   // verbatim custom name
-            : $this->rotate($serverUuid, null, 'Manual');      // "Manual <timestamp>"
+            ? $this->rotate($serverUuid, null, null, $clean, $mayEvict)   // verbatim custom name
+            : $this->rotate($serverUuid, null, 'Manual', null, $mayEvict); // "Manual <timestamp>"
     }
 
     /**
@@ -87,8 +87,11 @@ class BackupRotationService
      * @param  int|null    $keepOverride  Explicit keep-N; null resolves via settings.
      * @param  string|null $namePrefix    Backup name prefix; null uses config.
      * @param  string|null $nameOverride  Verbatim backup name; bypasses the prefix.
+     * @param  bool        $mayEvict      False when whoever asked can't delete backups (#130):
+     *                                    at the limit the backup is refused instead of
+     *                                    deleting the oldest, and no excess is trimmed.
      */
-    public function rotate(string $serverUuid, ?int $keepOverride = null, ?string $namePrefix = null, ?string $nameOverride = null): RotationResult
+    public function rotate(string $serverUuid, ?int $keepOverride = null, ?string $namePrefix = null, ?string $nameOverride = null, bool $mayEvict = true): RotationResult
     {
         $limit = $this->ops->serverBackupLimit($serverUuid);
 
@@ -119,6 +122,9 @@ class BackupRotationService
 
         // ---- Phase A: pre-create eviction ONLY when physically at the limit ----
         if ($atLimit) {
+            if (! $mayEvict) {
+                return RotationResult::skipped('at_limit_needs_delete', "This server is at its backup limit ({$limit}). Making room deletes the oldest backup, which needs the permission to delete backups.");
+            }
             if ($retained <= 1) {
                 return RotationResult::skipped('would_evict_last_success');
             }
@@ -126,6 +132,12 @@ class BackupRotationService
             $victim = $eligible[0] ?? null;
             if ($victim === null) {
                 return RotationResult::skipped('no_evictable_at_limit');
+            }
+
+            // #129: never delete one to make room when the create is about to
+            // be throttled, or a backup is gone and none is made.
+            if ($this->throttled($serverUuid)) {
+                return RotationResult::skipped('throttled');
             }
 
             $outcome = $this->tryEvict($serverUuid, $victim);
@@ -145,12 +157,12 @@ class BackupRotationService
         try {
             $created = $this->ops->createBackup($serverUuid, $name);
         } catch (BackupException $e) {
-            return $this->handleCreateFailure($serverUuid, $name, $e, $evicted, $effectiveKeep);
+            return $this->handleCreateFailure($serverUuid, $name, $e, $evicted, $effectiveKeep, $mayEvict);
         }
         $this->saveModList($serverUuid, $created, $all);
 
         // ---- Phase C: post-create trim, at most one, only if we didn't evict ----
-        if (empty($evicted)) {
+        if (empty($evicted) && $mayEvict) {
             $evicted = array_merge(
                 $evicted,
                 $this->trimOne($serverUuid, $effectiveKeep)
@@ -170,6 +182,7 @@ class BackupRotationService
         BackupException $e,
         array $evicted,
         int $effectiveKeep,
+        bool $mayEvict = true,
     ): RotationResult {
         if ($e->reason === 'throttled') {
             return RotationResult::skipped('throttled', evicted: $evicted);
@@ -185,6 +198,10 @@ class BackupRotationService
             return RotationResult::failed('limit_reached_after_evict', $e->getMessage(), $evicted);
         }
 
+        if (! $mayEvict) {
+            return RotationResult::skipped('at_limit_needs_delete', 'This server is at its backup limit. Making room deletes the oldest backup, which needs the permission to delete backups.');
+        }
+
         // Otherwise make room once and retry the create a single time.
         $successful = $this->successful($this->ops->listBackups($serverUuid));
         $eligible   = $this->eligibleOldestFirst($successful);
@@ -192,6 +209,9 @@ class BackupRotationService
 
         if ($victim === null || count($successful) <= 1) {
             return RotationResult::failed('limit_reached_no_room', $e->getMessage(), $evicted);
+        }
+        if ($this->throttled($serverUuid)) {
+            return RotationResult::skipped('throttled', evicted: $evicted);
         }
 
         $outcome = $this->tryEvict($serverUuid, $victim);
@@ -288,16 +308,38 @@ class BackupRotationService
     // Backup-set helpers
     // -------------------------------------------------------------------------
 
-    /** @param BackupRef[] $all */
+    /**
+     * A backup still running. One "running" for longer than
+     * backups.stale_after_hours (default 24) never finished (Wings restarted,
+     * the node went away) and no longer blocks rotation (#129).
+     *
+     * @param BackupRef[] $all
+     */
     private function hasInProgress(array $all): bool
     {
+        $staleAfter = max(1, (int) config('serversuite.backups.stale_after_hours', 24));
         foreach ($all as $b) {
-            if ($b->completedAt === null && ! $b->isSuccessful) {
-                return true;
+            if ($b->completedAt !== null || $b->isSuccessful) {
+                continue;
             }
+            if ($b->createdAt !== null && \Illuminate\Support\Carbon::parse($b->createdAt)->lt(now()->subHours($staleAfter))) {
+                continue;
+            }
+
+            return true;
         }
 
         return false;
+    }
+
+    /** Whether the panel would refuse a create right now for its rate limit (#129). Unknown = no. */
+    private function throttled(string $serverUuid): bool
+    {
+        try {
+            return $this->ops->backupThrottleWait($serverUuid) > 0;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /**

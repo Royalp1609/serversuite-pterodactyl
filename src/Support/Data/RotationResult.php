@@ -99,6 +99,7 @@ readonly class RotationResult
             'no_evictable_at_limit'   => 'At the backup limit and every backup is locked; nothing can be evicted to make room.',
             'all_locked'              => 'Retention exceeded but every eligible backup is locked.',
             'throttled'               => 'The panel backup throttle was hit; will retry next cycle.',
+            'at_limit_needs_delete'   => 'At the backup limit: making room deletes the oldest backup, which needs the permission to delete backups.',
             'limit_reached_no_room'   => 'The panel reported the backup limit with no evictable backup to free.',
             default                   => $reason,
         };
