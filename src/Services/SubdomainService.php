@@ -324,7 +324,10 @@ class SubdomainService
             throw new SubdomainException('Enter a Cloudflare API token for the domain.');
         }
 
-        $zoneId = $this->verified($token, $zone);
+        // Same zone with subdomains on it: a new token must see the zone their
+        // records are in, as for an admin domain (#140).
+        $sameZoneInUse = $setting->own_dns_zone === $zone && $this->ownSubdomainsExist($server);
+        [$token, $zoneId] = $this->replacementToken($token, $zone, $setting->own_dns_zone_id, $sameZoneInUse);
         $setting->forceFill(['own_dns_zone' => $zone, 'own_dns_zone_id' => $zoneId, 'own_dns_token' => $token])->save();
     }
 
@@ -358,6 +361,48 @@ class SubdomainService
         return SubdomainDomain::query()->create([
             'zone' => $zone, 'zone_id' => $this->verified($token, $zone), 'token' => $token, 'enabled' => true,
         ]);
+    }
+
+    /**
+     * Swap an admin domain's token without touching the subdomains on it
+     * (#140). Cloudflare tokens can expire, and a domain with subdomains
+     * can't be removed and added again.
+     *
+     * @throws SubdomainException
+     */
+    public function replaceDomainToken(int $id, string $token): SubdomainDomain
+    {
+        $d = SubdomainDomain::query()->find($id) ?? throw new SubdomainException('Domain not found.');
+        $inUse = Subdomain::query()->where('domain_id', $d->id)->exists();
+
+        [$token, $zoneId] = $this->replacementToken($token, $d->zone, $d->zone_id, $inUse);
+        $d->forceFill(['token' => $token, 'zone_id' => $zoneId])->save();
+
+        return $d;
+    }
+
+    /**
+     * A checked replacement token and the zone id it sees. When subdomains
+     * exist, the zone must be the one their records are in (a recreated
+     * zone with the same name has new ids and none of the records).
+     *
+     * @return array{0: string, 1: string}
+     *
+     * @throws SubdomainException
+     */
+    private function replacementToken(string $token, string $zone, ?string $zoneId, bool $inUse): array
+    {
+        $token = trim($token);
+        if ($token === '') {
+            throw new SubdomainException('Enter the new Cloudflare API token.');
+        }
+
+        $seen = $this->verified($token, $zone);
+        if ($inUse && $zoneId !== null && $seen !== $zoneId) {
+            throw new SubdomainException("That token sees a different {$zone} zone from the one the subdomains are in. Use a token for the original zone.");
+        }
+
+        return [$token, $seen];
     }
 
     /** @throws SubdomainException */

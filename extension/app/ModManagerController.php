@@ -2295,6 +2295,18 @@ class ModManagerController extends Controller
         return $this->adminSubdomainRedirect(fn ($svc) => $svc->setDomainEnabled($id, ! $domain->enabled), $domain->enabled ? 'Domain disabled.' : 'Domain enabled.');
     }
 
+    /** POST /admin/domains/{id}/token   { token } (#140) */
+    public function adminReplaceDomainToken(Request $request, int $id)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $data = $request->validate(['token' => ['required', 'string', 'max:255']]);
+
+        return $this->adminSubdomainRedirect(
+            fn ($svc) => $svc->replaceDomainToken($id, $data['token']),
+            'Token replaced. It was checked with Cloudflare and stored encrypted; the subdomains on the domain are unchanged.'
+        );
+    }
+
     /** POST /admin/domains/{id}/remove */
     public function adminRemoveDomain(Request $request, int $id)
     {

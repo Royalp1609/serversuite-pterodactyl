@@ -295,10 +295,21 @@
                                     @csrf
                                     <button class="btn btn-xs btn-default">{{ $d->enabled ? 'Disable' : 'Enable' }}</button>
                                 </form>
+                                <button type="button" class="btn btn-xs btn-default" data-toggle="collapse" data-target="#ss-token-{{ $d->id }}">Replace token</button>
                                 <form method="POST" action="/extensions/serversuite/admin/domains/{{ $d->id }}/remove" style="display:inline-block;"
                                       onsubmit="return confirm('Remove this domain and its stored token?');">
                                     @csrf
                                     <button class="btn btn-xs btn-danger">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                        <tr id="ss-token-{{ $d->id }}" class="collapse">
+                            <td colspan="4">
+                                <form method="POST" action="/extensions/serversuite/admin/domains/{{ $d->id }}/token" class="form-inline" autocomplete="off">
+                                    @csrf
+                                    <input type="password" name="token" class="form-control input-sm" placeholder="New Cloudflare API token for {{ $d->zone }}" autocomplete="new-password" required style="min-width:280px;">
+                                    <button type="submit" class="btn btn-sm btn-primary">Save token</button>
+                                    <span class="text-muted small">Checked with Cloudflare before it replaces the old one. Subdomains on this domain keep working.</span>
                                 </form>
                             </td>
                         </tr>
