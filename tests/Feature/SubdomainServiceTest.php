@@ -2,7 +2,11 @@
 
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use ServerSuite\Jobs\SendNotificationJob;
+use ServerSuite\Services\Notifier;
 use ServerSuite\Exceptions\SubdomainException;
 use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Models\Subdomain;
@@ -29,9 +33,31 @@ function fakeCloudflare(): void
 {
     $n = 0;
     $GLOBALS['cfSrvFails'] = false;
+    $GLOBALS['cfVerify'] = null;
+    $GLOBALS['cfAuthFails'] = false;
     Http::fake(function (Request $r) use (&$n) {
         $srvFails = $GLOBALS['cfSrvFails'];
         $url = $r->url();
+        // Token health (#139): null = active with no expiry, 'down' = 503,
+        // 'account' = an account-owned token (/user/tokens/verify says invalid).
+        $verify = $GLOBALS['cfVerify'] ?? null;
+        $authFails = $GLOBALS['cfAuthFails'] ?? false;
+        if ($verify === 'down') {
+            return Http::response(['success' => false, 'errors' => [['code' => 0, 'message' => 'Service unavailable']]], 503);
+        }
+        if ($authFails && ! str_ends_with($url, '/user/tokens/verify')) {
+            // What Cloudflare returns for an expired token, and for one that isn't a token at all.
+            return $authFails === 'malformed'
+                ? Http::response(['success' => false, 'errors' => [['code' => 9106, 'message' => 'Authentication failed (status: 400)']]], 400)
+                : Http::response(['success' => false, 'errors' => [['code' => 10000, 'message' => 'Authentication error']]], 403);
+        }
+        if (str_ends_with($url, '/user/tokens/verify')) {
+            return match (true) {
+                $verify === null    => Http::response(['success' => true, 'result' => ['id' => 'tok', 'status' => 'active']]),
+                $verify === 'account' => Http::response(['success' => false, 'errors' => [['code' => 1000, 'message' => 'Invalid API Token']]], 401),
+                default             => Http::response(['success' => true, 'result' => ['id' => 'tok'] + $verify]),
+            };
+        }
         if (str_starts_with($url, CF . '/zones?')) {
             if (str_contains($url, 'name=bad.example')) {
                 return Http::response(['success' => true, 'result' => []]);
@@ -277,7 +303,7 @@ it("removes a deleted server's records and rows", function () {
     cfService()->cleanupServer('srv-1');
 
     expect(Subdomain::count())->toBe(0);
-    Http::assertSentCount(1 + 4 + 4); // zone lookup, 2x(A+SRV) create, 2x(A+SRV) delete
+    Http::assertSentCount(1 + 2 + 4 + 4); // zone lookup, token check (#139), 2x(A+SRV) create, 2x(A+SRV) delete
 });
 
 it("forgets a deleted server's own domain, token and allowance (#35)", function () {
@@ -351,4 +377,139 @@ it('lists domains and allowance for the Subdomains screen, without tokens', func
         ->and($o['domains'])->toBe([['id' => $d->id, 'zone' => 'play.example.com']])
         ->and($o['own'])->toBe(['zone' => null, 'configured' => false])
         ->and(json_encode($o))->not->toContain('panel-token');
+});
+
+// ---------------------------------------------------------------------------
+// Token health (#139)
+// ---------------------------------------------------------------------------
+
+function adminTarget(): void
+{
+    app(Notifier::class)->saveDefaults([['type' => 'ntfy', 'server' => 'http://192.168.5.10:8080', 'topic' => 'panel']], []);
+}
+
+it('records the token status and expiry when a domain is added (#139)', function () {
+    $GLOBALS['cfVerify'] = ['status' => 'active', 'expires_on' => now()->addDays(60)->toIso8601String()];
+    $d = panelDomain();
+
+    expect($d->token_status)->toBe('active')
+        ->and($d->token_expires_at->toDateString())->toBe(now()->addDays(60)->toDateString())
+        ->and($d->token_checked_at)->not->toBeNull()
+        ->and(SubdomainService::tokenWarning($d))->toBeNull();
+});
+
+it('warns the admin once when a token is about to expire (#139)', function () {
+    adminTarget();
+    Queue::fake();
+    $d = panelDomain();
+    $expires = now()->addDays(10)->addHour();
+    $GLOBALS['cfVerify'] = ['status' => 'active', 'expires_on' => $expires->toIso8601String()];
+
+    expect(cfService()->checkDomainTokens())->toHaveCount(1);
+    $w = SubdomainService::tokenWarning($d->fresh());
+    expect($w['level'])->toBe('warn')
+        ->and($w['title'])->toContain('play.example.com expires in 10 days')
+        ->and($w['key'])->toBe('expiring:' . $expires->format('Y-m-d'));
+
+    Cache::flush();   // the next day: the cooldown is gone, the stored warning still stops a repeat
+    cfService()->checkDomainTokens();
+    Queue::assertPushed(SendNotificationJob::class, 1);
+    Queue::assertPushed(SendNotificationJob::class, fn ($j) => str_contains(json_encode($j), 'expires in'));
+});
+
+it('reports an expired token, then warns again for the next problem (#139)', function () {
+    adminTarget();
+    Queue::fake();
+    $d = panelDomain();
+    $GLOBALS['cfVerify'] = ['status' => 'expired', 'expires_on' => now()->subDay()->toIso8601String()];
+
+    cfService()->checkDomainTokens();
+    $d->refresh();
+    expect($d->token_status)->toBe('expired')
+        ->and(SubdomainService::tokenWarning($d)['short'])->toBe('Token has expired')
+        ->and($d->token_warned)->toBe('expired');
+
+    $GLOBALS['cfVerify'] = ['status' => 'disabled'];
+    cfService()->checkDomainTokens();
+    Queue::assertPushed(SendNotificationJob::class, 2);
+});
+
+it('treats a token past its expiry date as expired before the next check (#139)', function () {
+    $d = panelDomain();
+    $d->forceFill(['token_status' => 'active', 'token_expires_at' => now()->subMinute()])->save();
+
+    expect(SubdomainService::tokenWarning($d)['key'])->toBe('expired');
+});
+
+it('keeps the last known state while Cloudflare is down (#139)', function () {
+    $GLOBALS['cfVerify'] = ['status' => 'expired'];
+    $d = panelDomain();
+    $GLOBALS['cfVerify'] = 'down';
+
+    cfService()->checkDomainTokens();
+
+    expect($d->fresh()->token_status)->toBe('expired');
+});
+
+it("checks an account-owned token by reading the zone, and flags one that can't see it (#139)", function () {
+    $GLOBALS['cfVerify'] = 'account';
+    $d = panelDomain();
+    expect($d->token_status)->toBe('active')->and($d->token_expires_at)->toBeNull();
+
+    $d->forceFill(['zone' => 'bad.example'])->save();   // the zone lookup now finds nothing
+    cfService()->checkDomainToken($d);
+    expect($d->fresh()->token_status)->toBe('invalid');
+});
+
+it('tells the owner to ask an admin when the panel token is rejected, and records it (#139)', function () {
+    adminTarget();
+    Queue::fake();
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $GLOBALS['cfAuthFails'] = true;
+    $GLOBALS['cfVerify'] = ['status' => 'expired'];
+
+    expect(fn () => cfService()->claim(cfServer(), 'smp', $d->id))
+        ->toThrow(SubdomainException::class, 'Ask a panel admin to replace the token');
+    expect($d->fresh()->token_status)->toBe('expired')
+        ->and(Subdomain::count())->toBe(0);
+    Queue::assertPushed(SendNotificationJob::class, 1);
+});
+
+it('treats a malformed token (HTTP 400, code 9106) as rejected (#139)', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $GLOBALS['cfAuthFails'] = 'malformed';
+
+    expect(fn () => cfService()->claim(cfServer(), 'smp', $d->id))
+        ->toThrow(SubdomainException::class, 'Ask a panel admin to replace the token');
+    expect($d->fresh()->token_status)->toBe('invalid');
+});
+
+it("tells the owner to replace their own domain's token when Cloudflare rejects it (#139)", function () {
+    allow('srv-1', 1);
+    cfService()->saveOwnDomain(cfServer(), 'own.example', 'own-token');
+    $GLOBALS['cfAuthFails'] = true;
+
+    expect(fn () => cfService()->claim(cfServer(), 'smp', 'own'))
+        ->toThrow(SubdomainException::class, "rejected your own domain's API token");
+});
+
+it('clears the warning when the token is replaced (#139)', function () {
+    $GLOBALS['cfVerify'] = ['status' => 'expired'];
+    $d = panelDomain();
+    $GLOBALS['cfVerify'] = ['status' => 'active', 'expires_on' => now()->addYear()->toIso8601String()];
+
+    $d = cfService()->replaceDomainToken($d->id, 'rotated-panel-token');
+
+    expect($d->token_status)->toBe('active')
+        ->and($d->token_warned)->toBeNull()
+        ->and(SubdomainService::tokenWarning($d))->toBeNull();
+});
+
+it('runs the daily token check from the scheduler command (#139)', function () {
+    panelDomain();
+    $GLOBALS['cfVerify'] = ['status' => 'expired'];
+
+    $this->artisan('serversuite:check-dns-tokens')->expectsOutputToContain('play.example.com has expired')->assertSuccessful();
 });
