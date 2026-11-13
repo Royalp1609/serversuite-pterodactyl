@@ -362,6 +362,21 @@ it('refuses a pack that changed after review, before any file changes', function
     $this->ops->shouldHaveReceived('power')->with('srv-mp', 'start')->once();   // #134: nothing changed, so it runs again
 });
 
+it('rejects a pack file whose content changed but whose size did not (#133)', function () {
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    // The host serves different bytes of the same length after the review.
+    $url = MP_CDN . '/' . md5('mods/b.jar') . '/versions/v1/b.jar';
+    $this->wings->remote[$url] = strrev($this->wings->remote[$url]);
+
+    $pack = mpRun();
+
+    expect($pack->status)->toBe(Modpack::STATUS_INSTALLED)
+        ->and(collect($pack->failures)->firstWhere('path', 'mods/b.jar')['reason'] ?? '')->toContain('SHA-1 mismatch')
+        ->and(array_keys($this->wings->files))->toContain('/mods/a.jar')
+        ->and(array_keys($this->wings->files))->not->toContain('/mods/b.jar');
+});
+
 it('changes nothing without the backup', function () {
     mpV1($this);
     $this->rotation->shouldReceive('backupNow')->andReturn(RotationResult::failed('limit_reached', 'all backups are locked'));

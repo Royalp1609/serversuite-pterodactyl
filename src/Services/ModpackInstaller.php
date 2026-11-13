@@ -359,7 +359,7 @@ class ModpackInstaller
                 if (collect($this->daemon->listDirectory($uuid, $dir))->contains(fn ($e) => $e['name'] === $file)) {
                     $this->daemon->deleteFiles($uuid, $dir, [$file]);
                 }
-                $this->delivery->deliverFile($uuid, (string) $item['url'], $dir, $file, (int) $item['size']);
+                $this->delivery->deliverFile($uuid, (string) $item['url'], $dir, $file, (int) $item['size'], (string) ($item['sha1'] ?? ''));
             } catch (\Throwable $e) {
                 $failures[] = ['path' => $item['path'], 'reason' => mb_substr($e->getMessage(), 0, 300)];
             }
