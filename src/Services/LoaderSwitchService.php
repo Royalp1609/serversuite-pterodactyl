@@ -229,15 +229,11 @@ class LoaderSwitchService
         }
         $eggModel = self::EGG_MODEL;
 
-        // Find an installed egg whose loader matches (exact slug, so "forge" does
-        // not accidentally pick a NeoForge egg).
-        $egg = null;
-        foreach ($eggModel::with('variables')->get() as $e) {
-            if ($this->deriveLoaderSlug((string) $e->name) === $loaderSlug) {
-                $egg = $e;
-                break;
-            }
-        }
+        // Only an egg the Versions tab offers for that loader (Java server
+        // loaders, no Bedrock or proxy eggs), never any egg whose name happens
+        // to contain the word (#119).
+        $offered = collect(app(EggManagerService::class)->minecraftLoaders())->firstWhere('loader', $loaderSlug);
+        $egg = $offered ? $eggModel::with('variables')->find((int) $offered['egg_id']) : null;
         if ($egg === null) {
             return null;
         }
