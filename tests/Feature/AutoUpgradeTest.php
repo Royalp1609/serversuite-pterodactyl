@@ -49,6 +49,8 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
     private ?string $detected = null;
     private array $preflightBlockers = [];
     private bool $updateError = false;
+    private bool $listError = false;
+    private bool $postError = false;
     /** @var array<string, bool> plugin source id => has a build for the target */
     private array $pluginBuilds = [];
 
@@ -67,7 +69,7 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
         $ops = \Mockery::mock(PanelServerOps::class)->shouldIgnoreMissing();
         $ops->shouldReceive('serverBackupLimit')->andReturnUsing(fn () => $this->limit);
         $ops->shouldReceive('runtimeState')->andReturnUsing(fn () => $this->state);
-        $ops->shouldReceive('listBackups')->andReturnUsing(fn () => $this->backups);
+        $ops->shouldReceive('listBackups')->andReturnUsing(fn () => $this->listError ? throw new \RuntimeException('Wings unreachable') : $this->backups);
         $ops->shouldReceive('power')->andReturnUsing(function ($uuid, $signal) {
             $this->signals[] = $signal;
             $this->order[] = 'power:' . $signal;
@@ -148,7 +150,7 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
         $this->app->instance(MinecraftPing::class, $ping);
 
         $post = \Mockery::mock(PostSwitchService::class);
-        $post->shouldReceive('finish')->andReturn([]);
+        $post->shouldReceive('finish')->andReturnUsing(fn () => $this->postError ? throw new \RuntimeException('could not write the jar') : []);
         $this->app->instance(PostSwitchService::class, $post);
 
         $this->app->instance(AutoStartService::class, \Mockery::mock(AutoStartService::class)->shouldIgnoreMissing());
@@ -590,6 +592,47 @@ class AutoUpgradeTest extends \ServerSuite\Tests\TestCase
         app(AutoUpgradeService::class)->tick();
         $this->assertNotNull($this->setting()->auto_upgrade_paused_at);
         $this->assertSame([], $this->signals);
+    }
+
+    public function test_a_step_that_keeps_throwing_after_the_reinstall_fails_and_starts_the_server(): void
+    {
+        // #128: it used to retry every tick forever with the server stopped.
+        $this->tick();
+        $this->finishBackup();
+        app(AutoUpgradeService::class)->tick();
+        $this->state = ['power' => 'offline', 'install' => null];
+        $this->postError = true;
+
+        app(AutoUpgradeService::class)->tick();
+        $this->assertSame('reinstalling', $this->setting()->auto_upgrade_run['phase'] ?? null, 'retried within the time limit');
+        $this->assertSame([], $this->signals);
+
+        $this->travel(31)->minutes();
+        app(AutoUpgradeService::class)->tick();
+        $s = $this->setting();
+        $this->assertNull($s->auto_upgrade_run);
+        $this->assertNotNull($s->auto_upgrade_paused_at);
+        $this->assertSame(['start'], $this->signals);
+        $this->assertSame('error', end($this->notified)['level']);
+        $this->assertStringContainsString('kept failing', end($this->notified)['body']);
+        $this->assertStringContainsString('started on the new version', end($this->notified)['body']);
+    }
+
+    public function test_listing_backups_that_keeps_throwing_cancels_without_changes(): void
+    {
+        $this->tick();
+        $this->listError = true;
+
+        app(AutoUpgradeService::class)->tick();
+        $this->assertSame('backing_up', $this->setting()->auto_upgrade_run['phase'] ?? null);
+
+        $this->travel(61)->minutes();
+        app(AutoUpgradeService::class)->tick();
+        $s = $this->setting();
+        $this->assertNull($s->auto_upgrade_run);
+        $this->assertNull($s->auto_upgrade_paused_at, 'nothing changed, so not paused');
+        $this->assertSame([], $this->applied);
+        $this->assertStringContainsString('Nothing was changed', $s->auto_upgrade_status['text'] ?? '');
     }
 
     public function test_an_upgrade_resumes_from_stored_state_with_a_new_service(): void

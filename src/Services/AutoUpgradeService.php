@@ -121,7 +121,7 @@ class AutoUpgradeService
             if ($s->auto_upgrade_run === null) {
                 continue;
             }
-            $this->guard($s, fn () => $this->step($s));
+            $this->guard($s, fn () => $this->step($s), fn (\Throwable $e) => $this->stepThrew($s, $e));
             $running += $s->auto_upgrade_run !== null ? 1 : 0;
         }
 
@@ -150,13 +150,64 @@ class AutoUpgradeService
     }
 
     /** One server's problem never stops the others. A step that threw is retried until its phase times out. */
-    private function guard(ModManagerSetting $s, callable $work): void
+    private function guard(ModManagerSetting $s, callable $work, ?callable $onError = null): void
     {
         try {
             $work();
         } catch (\Throwable $e) {
             Log::warning('[Server Suite] auto-upgrade step failed', ['server' => $s->server_uuid, 'error' => $e->getMessage()]);
+            if ($onError !== null) {
+                try {
+                    $onError($e);
+                } catch (\Throwable $e2) {
+                    Log::warning('[Server Suite] auto-upgrade: could not end a failing run', ['server' => $s->server_uuid, 'error' => $e2->getMessage()]);
+                }
+            }
         }
+    }
+
+    /**
+     * A step threw. It is tried again each tick, but only until its phase's
+     * time limit: then the run ends instead of staying "running" forever with
+     * the server stopped (#128). In the backup phase nothing has changed, so
+     * it is cancelled. After that the upgrade has failed; if the reinstall is
+     * done and the server is stopped it is started on the new version (as the
+     * normal path does even when plugin updates fail).
+     */
+    private function stepThrew(ModManagerSetting $s, \Throwable $e): void
+    {
+        $run = $s->refresh()->auto_upgrade_run;
+        if (! is_array($run) || empty($run['phase_at'])) {
+            return;
+        }
+        [$key, $default] = match ($run['phase'] ?? '') {
+            'backing_up'   => ['backup_timeout_minutes', 60],
+            'reinstalling' => ['install_timeout_minutes', 30],
+            'booting'      => ['boot_timeout_minutes', 15],
+            default        => [null, 0],
+        };
+        if ($key === null || ! $this->timedOut($run, $key, $default)) {
+            return;
+        }
+
+        $why = 'a step kept failing (' . mb_substr($e->getMessage(), 0, 300) . ').';
+        if ($run['phase'] === 'backing_up') {
+            $this->cancel($s, 'backup', "Can't upgrade to {$run['to']}: {$why} Nothing was changed.", true);
+
+            return;
+        }
+
+        $started = false;
+        try {
+            $state = $this->ops->runtimeState($s->server_uuid);
+            if (($state['install'] ?? null) === null && ($state['power'] ?? null) === 'offline') {
+                $this->ops->power($s->server_uuid, 'start');
+                $started = true;
+            }
+        } catch (\Throwable) {
+            // leave it; the message says to check it
+        }
+        $this->fail($s, $run, ucfirst($why) . ($started ? ' The server was started on the new version.' : ''));
     }
 
     // -------------------------------------------------------------------------
