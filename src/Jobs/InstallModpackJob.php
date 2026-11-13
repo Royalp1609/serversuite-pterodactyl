@@ -62,11 +62,31 @@ class InstallModpackJob implements ShouldQueue
         }
     }
 
+    /**
+     * Laravel calls this when a copy of the job is picked up again after the
+     * queue's retry_after (90 s on the panels) while the first run is still
+     * going: with tries = 1 the copy counts as a failure. The first run holds
+     * the lock and will queue the next step, so leave the pack alone then;
+     * only a run that really died (lock free) fails the install (#118).
+     */
     public function failed(\Throwable $e): void
     {
         $pack = Modpack::query()->find($this->modpackId);
-        if ($pack?->isRunning()) {
-            app(ModpackInstaller::class)->fail($pack, 'The install job stopped: ' . $e->getMessage());
+        if (! $pack?->isRunning()) {
+            return;
+        }
+        try {
+            $lock = Cache::lock("serversuite.modpack.{$this->modpackId}", 60);
+            if (! $lock->get()) {
+                return;   // a run is still working on it
+            }
+        } catch (\BadMethodCallException) {
+            $lock = null;
+        }
+        try {
+            app(ModpackInstaller::class)->fail($pack->refresh(), 'The install job stopped: ' . $e->getMessage());
+        } finally {
+            $lock?->release();
         }
     }
 }
