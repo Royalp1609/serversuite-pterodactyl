@@ -74,12 +74,14 @@ class FileDeliveryService
 
     /**
      * Pull any file into $directory and check it landed at $expectedSize
-     * (0 = size unknown). Used for modpack files (#23), which aren't ModVersions.
-     * A wrong-sized file is deleted. Returns the verification note.
+     * (0 = size unknown). Used for modpack files, which aren't ModVersions.
+     * With $sha1 the file is also read back from Wings and its SHA-1 compared,
+     * since a file on GitHub or GitLab can change without its size changing
+     * (#133). A file that fails either check is deleted.
      *
      * @throws DeliveryException
      */
-    public function deliverFile(string $serverUuid, string $url, string $directory, string $filename, int $expectedSize): string
+    public function deliverFile(string $serverUuid, string $url, string $directory, string $filename, int $expectedSize, ?string $sha1 = null): string
     {
         $this->daemon->pull($serverUuid, $url, $directory, $filename, true);
 
@@ -99,7 +101,38 @@ class FileDeliveryService
             throw DeliveryException::verificationFailed("size mismatch: expected {$expectedSize} bytes, got {$match['size']}");
         }
 
+        $sha1 = strtolower(trim((string) $sha1));
+        if ($sha1 !== '') {
+            $this->verifySha1($serverUuid, $directory, $filename, $sha1, $expectedSize > 0 ? $expectedSize : (int) $match['size']);
+
+            return 'SHA-1 verified';
+        }
+
         return $expectedSize > 0 ? "size verified ({$expectedSize} bytes)" : 'file present (no reference size)';
+    }
+
+    /** Read a delivered file back from Wings and compare its SHA-1; delete it on a mismatch. */
+    private function verifySha1(string $serverUuid, string $directory, string $filename, string $sha1, int $size): void
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'ss-sha1-');
+        if ($tmp === false) {
+            throw DeliveryException::verificationFailed("no temp file to check the SHA-1 of {$filename}");
+        }
+        try {
+            $path = rtrim($directory, '/') . '/' . $filename;
+            $limit = $size > 0 ? $size : 1073741824;
+            if (! $this->daemon->downloadTo($serverUuid, $path, $tmp, $limit)) {
+                $this->safeDelete($serverUuid, $directory, $filename);
+                throw DeliveryException::verificationFailed("could not read {$filename} back to check its SHA-1");
+            }
+            $got = (string) sha1_file($tmp);
+            if (! hash_equals($sha1, $got)) {
+                $this->safeDelete($serverUuid, $directory, $filename);
+                throw DeliveryException::verificationFailed("SHA-1 mismatch: expected {$sha1}, got {$got}");
+            }
+        } finally {
+            @unlink($tmp);
+        }
     }
 
     /**
