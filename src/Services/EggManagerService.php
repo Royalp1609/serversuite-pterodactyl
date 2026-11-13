@@ -318,6 +318,10 @@ class EggManagerService
         $seen = [];
         foreach ($this->eggs() as $egg) {
             $slug = $this->loaderSlug((string) $egg['name']);
+            // "Vanilla Bedrock" is not a Java loader (#119).
+            if (str_contains(strtolower((string) $egg['name']), 'bedrock')) {
+                continue;
+            }
             if ($slug === null || ! in_array($slug, $serverLoaders, true) || isset($seen[$slug])) {
                 continue;
             }

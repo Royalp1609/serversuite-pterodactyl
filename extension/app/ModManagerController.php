@@ -1202,15 +1202,14 @@ class ModManagerController extends Controller
         // When Wings finishes, the mod list is brought back in line (#60).
         app(\ServerSuite\Services\RestoreSyncService::class)->noteRestore($srv->uuid, $backup, (bool) ($data['truncate'] ?? false));
 
-        // Re-align the server's version to the version stamped in the backup's
-        // name, so the restored world matches the server's version settings.
+        // Re-align the server's version to the one recorded when Server Suite
+        // took the backup (not its name, which users can edit: #119), so the
+        // restored world matches the server's version settings.
         // Best-effort — never allowed to fail the restore.
         $aligned = null;
         try {
-            $name = collect(app(PanelServerOps::class)->listBackups($server))
-                ->firstWhere('uuid', $backup)?->name;
             $aligned = app(\ServerSuite\Services\VersionSwitchService::class)
-                ->alignToBackupVersion($srv, $name);
+                ->alignToBackupVersion($srv, $backup);
         } catch (\Throwable $e) {
             // alignment is a nicety, not a requirement
         }

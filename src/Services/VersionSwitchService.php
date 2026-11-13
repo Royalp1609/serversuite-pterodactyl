@@ -159,25 +159,49 @@ class VersionSwitchService
     }
 
     /**
-     * Re-align the server's version to the one stamped in a restored backup's
-     * name (e.g. "v1.20.6 Paper · Auto …"), so the restored world and the
-     * server's version settings match — a mismatched jar/world is exactly the
+     * Re-align the server's version (and loader egg) to what it was when a
+     * restored backup was taken, so the restored world and the server's
+     * version settings match — a mismatched jar/world is exactly the
      * corruption case restores otherwise create.
      *
-     * Best-effort: an unstamped/unparseable name is a no-op, and every step is
-     * guarded so it can never turn a successful restore into an error.
+     * The loader and version come from the record Server Suite saved when it
+     * took the backup (BackupModList settings), never from the backup's name:
+     * names are user-editable, so "v1.2 before rebuild" must not change the
+     * server (#119). A backup with no record (taken on the panel's own Backups
+     * page, or before records existed) is left alone.
+     *
+     * Best-effort: every step is guarded so it can never turn a successful
+     * restore into an error.
      *
      * @return array{version: string, loader: ?string, image_changed: bool}|null
      */
-    public function alignToBackupVersion(object $server, ?string $backupName): ?array
+    public function alignToBackupVersion(object $server, ?string $backupUuid): ?array
     {
-        if (! $backupName || ! preg_match('/^v(\d+(?:\.\d+)+)(?:\s+([A-Za-z0-9]+))?/', $backupName, $m)) {
+        if (! $backupUuid) {
+            return null;
+        }
+        try {
+            GameGuard::assertMinecraft($server, 'align the version');   // Java Edition only
+        } catch (\Throwable $e) {
             return null;
         }
 
-        $version = $m[1];
-        $loader  = $m[2] ?? null;
-        $uuid    = $server->uuid;
+        $uuid  = $server->uuid;
+        $saved = \ServerSuite\Models\BackupModList::query()
+            ->where('backup_uuid', $backupUuid)->where('server_uuid', $uuid)->first();
+        $s       = (array) ($saved?->settings ?? []);
+        $version = trim((string) ($s['game_version'] ?? ''));
+        $loader  = ($s['loader'] ?? null) !== null ? strtolower((string) $s['loader']) : null;
+        if (! preg_match('/^\d+(?:\.\d+)+$/', $version)) {
+            return null;
+        }
+
+        // Nothing changed since the backup: leave the variables (and any pinned build) alone.
+        $current = \ServerSuite\Models\ModManagerSetting::forServer($uuid);
+        if ($version === (string) $current->game_version
+            && ($loader === null || $loader === strtolower((string) $current->loader))) {
+            return null;
+        }
 
         // Cross-loader restore: the backup was a different loader than the
         // server's current egg. The restore brought back that loader's files but
@@ -186,7 +210,7 @@ class VersionSwitchService
         // null) for a same-loader restore, which then falls through below.
         if ($loader) {
             try {
-                $switched = $this->loaders->alignLoaderForRestore($server, strtolower($loader), $version);
+                $switched = $this->loaders->alignLoaderForRestore($server, $loader, $version);
                 if ($switched !== null) {
                     return $switched;
                 }
