@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Can from '@/components/elements/Can';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
+import { safeExternalUrl } from './safeUrl';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft, faBoxOpen, faExternalLinkAlt, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import tw from 'twin.macro';
@@ -397,7 +398,7 @@ export default () => {
                         {pack.icon ? <Icon src={pack.icon} alt="" /> : <NoIcon />}
                         <div>
                             <h3 className="font-semibold text-white">{pack.name}</h3>
-                            {pack.url && <a href={pack.url} target="_blank" rel="noopener noreferrer" className="text-xs text-neutral-400">View on {source === 'curseforge' ? 'CurseForge' : 'Modrinth'} <FontAwesomeIcon icon={faExternalLinkAlt} /></a>}
+                            {safeExternalUrl(pack.url) && <a href={safeExternalUrl(pack.url) as string} target="_blank" rel="noopener noreferrer" className="text-xs text-neutral-400">View on {source === 'curseforge' ? 'CurseForge' : 'Modrinth'} <FontAwesomeIcon icon={faExternalLinkAlt} /></a>}
                         </div>
                         <GhostButton style={{ marginLeft: 'auto' }} onClick={() => { setPack(null); setPreview(null); }}><FontAwesomeIcon icon={faArrowLeft} /> Back</GhostButton>
                     </div>
