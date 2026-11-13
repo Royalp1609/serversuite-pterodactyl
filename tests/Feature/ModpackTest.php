@@ -357,7 +357,9 @@ it('refuses a pack that changed after review, before any file changes', function
 
     expect($pack->status)->toBe(Modpack::STATUS_FAILED)
         ->and($pack->error)->toContain('not the one you confirmed')
+        ->and($pack->error)->toContain('The server was started again.')
         ->and(array_keys($this->wings->files))->toBe(['/mods/mine.jar']);
+    $this->ops->shouldHaveReceived('power')->with('srv-mp', 'start')->once();   // #134: nothing changed, so it runs again
 });
 
 it('changes nothing without the backup', function () {
@@ -370,6 +372,32 @@ it('changes nothing without the backup', function () {
     expect($pack->status)->toBe(Modpack::STATUS_FAILED)
         ->and($pack->error)->toContain('backup could not be taken')
         ->and($this->wings->pulled)->toBe([]);
+    $this->ops->shouldHaveReceived('power')->with('srv-mp', 'start')->once();   // #134
+});
+
+it('leaves the server stopped when a failure comes after files changed (#134)', function () {
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    $pack = Modpack::forServer('srv-mp');
+    $pack->forceFill(['phase' => 'files', 'state' => ['was_running' => true]])->save();
+
+    app(ServerSuite\Services\ModpackInstaller::class)->fail($pack, 'Wings went away.');
+
+    expect($pack->refresh()->status)->toBe(Modpack::STATUS_FAILED)
+        ->and($pack->error)->toContain('left stopped');
+    $this->ops->shouldNotHaveReceived('power', ['srv-mp', 'start']);
+});
+
+it('does not start a server that was already stopped (#134)', function () {
+    mpV1($this);
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    $pack = Modpack::forServer('srv-mp');
+    $pack->forceFill(['phase' => 'staging', 'state' => []])->save();
+
+    app(ServerSuite\Services\ModpackInstaller::class)->fail($pack, 'Nope.');
+
+    expect($pack->refresh()->error)->toBe('Nope.');
+    $this->ops->shouldNotHaveReceived('power', ['srv-mp', 'start']);
 });
 
 it('makes override files readable when the zip has no permissions on them', function () {
