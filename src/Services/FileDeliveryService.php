@@ -4,6 +4,7 @@ namespace ServerSuite\Services;
 
 use ServerSuite\Contracts\DaemonFileClient;
 use ServerSuite\Exceptions\DeliveryException;
+use ServerSuite\Exceptions\WipeFailedException;
 use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Support\Data\ModVersion;
 use Illuminate\Support\Facades\Log;
@@ -74,12 +75,14 @@ class FileDeliveryService
 
     /**
      * Pull any file into $directory and check it landed at $expectedSize
-     * (0 = size unknown). Used for modpack files (#23), which aren't ModVersions.
-     * A wrong-sized file is deleted. Returns the verification note.
+     * (0 = size unknown). Used for modpack files, which aren't ModVersions.
+     * With $sha1 the file is also read back from Wings and its SHA-1 compared,
+     * since a file on GitHub or GitLab can change without its size changing
+     * (#133). A file that fails either check is deleted.
      *
      * @throws DeliveryException
      */
-    public function deliverFile(string $serverUuid, string $url, string $directory, string $filename, int $expectedSize): string
+    public function deliverFile(string $serverUuid, string $url, string $directory, string $filename, int $expectedSize, ?string $sha1 = null): string
     {
         $this->daemon->pull($serverUuid, $url, $directory, $filename, true);
 
@@ -99,7 +102,38 @@ class FileDeliveryService
             throw DeliveryException::verificationFailed("size mismatch: expected {$expectedSize} bytes, got {$match['size']}");
         }
 
+        $sha1 = strtolower(trim((string) $sha1));
+        if ($sha1 !== '') {
+            $this->verifySha1($serverUuid, $directory, $filename, $sha1, $expectedSize > 0 ? $expectedSize : (int) $match['size']);
+
+            return 'SHA-1 verified';
+        }
+
         return $expectedSize > 0 ? "size verified ({$expectedSize} bytes)" : 'file present (no reference size)';
+    }
+
+    /** Read a delivered file back from Wings and compare its SHA-1; delete it on a mismatch. */
+    private function verifySha1(string $serverUuid, string $directory, string $filename, string $sha1, int $size): void
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'ss-sha1-');
+        if ($tmp === false) {
+            throw DeliveryException::verificationFailed("no temp file to check the SHA-1 of {$filename}");
+        }
+        try {
+            $path = rtrim($directory, '/') . '/' . $filename;
+            $limit = $size > 0 ? $size : 1073741824;
+            if (! $this->daemon->downloadTo($serverUuid, $path, $tmp, $limit)) {
+                $this->safeDelete($serverUuid, $directory, $filename);
+                throw DeliveryException::verificationFailed("could not read {$filename} back to check its SHA-1");
+            }
+            $got = (string) sha1_file($tmp);
+            if (! hash_equals($sha1, $got)) {
+                $this->safeDelete($serverUuid, $directory, $filename);
+                throw DeliveryException::verificationFailed("SHA-1 mismatch: expected {$sha1}, got {$got}");
+            }
+        } finally {
+            @unlink($tmp);
+        }
     }
 
     /**
@@ -201,7 +235,10 @@ class FileDeliveryService
      * Exact-normalised match (not prefix) avoids eating an unrelated "backups/"
      * when removing something called "Backup", and a hard PROTECTED blocklist
      * guarantees critical folders/files (world, logs, plugins, jars, …) are
-     * never touched even if a mod shares their name. Purely best-effort: any
+     * never touched even if a mod shares their name. In the server root only
+     * folders are swept: files there belong to the server software (a mod
+     * called "Purpur" must not take purpur.yml with it), and the world folders
+     * from level-name are protected too (#135). Purely best-effort: any
      * failure is swallowed so it can never block the actual removal.
      *
      * @return array<int,string> paths removed (for logging)
@@ -215,6 +252,7 @@ class FileDeliveryService
         }
 
         $removed = [];
+        $worlds = $this->worldFolderNames($serverUuid);
 
         foreach (['plugins', 'config', '/'] as $root) {
             try {
@@ -228,6 +266,9 @@ class FileDeliveryService
                 $name = (string) ($entry['name'] ?? '');
                 if ($name === '' || in_array(strtolower($name), self::PROTECTED, true)) {
                     continue;
+                }
+                if ($root === '/' && (($entry['is_file'] ?? true) || in_array(strtolower($name), $worlds, true))) {
+                    continue;   // root: mod config folders only, never files or worlds
                 }
                 // Strip a config-ish extension so "journeymap.yml" matches too.
                 $base = preg_replace('/\.(ya?ml|toml|conf|json|properties|txt|cfg)$/i', '', $name);
@@ -258,32 +299,27 @@ class FileDeliveryService
      *     configs and server.properties intact.
      *   - clean_slate:  deletes everything except eula.txt (kept so the server
      *     still boots — the egg install script does not re-accept the EULA).
-     * Best-effort; returns the entries removed.
      *
-     * @return array<int,string>
+     * Throws when the folder can't be listed, the delete fails, or anything
+     * that should be gone is still there afterwards, so a switch or reset
+     * stops instead of reporting a wipe that didn't happen (#136).
+     *
+     * @return array<int,string> the entries removed
+     *
+     * @throws WipeFailedException
      */
     public function wipeForNuclear(string $serverUuid, string $mode): array
     {
         try {
             $entries = $this->daemon->listDirectory($serverUuid, '/');
         } catch (\Throwable $e) {
-            return [];
+            throw new WipeFailedException("Couldn't list the server's files, so nothing was wiped or changed: {$e->getMessage()}", 0, $e);
         }
 
         $victims = [];
 
         if ($mode === 'keep_plugins') {
-            // Resolve the world base name (custom level-name is respected).
-            $level = 'world';
-            try {
-                $props = $this->daemon->readFile($serverUuid, 'server.properties');
-                if ($props && preg_match('/^\s*level-name\s*=\s*(.+?)\s*$/m', $props, $m)) {
-                    $level = trim($m[1]) ?: 'world';
-                }
-            } catch (\Throwable $e) {
-                // fall back to default "world"
-            }
-            $worlds = array_map('strtolower', [$level, $level . '_nether', $level . '_the_end']);
+            $worlds = $this->worldFolderNames($serverUuid, true);
 
             foreach ($entries as $e) {
                 $name = (string) ($e['name'] ?? '');
@@ -302,15 +338,57 @@ class FileDeliveryService
             }
         }
 
-        if ($victims) {
-            try {
-                $this->daemon->deleteFiles($serverUuid, '/', $victims);
-            } catch (\Throwable $e) {
-                return [];
-            }
+        if (! $victims) {
+            return [];
+        }
+
+        try {
+            $this->daemon->deleteFiles($serverUuid, '/', $victims);
+        } catch (\Throwable $e) {
+            throw new WipeFailedException("Couldn't delete the server's files, so the reset was stopped. Some files may already be gone: {$e->getMessage()}", 0, $e);
+        }
+
+        // Wings can report success and still leave entries behind; check.
+        try {
+            $after = $this->daemon->listDirectory($serverUuid, '/');
+        } catch (\Throwable $e) {
+            throw new WipeFailedException("Couldn't check the wipe afterwards, so the reset was stopped: {$e->getMessage()}", 0, $e);
+        }
+        $left = array_values(array_intersect($victims, array_map(fn ($e) => (string) ($e['name'] ?? ''), $after)));
+        if ($left) {
+            throw new WipeFailedException('The wipe left files behind (' . implode(', ', array_slice($left, 0, 5)) . (count($left) > 5 ? ', …' : '') . '), so the reset was stopped.');
         }
 
         return $victims;
+    }
+
+    /**
+     * World folder names (lower case) from server.properties level-name, plus
+     * the _nether and _the_end folders. Falls back to "world". With $strict,
+     * a level-name that is a path (worlds/survival) throws, since only
+     * top-level folders are wiped and the reset would otherwise do nothing.
+     *
+     * @return array<int,string>
+     */
+    private function worldFolderNames(string $serverUuid, bool $strict = false): array
+    {
+        $level = 'world';
+        try {
+            $props = $this->daemon->readFile($serverUuid, 'server.properties');
+            if ($props && preg_match('/^\s*level-name\s*=\s*(.+?)\s*$/m', $props, $m)) {
+                $level = trim($m[1]) ?: 'world';
+            }
+        } catch (\Throwable $e) {
+            // fall back to default "world"
+        }
+        if (str_contains($level, '/') || str_contains($level, '\\')) {
+            if ($strict) {
+                throw new WipeFailedException("level-name in server.properties is a path ({$level}). Reset the world from the file manager instead.");
+            }
+            $level = basename(str_replace('\\', '/', $level));
+        }
+
+        return array_map('strtolower', [$level, $level . '_nether', $level . '_the_end']);
     }
 
     private function normalizeName(string $s): string
@@ -357,8 +435,8 @@ class FileDeliveryService
     /**
      * Names that must NEVER be deleted by the config sweep, regardless of a
      * mod's name. Guards worlds, server state, and core config so a mod called
-     * e.g. "World" or "logs" can't wipe them. (A custom level-name is a rare
-     * residual edge not covered here.)
+     * e.g. "World" or "logs" can't wipe them. Custom level-name world folders
+     * are protected separately (worldFolderNames).
      */
     private const PROTECTED = [
         'world', 'world_nether', 'world_the_end', 'logs', 'cache', 'crash-reports',
@@ -367,6 +445,10 @@ class FileDeliveryService
         'banned-players.json', 'banned-ips.json', 'usercache.json', 'session.lock',
         'bukkit.yml', 'spigot.yml', 'paper.yml', 'paper-global.yml',
         'paper-world-defaults.yml', 'commands.yml', 'help.yml', 'permissions.yml',
+        'purpur.yml', 'pufferfish.yml', 'leaves.yml', 'velocity.toml',
+        'forwarding.secret', 'config.yml', 'allowlist.json', 'permissions.json',
+        'worlds', 'behavior_packs', 'resource_packs', 'development_behavior_packs',
+        'development_resource_packs', 'valid_known_packs.json', 'server.json',
     ];
 
     // -------------------------------------------------------------------------

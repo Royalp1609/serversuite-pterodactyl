@@ -81,12 +81,30 @@ class ModpackInstaller
         return null;
     }
 
+    /** Phases that fail before anything outside the staging folder has changed. */
+    private const UNCHANGED_PHASES = ['stopping', 'backing_up', 'staging'];
+
     public function fail(Modpack $pack, string $message): void
     {
+        // The install stopped the server. If nothing on it changed yet, start
+        // it again; once files or the egg have changed, starting a half-done
+        // server could make a new world or crash, so it is left stopped and
+        // the message says so (#134).
+        $restart = null;
+        if (! empty($pack->state['was_running'])) {
+            $restart = in_array($pack->phase, self::UNCHANGED_PHASES, true);
+            $message = rtrim($message) . ($restart
+                ? ' The server was started again.'
+                : ' The server was left stopped because its files had already changed. Check it, or restore the backup taken before the change, before starting it.');
+        }
+
         $pack->forceFill([
             'status' => Modpack::STATUS_FAILED, 'error' => mb_substr($message, 0, 2000), 'finished_at' => now(),
         ])->save();
         $this->cleanStaging($pack->server_uuid);
+        if ($restart) {
+            $this->startAgain($pack, 'modpack-failed');
+        }
         SuiteActivity::logFor($pack->server_uuid, 'server:serversuite.modpack-failed', [
             'pack' => $pack->target['name'] ?? null, 'version' => $pack->target['version_number'] ?? null, 'error' => $pack->error,
         ]);
@@ -341,7 +359,7 @@ class ModpackInstaller
                 if (collect($this->daemon->listDirectory($uuid, $dir))->contains(fn ($e) => $e['name'] === $file)) {
                     $this->daemon->deleteFiles($uuid, $dir, [$file]);
                 }
-                $this->delivery->deliverFile($uuid, (string) $item['url'], $dir, $file, (int) $item['size']);
+                $this->delivery->deliverFile($uuid, (string) $item['url'], $dir, $file, (int) $item['size'], (string) ($item['sha1'] ?? ''));
             } catch (\Throwable $e) {
                 $failures[] = ['path' => $item['path'], 'reason' => mb_substr($e->getMessage(), 0, 300)];
             }
