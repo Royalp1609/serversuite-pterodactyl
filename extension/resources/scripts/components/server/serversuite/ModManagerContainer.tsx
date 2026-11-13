@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Can from '@/components/elements/Can';
 import ConfigsPanel from './ConfigsPanel';
 import { getClearance } from './prechange';
+import { safeExternalUrl } from './safeUrl';
 import { BackupChoice, BackupPromptHost } from './BackupPrompt';
 import CrashCard from './CrashCard';
 import RestoreBanner from './RestoreBanner';
@@ -106,7 +107,12 @@ const MarkdownLite = ({ source }: { source: string }) => {
             else if (tok.startsWith('`')) nodes.push(<code key={`${keyBase}-${i}`} className="px-1 rounded bg-neutral-800 text-indigo-300">{tok.slice(1, -1)}</code>);
             else {
                 const lm = tok.match(/\[([^\]]+)\]\(([^)]+)\)/);
-                if (lm) nodes.push(<a key={`${keyBase}-${i}`} href={lm[2]} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">{lm[1]}</a>);
+                if (lm) {
+                    const href = safeExternalUrl(lm[2]);
+                    nodes.push(href
+                        ? <a key={`${keyBase}-${i}`} href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">{lm[1]}</a>
+                        : <span key={`${keyBase}-${i}`}>{lm[1]}</span>);
+                }
             }
             last = m.index + tok.length; i++;
         }
@@ -1157,8 +1163,8 @@ export default () => {
                                     </div>
                                     <p className="text-neutral-300 text-sm mb-4 line-clamp-3 flex-1">{mod.description}</p>
                                     <div className="flex items-center gap-2">
-                                        {mod.page_url && (
-                                            <GhostButton onClick={() => window.open(mod.page_url as string, '_blank')} title="Open on site">
+                                        {safeExternalUrl(mod.page_url) && (
+                                            <GhostButton onClick={() => window.open(safeExternalUrl(mod.page_url) as string, '_blank', 'noopener,noreferrer')} title="Open on site">
                                                 <FontAwesomeIcon icon={faExternalLinkAlt} />
                                             </GhostButton>
                                         )}
@@ -1464,8 +1470,8 @@ export default () => {
                                         <p className="text-neutral-300 text-sm mt-2">{details.mod.description}</p>
                                     </div>
                                     <div className="flex gap-2 flex-shrink-0">
-                                        {details.mod.page_url && (
-                                            <GhostButton onClick={() => window.open(details.mod.page_url as string, '_blank')} title="Open on site">
+                                        {safeExternalUrl(details.mod.page_url) && (
+                                            <GhostButton onClick={() => window.open(safeExternalUrl(details.mod.page_url) as string, '_blank', 'noopener,noreferrer')} title="Open on site">
                                                 <FontAwesomeIcon icon={faExternalLinkAlt} />
                                             </GhostButton>
                                         )}
