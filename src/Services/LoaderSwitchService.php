@@ -185,14 +185,10 @@ class LoaderSwitchService
         // querying repositories with the wrong loader, and never re-detecting.
         $loaderSlug = $this->deriveLoaderSlug((string) $egg->name);
         try {
-            $update = ['game_version' => $mc];
-            if ($loaderSlug !== null) {
-                $update['loader'] = $loaderSlug;
-                $path = config("serversuite.mod_directories.{$loaderSlug}");
-                if ($path) {
-                    $update['install_path'] = $path;
-                }
-            }
+            // An egg we can't name clears the old loader rather than keeping
+            // it (#137): detection then works it out from the new egg.
+            $update = ['game_version' => $mc, 'loader' => $loaderSlug, 'loader_locked' => false,
+                'install_path' => $loaderSlug !== null ? (config("serversuite.mod_directories.{$loaderSlug}") ?: null) : null];
             \ServerSuite\Models\ModManagerSetting::forServer($uuid)->update($update);
         } catch (\Throwable $e) {
             // non-fatal — detection will still recover it from the egg name
@@ -276,9 +272,16 @@ class LoaderSwitchService
      */
     private function deriveLoaderSlug(string $eggName): ?string
     {
+        // Most specific first: neoforge before forge, Paper forks before paper.
+        // Hybrids that load Forge mods count as forge (#137).
         $name = strtolower($eggName);
-        foreach (['neoforge', 'fabric', 'quilt', 'forge', 'purpur', 'paper', 'spigot', 'waterfall', 'bungeecord', 'velocity', 'sponge', 'vanilla'] as $slug) {
-            if (str_contains($name, $slug)) {
+        foreach ([
+            'neoforge' => 'neoforge', 'fabric' => 'fabric', 'quilt' => 'quilt',
+            'mohist' => 'forge', 'arclight' => 'forge', 'forge' => 'forge',
+            'folia' => 'folia', 'purpur' => 'purpur', 'pufferfish' => 'pufferfish', 'paper' => 'paper', 'spigot' => 'spigot',
+            'waterfall' => 'waterfall', 'bungeecord' => 'bungeecord', 'velocity' => 'velocity', 'sponge' => 'sponge', 'vanilla' => 'vanilla',
+        ] as $word => $slug) {
+            if (str_contains($name, $word)) {
                 return $slug;
             }
         }
