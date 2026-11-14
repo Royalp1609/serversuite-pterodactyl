@@ -373,10 +373,8 @@ class CurseForgeDriver extends AbstractDriver
         ?string $loader = null,
         ?string $gameVersion = null
     ): ?ModVersion {
-        $versions = $this->versions($modId, $loader, $gameVersion);
-
-        // CurseForge returns files newest-first by default
-        return $versions[0] ?? null;
+        // Files come newest-first; the newest release file, not a beta or alpha (#126).
+        return self::newestStable($this->versions($modId, $loader, $gameVersion));
     }
 
     // -------------------------------------------------------------------------
