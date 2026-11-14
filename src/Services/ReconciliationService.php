@@ -38,13 +38,29 @@ class ReconciliationService
      */
     public function reconcile(object $server): array
     {
+        return $this->scan($server, true);
+    }
+
+    /**
+     * The drift, optionally without identifying untracked files (adopt only
+     * needs the names; identifying hashes each jar and makes HTTP calls, #127).
+     */
+    protected function scan(object $server, bool $identify): array
+    {
         $dir     = $this->delivery->targetDirectory($server->uuid);
         $entries = $this->files->listDirectory($server->uuid, $dir);
 
         $diskFiles = [];
+        $disabledFiles = [];
         foreach ($entries as $e) {
-            if (($e['is_file'] ?? false) && str_ends_with(strtolower($e['name']), '.jar')) {
+            if (! ($e['is_file'] ?? false)) {
+                continue;
+            }
+            $lower = strtolower($e['name']);
+            if (str_ends_with($lower, '.jar')) {
                 $diskFiles[$e['name']] = (int) ($e['size'] ?? 0);
+            } elseif (str_ends_with($lower, '.jar.disabled')) {
+                $disabledFiles[$e['name']] = true;
             }
         }
 
@@ -67,23 +83,48 @@ class ReconciliationService
             $untracked[] = [
                 'filename'   => $name,
                 'size'       => $size,
-                'identified' => $this->identify($server, $dir, $name, $size),
+                'identified' => $identify ? $this->identifyCached($server, $dir, $name, $size) : null,
             ];
         }
 
         $missing = [];
         foreach ($mods as $mod) {
-            if ($mod->target_filename && ! isset($diskFiles[$mod->target_filename])) {
-                $missing[] = [
-                    'id'                => $mod->id,
-                    'mod_name'          => $mod->mod_name,
-                    'installed_version' => $mod->installed_version,
-                    'target_filename'   => $mod->target_filename,
-                ];
+            if (! $mod->target_filename) {
+                continue;
             }
+            // A disabled mod's file is name.jar.disabled (#127).
+            if (isset($diskFiles[$mod->target_filename]) || isset($disabledFiles[$mod->target_filename . '.disabled'])) {
+                continue;
+            }
+            // Only this folder was listed: a mod tracked somewhere else (pack
+            // files, or the old folder after a loader switch) can't be judged.
+            if ($mod->install_path !== null && $mod->install_path !== ''
+                && '/' . trim((string) $mod->install_path, '/') !== '/' . trim($dir, '/')) {
+                continue;
+            }
+            $missing[] = [
+                'id'                => $mod->id,
+                'mod_name'          => $mod->mod_name,
+                'installed_version' => $mod->installed_version,
+                'target_filename'   => $mod->target_filename,
+            ];
         }
 
         return ['directory' => $dir, 'untracked' => $untracked, 'missing' => $missing];
+    }
+
+    /** identify(), remembered for ten minutes per file and size, so rescans stay quick. */
+    protected function identifyCached(object $server, string $dir, string $filename, int $size): ?array
+    {
+        $key = 'serversuite:reconcile:identify:' . sha1($server->uuid . '|' . $dir . '|' . $filename . '|' . $size);
+        $hit = \Illuminate\Support\Facades\Cache::get($key);
+        if (is_array($hit) && array_key_exists('result', $hit)) {
+            return $hit['result'];
+        }
+        $result = $this->identify($server, $dir, $filename, $size);
+        \Illuminate\Support\Facades\Cache::put($key, ['result' => $result], 600);
+
+        return $result;
     }
 
     /**
@@ -177,7 +218,7 @@ class ReconciliationService
         // Only a file the reconcile list shows (#36): a bare name, in the
         // mods folder, not tracked yet. The name later decides what removing
         // the mod deletes, so "../server.jar" must never get in.
-        $untracked = array_column($this->reconcile($server)['untracked'], 'filename');
+        $untracked = array_column($this->scan($server, false)['untracked'], 'filename');
         if (! self::isBareFilename($filename) || ! in_array($filename, $untracked, true)) {
             throw new \InvalidArgumentException('Only files in the mods folder that are not tracked yet can be adopted.');
         }
@@ -204,6 +245,18 @@ class ReconciliationService
 
         $driver = $this->repositories->driver($source);
         $mod    = $driver->get($modId);
+
+        // One row per mod and server (unique index): a second file of a mod
+        // already tracked is refused with a reason, not a database error (#127).
+        if ($mod) {
+            $tracked = ServerMod::forServer($server->uuid)->where('source', $mod->source)->where('source_id', $mod->id)->first();
+            if ($tracked !== null) {
+                throw new \InvalidArgumentException(sprintf(
+                    '%s is already tracked as %s. Remove one of the two files, or track this one as a manual file.',
+                    $mod->name, $tracked->target_filename ?: 'another file',
+                ));
+            }
+        }
 
         if (! $mod) {
             // Identification went stale — fall back to manual tracking rather
