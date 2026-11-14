@@ -611,6 +611,15 @@ class ModManagerService
      */
     public function update(ServerMod $serverMod, object $server): ServerMod
     {
+        // A disabled mod would come back enabled next to its old .jar.disabled,
+        // and a pack mod updates with its pack (#121).
+        if ($serverMod->disabled_at !== null) {
+            throw \ServerSuite\Exceptions\DeliveryException::daemonError("{$serverMod->mod_name} is disabled. Enable it before updating it.");
+        }
+        if ($serverMod->modpack_id !== null) {
+            throw \ServerSuite\Exceptions\DeliveryException::daemonError("{$serverMod->mod_name} belongs to a modpack and updates with the pack.");
+        }
+
         $driver   = $this->repositories->driver($serverMod->source);
         $settings = ModManagerSetting::forServer($server->uuid);
         $loader   = $serverMod->loader ?: ($settings->loader ?: $this->loaderDetection->detect($server));
@@ -919,7 +928,10 @@ class ModManagerService
         $mods = ServerMod::forServer($server->uuid)
             ->with('pendingUpdate')
             ->get()
-            ->filter(fn (ServerMod $m) => $m->pendingUpdate !== null);
+            // Skip dismissed updates, pack mods (they update with the pack)
+            // and disabled mods (#121).
+            ->filter(fn (ServerMod $m) => $m->pendingUpdate !== null && ! $m->pendingUpdate->dismissed
+                && $m->modpack_id === null && $m->disabled_at === null);
 
         $updated = [];
         $failed  = [];
