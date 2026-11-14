@@ -54,7 +54,7 @@ class CheckUpdatesCommand extends Command
             }
 
             // --apply / admin auto-apply: install in the background, behind a backup.
-            if ($apply && $this->hasApplicable($uuid) && ApplyModUpdatesJob::queueFor($uuid)) {
+            if ($apply && $mods->applicableUpdates($uuid)->isNotEmpty() && ApplyModUpdatesJob::queueFor($uuid)) {
                 $queued++;
             }
         }
@@ -65,14 +65,6 @@ class CheckUpdatesCommand extends Command
             . ($apply ? " Servers queued to install: {$queued}." : ''));
 
         return self::SUCCESS;
-    }
-
-    /** Whether update all would install anything on this server. */
-    private function hasApplicable(string $uuid): bool
-    {
-        return ServerMod::forServer($uuid)->with('pendingUpdate')->get()
-            ->contains(fn (ServerMod $m) => $m->pendingUpdate !== null && ! $m->pendingUpdate->dismissed
-                && $m->modpack_id === null && $m->disabled_at === null);
     }
 
     /** #26: each server's waiting updates; the same list is sent once a day at most. */
