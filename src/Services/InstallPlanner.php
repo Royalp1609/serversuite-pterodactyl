@@ -64,11 +64,17 @@ class InstallPlanner
             // Resolve the version we'd install. For the primary mod we were
             // handed an explicit versionId; for dependencies we pick the latest
             // compatible version.
-            $version = $vid
-                ? $this->findVersion($driver, $mid, $vid, $loader, $gameVersion)
-                : $driver->latestVersion($mid, $loader, $gameVersion);
-
             $modName = $this->resolveName($driver, $mid, $src);
+            $problem = null;
+            try {
+                $version = $vid
+                    ? \ServerSuite\Support\ChosenVersion::resolve($driver, $mid, $vid, $loader, $gameVersion, $modName)
+                    : $driver->latestVersion($mid, $loader, $gameVersion);
+            } catch (\ServerSuite\Exceptions\DeliveryException $e) {
+                // The picked version is for another loader, or gone (#138).
+                $version = null;
+                $problem = $e->getMessage();
+            }
 
             if (! $version) {
                 // No compatible version exists for this loader/game version.
@@ -80,7 +86,7 @@ class InstallPlanner
                     versionNumber: '',
                     status: 'manual',
                     kind: $kind,
-                    reason: 'No compatible version found for this loader / game version.',
+                    reason: $problem ?? 'No compatible version found for this loader / game version.',
                 );
                 continue;
             }
@@ -182,21 +188,6 @@ class InstallPlanner
             status: 'install',
             kind: $kind,
         );
-    }
-
-    /**
-     * Find a specific version by id from a driver's version list.
-     */
-    protected function findVersion($driver, string $modId, string $versionId, ?string $loader, ?string $gameVersion): ?ModVersion
-    {
-        foreach ($driver->versions($modId, $loader, $gameVersion) as $v) {
-            if ($v->versionId === $versionId) {
-                return $v;
-            }
-        }
-
-        // Fall back to latest if the requested id isn't in the compatible set.
-        return $driver->latestVersion($modId, $loader, $gameVersion);
     }
 
     /**

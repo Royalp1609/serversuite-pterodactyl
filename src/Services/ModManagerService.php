@@ -497,9 +497,9 @@ class ModManagerService
         $settings = ModManagerSetting::forServer($server->uuid);
         $loader   = $settings->loader ?: $this->loaderDetection->detect($server);
 
-        $version = $this->resolveVersion($driver, $modId, $versionId, $loader, $settings->game_version);
         $mod     = $driver->get($modId);
         $modName = $mod?->name ?? $modId;
+        $version = $this->resolveVersion($driver, $modId, $versionId, $loader, $settings->game_version, $modName);
 
         // If this mod is already in the manifest with a different filename,
         // remember the old file so we can remove it after the new one lands.
@@ -915,26 +915,10 @@ class ModManagerService
     // Helpers
     // -------------------------------------------------------------------------
 
-    /**
-     * Resolve a ModVersion by id, falling back to latest compatible.
-     */
-    protected function resolveVersion($driver, string $modId, string $versionId, ?string $loader, ?string $gameVersion): ModVersion
+    /** The version the user picked, or a clear error; never a different one (#138). */
+    protected function resolveVersion($driver, string $modId, string $versionId, ?string $loader, ?string $gameVersion, ?string $modName = null): ModVersion
     {
-        foreach ($driver->versions($modId, $loader, $gameVersion) as $v) {
-            if ($v->versionId === $versionId) {
-                return $v;
-            }
-        }
-
-        $latest = $driver->latestVersion($modId, $loader, $gameVersion);
-
-        if (! $latest) {
-            throw \ServerSuite\Exceptions\DeliveryException::daemonError(
-                "No compatible version found for mod {$modId}."
-            );
-        }
-
-        return $latest;
+        return \ServerSuite\Support\ChosenVersion::resolve($driver, $modId, $versionId, $loader, $gameVersion, $modName ?? $modId);
     }
 
     /**
