@@ -28,6 +28,27 @@ abstract class AbstractDriver implements RepositoryContract
     }
 
     /**
+     * "Latest" for updates, update checks and installs without a pick (#126):
+     * the newest release build. Only a project with no release builds at all
+     * falls back to its newest beta, then alpha, so beta-only mods still
+     * install, but a mod on a release is never moved onto a pre-release.
+     *
+     * @param \ServerSuite\Support\Data\ModVersion[] $versions newest first
+     */
+    protected static function newestStable(array $versions): ?\ServerSuite\Support\Data\ModVersion
+    {
+        foreach (['release', 'beta', 'alpha'] as $channel) {
+            foreach ($versions as $v) {
+                if (($v->channel ?: 'release') === $channel) {
+                    return $v;
+                }
+            }
+        }
+
+        return $versions[0] ?? null;
+    }
+
+    /**
      * The base URL for this provider's API (from config).
      */
     abstract protected function baseUrl(): string;

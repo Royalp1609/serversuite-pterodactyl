@@ -373,9 +373,8 @@ class ModrinthDriver extends AbstractDriver
         ?string $loader = null,
         ?string $gameVersion = null
     ): ?ModVersion {
-        $versions = $this->versions($modId, $loader, $gameVersion);
-
-        return $versions[0] ?? null;
+        // Newest first; the newest release build, not a pre-release (#126).
+        return self::newestStable($this->versions($modId, $loader, $gameVersion));
     }
 
     // -------------------------------------------------------------------------

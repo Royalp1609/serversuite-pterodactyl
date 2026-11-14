@@ -157,7 +157,7 @@ class HangarDriver extends AbstractDriver
 
     public function latestVersion(string $modId, ?string $loader = null, ?string $gameVersion = null): ?ModVersion
     {
-        return $this->versions($modId, $loader, $gameVersion)[0] ?? null;
+        return self::newestStable($this->versions($modId, $loader, $gameVersion));
     }
 
     // -------------------------------------------------------------------------
