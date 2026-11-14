@@ -5,90 +5,64 @@ namespace ServerSuite\Console\Commands;
 use Illuminate\Console\Command;
 use ServerSuite\Models\ServerMod;
 use ServerSuite\Models\ModManagerSetting;
-use ServerSuite\Support\RepositoryManager;
-use ServerSuite\Services\ManifestService;
+use ServerSuite\Jobs\ApplyModUpdatesJob;
+use ServerSuite\Services\ModManagerService;
 
 class CheckUpdatesCommand extends Command
 {
     protected $signature = 'serversuite:check-updates
                             {--server= : Only check a specific server UUID}
-                            {--apply   : Apply available updates immediately (overrides config notify_only)}';
+                            {--apply   : Also install the updates found, behind a backup, in the background (also on when the admin turns on auto-apply)}';
 
     protected $description = 'Check all installed mods for available updates and flag them in the manifest.';
 
-    public function handle(RepositoryManager $repositories, ManifestService $manifest): int
+    public function handle(ModManagerService $mods): int
     {
         $serverFilter = $this->option('server');
-        $applyUpdates = $this->option('apply') || ! config('serversuite.scheduler.notify_only', true);
+        $apply = $this->option('apply') || ! config('serversuite.scheduler.notify_only', true);
 
         $this->info('[Server Suite] Starting update check' . ($serverFilter ? " for server {$serverFilter}" : ' for all servers') . '.');
 
-        // Fetch distinct server UUIDs that have auto_update_checks enabled
         $query = ModManagerSetting::where('auto_update_checks', true);
-
         if ($serverFilter) {
             $query->where('server_uuid', $serverFilter);
         }
+        $serverUuids = $query->pluck('server_uuid')->all();
 
-        $settings = $query->get()->keyBy('server_uuid');
-
-        if ($settings->isEmpty()) {
+        if ($serverUuids === []) {
             $this->info('[Server Suite] No servers with update checks enabled.');
+
             return self::SUCCESS;
         }
 
-        $serverUuids = $settings->keys()->toArray();
-
-        $mods = ServerMod::whereIn('server_uuid', $serverUuids)->with('pendingUpdate')->get();
-
-        $checked = 0;
-        $flagged = 0;
-
-        foreach ($mods as $serverMod) {
-            $serverSettings = $settings->get($serverMod->server_uuid);
-            $enabledRepos   = $serverSettings?->enabledRepositories() ?? [];
-
-            if (! in_array($serverMod->source, $enabledRepos, true)) {
+        $checked = $flagged = $queued = 0;
+        foreach ($serverUuids as $uuid) {
+            // Same lookup as an update (#120): the server's loader and game version.
+            try {
+                $r = $mods->checkUpdates($mods->serverFor($uuid));
+            } catch (\Throwable $e) {
+                $this->warn("  ! {$uuid}: check failed: {$e->getMessage()}");
                 continue;
             }
+            $checked += $r['checked'];
+            $flagged += $r['updates'];
+            foreach ($r['flagged'] as $line) {
+                $this->line("  \u{2192} {$line} ({$uuid})");
+            }
+            if ($r['errors'] > 0) {
+                $this->warn("  ! {$uuid}: {$r['errors']} mod(s) could not be checked");
+            }
 
-            try {
-                $driver = $repositories->driver($serverMod->source);
-
-                if (! $driver->isAvailable()) {
-                    continue;
-                }
-
-                $latest = $driver->latestVersion(
-                    $serverMod->source_id,
-                    $serverMod->loader,
-                    $serverMod->game_version
-                );
-
-                $checked++;
-
-                if ($latest && $latest->versionNumber !== $serverMod->installed_version) {
-                    $manifest->flagPendingUpdate($serverMod, $latest);
-                    $flagged++;
-
-                    $this->line(sprintf(
-                        '  → %s (%s): %s → %s',
-                        $serverMod->mod_name,
-                        $serverMod->server_uuid,
-                        $serverMod->installed_version,
-                        $latest->versionNumber
-                    ));
-
-                    // TODO Phase 7: if $applyUpdates, dispatch UpdateModJob
-                }
-            } catch (\Throwable $e) {
-                $this->warn("  ! Failed to check {$serverMod->mod_name} ({$serverMod->source_id}): {$e->getMessage()}");
+            // --apply / admin auto-apply: install in the background, behind a backup.
+            if ($apply && $mods->applicableUpdates($uuid)->isNotEmpty() && ApplyModUpdatesJob::queueFor($uuid)) {
+                $queued++;
             }
         }
 
         $this->notifyUpdates($serverUuids);
 
-        $this->info("[Server Suite] Done. Checked: {$checked} mods. Updates found: {$flagged}.");
+        $this->info("[Server Suite] Done. Checked: {$checked} mods. Updates found: {$flagged}."
+            . ($apply ? " Servers queued to install: {$queued}." : ''));
 
         return self::SUCCESS;
     }

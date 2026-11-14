@@ -55,7 +55,7 @@
                         <input type="text" class="form-control" name="scheduler_interval" value="{{ $interval }}" placeholder="0 3 * * *">
                         <label style="font-weight:normal; margin-top:8px;">
                             <input type="checkbox" name="scheduler_auto_apply" value="1" {{ $notifyOnly ? '' : 'checked' }}>
-                            Apply updates automatically (otherwise updates are only flagged, and admins use the "Update all" button)
+                            Install updates automatically, in the background, after a backup (skipped when a server's pre-change backup is set to never). Disabled and modpack mods are left alone. Otherwise updates are only flagged and installed from the Mods tab.
                         </label>
                     </div>
 

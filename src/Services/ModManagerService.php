@@ -620,11 +620,8 @@ class ModManagerService
             throw \ServerSuite\Exceptions\DeliveryException::daemonError("{$serverMod->mod_name} belongs to a modpack and updates with the pack.");
         }
 
-        $driver   = $this->repositories->driver($serverMod->source);
-        $settings = ModManagerSetting::forServer($server->uuid);
-        $loader   = $serverMod->loader ?: ($settings->loader ?: $this->loaderDetection->detect($server));
-
-        $latest = $driver->latestVersion($serverMod->source_id, $loader, $settings->game_version);
+        $driver = $this->repositories->driver($serverMod->source);
+        $latest = $this->latestFor($serverMod, $server);
 
         if (! $latest) {
             throw \ServerSuite\Exceptions\DeliveryException::daemonError('No compatible version available to update to.');
@@ -654,6 +651,75 @@ class ModManagerService
         $this->manifest->clearPendingUpdate($serverMod);
 
         return $serverMod->fresh();
+    }
+
+    /**
+     * The build update() installs for this mod (#120). The scheduled check
+     * asks the same question, so what it flags is what an update installs:
+     * the mod's loader (else the server's), and the server's game version.
+     */
+    public function latestFor(ServerMod $serverMod, object $server, ?ModManagerSetting $settings = null): ?ModVersion
+    {
+        $settings ??= ModManagerSetting::forServer($server->uuid);
+        $loader = $serverMod->loader ?: ($settings->loader ?: $this->loaderDetection->detect($server));
+
+        return $this->repositories->driver($serverMod->source)
+            ->latestVersion($serverMod->source_id, $loader, $settings->game_version);
+    }
+
+    /**
+     * Flag (or clear) each installed mod's pending update for one server
+     * (#120). Pack mods update with their pack, so their flags are cleared.
+     * Mods from a repository the server has turned off are left as they are.
+     * A dismissed update stays dismissed until a newer version appears.
+     *
+     * @return array{checked: int, updates: int, errors: int, flagged: array<int, string>}
+     */
+    public function checkUpdates(object $server): array
+    {
+        $settings = ModManagerSetting::forServer($server->uuid);
+        $enabled  = $settings->enabledRepositories();
+        $checked = $updates = $errors = 0;
+        $flagged = [];
+
+        foreach ($this->installed($server->uuid) as $mod) {
+            if ($mod->modpack_id !== null) {
+                $mod->pendingUpdate?->delete();
+                continue;
+            }
+            if (! in_array($mod->source, $enabled, true)) {
+                continue;
+            }
+
+            try {
+                $driver = $this->repositories->driver($mod->source);
+                if (! $driver->isAvailable()) {
+                    continue;
+                }
+                $latest = $this->latestFor($mod, $server, $settings);
+            } catch (\Throwable $e) {
+                $errors++;
+                Log::warning('[Server Suite] update check failed', ['mod' => $mod->id, 'error' => $e->getMessage()]);
+                continue;
+            }
+            $checked++;
+
+            $number = $latest?->versionNumber;
+            if ($number === null || $number === '' || $number === $mod->installed_version) {
+                $mod->pendingUpdate?->delete();
+                continue;
+            }
+
+            $updates++;
+            $flagged[] = "{$mod->mod_name}: {$mod->installed_version} \u{2192} {$number}";
+            $pending = $mod->pendingUpdate;
+            if ($pending !== null && $pending->available_version === $number) {
+                continue;   // same version: keep it (and a dismissal) as it is
+            }
+            $this->manifest->flagPendingUpdate($mod, $latest);
+        }
+
+        return ['checked' => $checked, 'updates' => $updates, 'errors' => $errors, 'flagged' => $flagged];
     }
 
     /**
@@ -859,6 +925,12 @@ class ModManagerService
      * Resolve the panel's Server model by UUID without coupling to its class
      * at the type level. Tries common panel model classes.
      */
+    /** The panel's server model for a uuid (or an object carrying just the uuid). */
+    public function serverFor(string $serverUuid): object
+    {
+        return $this->resolveServer($serverUuid);
+    }
+
     protected function resolveServer(string $serverUuid): object
     {
         foreach (['\Pterodactyl\Models\Server', '\App\Models\Server'] as $class) {
@@ -909,13 +981,7 @@ class ModManagerService
      */
     public function updateAll(object $server): array
     {
-        $mods = ServerMod::forServer($server->uuid)
-            ->with('pendingUpdate')
-            ->get()
-            // Skip dismissed updates, pack mods (they update with the pack)
-            // and disabled mods (#121).
-            ->filter(fn (ServerMod $m) => $m->pendingUpdate !== null && ! $m->pendingUpdate->dismissed
-                && $m->modpack_id === null && $m->disabled_at === null);
+        $mods = $this->applicableUpdates($server->uuid);
 
         $updated = [];
         $failed  = [];
@@ -938,6 +1004,19 @@ class ModManagerService
         return ['updated' => $updated, 'failed' => $failed];
     }
 
+    /**
+     * The mods "Update all" would update: a pending, undismissed update, not
+     * from a modpack (they update with the pack), not disabled (#121).
+     */
+    public function applicableUpdates(string $serverUuid): \Illuminate\Support\Collection
+    {
+        return ServerMod::forServer($serverUuid)->with('pendingUpdate')->get()
+            ->filter(fn (ServerMod $m) => $m->pendingUpdate !== null && ! $m->pendingUpdate->dismissed
+                && $m->modpack_id === null && $m->disabled_at === null)
+            ->values();
+    }
+
+    /** @return \Illuminate\Database\Eloquent\Collection<int, ServerMod> */
     public function installed(string $serverUuid): \Illuminate\Database\Eloquent\Collection
     {
         return ServerMod::forServer($serverUuid)->with('pendingUpdate')->get();
