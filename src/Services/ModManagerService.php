@@ -144,10 +144,14 @@ class ModManagerService
                 $drivers, $query, $loader, $gameVersion, $limit, $sort, $offset
             );
         } else {
-            $batch      = $this->fanOut($drivers, $query, $loader, $gameVersion, $limit, $sort, $offset);
-            $data       = $this->rankAndDedupe($batch, $query, $limit, $sort);
+            // Each repository returns up to $limit and moves on by $limit, so
+            // keep everything it returned: cutting the merged list to $limit
+            // dropped results no page ever showed (#124). More pages exist
+            // while any repository returned a full page (dedupe can shrink one).
+            [$batch, $full] = $this->fanOutCounted($drivers, $query, $loader, $gameVersion, $limit, $sort, $offset);
+            $data       = $this->rankAndDedupe($batch, $query, max($batch->count(), 1), $sort);
             $nextOffset = $offset + $limit;
-            $hasMore    = count($data) >= $limit;
+            $hasMore    = $full;
         }
 
         return [
@@ -158,6 +162,25 @@ class ModManagerService
             'loader_confident' => $loaderConfident,
             'game_version'     => $gameVersion,
         ];
+    }
+
+    /**
+     * fanOut(), plus whether any repository returned a whole page (so it has
+     * more) (#124).
+     *
+     * @return array{0: Collection, 1: bool}
+     */
+    private function fanOutCounted(array $drivers, string $query, ?string $loader, ?string $gameVersion, int $limit, ?string $sort, int $offset): array
+    {
+        $out = collect();
+        $full = false;
+        foreach ($drivers as $driver) {
+            $one = $this->fanOut([$driver], $query, $loader, $gameVersion, $limit, $sort, $offset);
+            $full = $full || $one->count() >= $limit;
+            $out = $out->concat($one);
+        }
+
+        return [$out, $full];
     }
 
     /**
@@ -306,22 +329,40 @@ class ModManagerService
     {
         $queryLower = mb_strtolower(trim($query));
 
+        // Collapse the same mod listed by two repositories (same normalised
+        // name, different source), keeping the most-downloaded copy. Two
+        // results from ONE repository are different projects and both stay
+        // (#124). groupBy/map preserve first-seen order.
         $deduped = $results
-            // Group by a normalised mod name to catch cross-repo duplicates.
-            // groupBy/map preserve first-seen order, so the driver's sort order
-            // survives deduplication.
             ->groupBy(fn (ModResult $r) => $this->normaliseName($r->name))
-            ->map(function (Collection $group) {
-                // Keep the most-downloaded variant as the canonical result
-                return $group->sortByDesc(fn (ModResult $r) => $r->downloads)->first();
+            ->flatMap(function (Collection $group) {
+                if ($group->pluck('source')->unique()->count() < 2) {
+                    return $group->values();
+                }
+                $keep = $group->sortByDesc(fn (ModResult $r) => $r->downloads)->first();
+                // Other sources' copies go; same-source namesakes of the kept one stay.
+                return $group->filter(fn (ModResult $r) => $r === $keep || $r->source === $keep->source)->values();
             });
 
-        // Our blended relevance ranking exists for merging multi-repo results.
-        // When the user picked an explicit sort (downloads/newest/...), the
-        // repository API already returned that order — re-ranking here would
-        // clobber it, so preserve the API order instead.
+        // An explicit sort: each repository already returned that order, so
+        // merge them by the same key instead of leaving them grouped by
+        // source (#124). Ties keep the repositories' own order.
         if ($sort !== null && $sort !== '' && $sort !== 'relevance') {
-            return $deduped->take($limit)->values()->all();
+            $key = match ($sort) {
+                'downloads' => fn (ModResult $r) => (float) $r->downloads,
+                'follows'   => fn (ModResult $r) => (float) ($r->follows ?? 0),
+                'newest'    => fn (ModResult $r) => (float) (strtotime((string) $r->publishedAt) ?: 0),
+                'updated'   => fn (ModResult $r) => (float) (strtotime((string) $r->updatedAt) ?: 0),
+                default     => null,
+            };
+            $list = $deduped->values();
+            if ($key !== null && $list->pluck('source')->unique()->count() > 1) {
+                $list = $list->map(fn ($r, $i) => [$r, $key($r), $i])
+                    ->sort(fn ($a, $b) => [$b[1], $a[2]] <=> [$a[1], $b[2]])
+                    ->map(fn ($x) => $x[0])->values();
+            }
+
+            return $list->take($limit)->values()->all();
         }
 
         return $deduped
