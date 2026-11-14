@@ -131,41 +131,65 @@ class ServerVersionService
      */
     public function paperBuilds(string $version): array
     {
+        // The version goes into the Fill URL and the cache key, and comes
+        // from the request: accept only a release-style version (#122).
+        if (! preg_match('/^\d{1,4}(?:\.\d{1,4}){1,3}$/', $version)) {
+            return [];
+        }
+
         $key = 'serversuite.versions.paper.builds.' . $version;
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached;
+        }
 
-        return Cache::remember($key, self::TTL, function () use ($version) {
-            try {
-                $resp = $this->http()->get("/projects/paper/versions/{$version}/builds");
+        // Only a real answer is cached: the build list, or a 404 for a version
+        // Paper doesn't have. A timeout or server error is not "no builds"
+        // and would otherwise block switches and auto-upgrades for an hour.
+        try {
+            $resp = $this->http()->get("/projects/paper/versions/{$version}/builds");
+        } catch (\Illuminate\Http\Client\RequestException $e) {
+            $resp = $e->response;   // retry() throws on an error status
+        } catch (\Throwable $e) {
+            Log::warning('[Server Suite] Paper Fill v3 builds unreachable', ['version' => $version, 'error' => $e->getMessage()]);
 
-                if (! $resp->successful()) {
-                    return [];
-                }
+            return [];
+        }
 
-                $out = [];
-                foreach ($resp->json() ?? [] as $b) {
-                    // Fill v3 download key for the server jar is 'server:default'.
-                    $url = $b['downloads']['server:default']['url']
-                        ?? $b['downloads']['application']['url']   // tolerate older key
-                        ?? null;
+        if ($resp->status() === 404) {
+            Cache::put($key, [], self::TTL);
 
-                    $out[] = [
-                        'build'        => (int) ($b['id'] ?? 0),
-                        'channel'      => (string) ($b['channel'] ?? 'STABLE'),
-                        'download_url' => $url,
-                        'time'         => isset($b['time']) ? (string) $b['time'] : null,
-                    ];
-                }
+            return [];
+        }
+        if (! $resp->successful()) {
+            Log::warning('[Server Suite] Paper Fill v3 builds unavailable', ['version' => $version, 'status' => $resp->status()]);
 
-                // Newest build first.
-                usort($out, fn ($a, $z) => $z['build'] <=> $a['build']);
+            return [];
+        }
 
-                return $out;
-            } catch (\Throwable $e) {
-                Log::warning('[Server Suite] Paper Fill v3 builds unreachable', ['version' => $version, 'error' => $e->getMessage()]);
-
-                return [];
+        $out = [];
+        foreach ((array) ($resp->json() ?? []) as $b) {
+            if (! is_array($b)) {
+                continue;
             }
-        });
+            // Fill v3 download key for the server jar is 'server:default'.
+            $url = $b['downloads']['server:default']['url']
+                ?? $b['downloads']['application']['url']   // tolerate older key
+                ?? null;
+
+            $out[] = [
+                'build'        => (int) ($b['id'] ?? 0),
+                'channel'      => (string) ($b['channel'] ?? 'STABLE'),
+                'download_url' => $url,
+                'time'         => isset($b['time']) ? (string) $b['time'] : null,
+            ];
+        }
+
+        // Newest build first.
+        usort($out, fn ($a, $z) => $z['build'] <=> $a['build']);
+        Cache::put($key, $out, self::TTL);
+
+        return $out;
     }
 
     private function http()
