@@ -299,6 +299,15 @@ class ServerVersionService
             $blockers[] = $reinstallBlocker;
         }
 
+        // The switch pins Paper's MINECRAFT_VERSION + BUILD_NUMBER, so only a
+        // Paper server can use it, as the Versions tab shows (#123). Other
+        // loaders change version with the loader switch.
+        $loader = strtolower((string) ($current['loader'] ?? ''));
+        if ($loader !== 'paper') {
+            $blockers[] = $loader === ''
+                ? "Can't tell which loader this server runs, so its version can't be changed here."
+                : 'Version changes here are for Paper servers; this server runs ' . ucfirst($loader) . '. Use the loader switch to pick a version.';
+        }
         if (! $versionValid) {
             $blockers[] = "Paper has no published builds for {$targetVersion}.";
         }
