@@ -21,6 +21,10 @@ use Carbon\CarbonInterface;
  *    tolerates a late tick. Switching an existing schedule to a fixed hour
  *    takes effect at the next slot instead of waiting a whole extra interval.
  *    If the scheduler misses the whole hour, that run waits for the next slot.
+ *    With a fixed hour, an interval of a day or more rounds up to whole days
+ *    (36h at 03 runs every second day at 03), and a sub-daily interval counts
+ *    hours continuously, so 5h/7h/9h stay evenly spaced across midnight
+ *    (#131; divisors of 24 give the same hours as before).
  */
 class BackupSchedule
 {
@@ -51,6 +55,7 @@ class BackupSchedule
         if ($anchorHour === null) {
             return $lastRun === null || $lastRun->copy()->addHours($interval)->lte($now);
         }
+        $interval = self::anchoredInterval($interval);
 
         if (! self::inSlot($interval, $anchorHour, $now)) {
             return false;
@@ -77,6 +82,7 @@ class BackupSchedule
         if ($anchorHour === null) {
             return $lastRun?->copy()->addHours($interval);
         }
+        $interval = self::anchoredInterval($interval);
 
         // Walk hour slots from the current hour; the answer is always within
         // one interval plus a day.
@@ -91,12 +97,23 @@ class BackupSchedule
         return null;
     }
 
+    /** With a fixed hour, a day or more is whole days (rounded up); less is left as it is. */
+    private static function anchoredInterval(int $interval): int
+    {
+        return $interval < 24 ? $interval : (int) ceil($interval / 24) * 24;
+    }
+
     private static function inSlot(int $interval, int $anchorHour, CarbonInterface $at): bool
     {
         $anchor = (($anchorHour % 24) + 24) % 24;
+        if ($interval >= 24) {
+            return $at->hour === $anchor;
+        }
 
-        return $interval < 24
-            ? ((($at->hour - $anchor) % $interval) + $interval) % $interval === 0
-            : $at->hour === $anchor;
+        // Local hours since the epoch: the same slots every day when the
+        // interval divides 24, and evenly spaced across midnight when not.
+        $hours = intdiv($at->getTimestamp() + $at->getOffset(), 3600);
+
+        return ((($hours - $anchor) % $interval) + $interval) % $interval === 0;
     }
 }
