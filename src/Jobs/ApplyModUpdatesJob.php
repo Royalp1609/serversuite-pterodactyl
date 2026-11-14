@@ -55,8 +55,9 @@ class ApplyModUpdatesJob implements ShouldQueue
         return true;
     }
 
-    public function handle(ModManagerService $mods, PreChangeBackup $pre, Notifier $notifier): void
+    public function handle(ModManagerService $mods, Notifier $notifier): void
     {
+        $pre = fn (): PreChangeBackup => app(PreChangeBackup::class);
         $server = $mods->serverFor($this->serverUuid);
         // Suspended, or node in maintenance (#116): leave it alone.
         $blocked = \ServerSuite\Support\ServerState::blocker($server);
@@ -72,7 +73,7 @@ class ApplyModUpdatesJob implements ShouldQueue
             return;
         }
 
-        $state = $pre->state($this->serverUuid, $this->backupUuid);
+        $state = $pre()->state($this->serverUuid, $this->backupUuid);
         if ($state === 'running') {
             if (time() >= (int) $this->deadline) {
                 $this->finish($notifier, null, "Mod updates were not installed: the pre-update backup {$this->backupName} did not finish in time.");
@@ -92,7 +93,8 @@ class ApplyModUpdatesJob implements ShouldQueue
         $this->apply($mods, $notifier, $server, $this->backupName);
     }
 
-    private function startBackup(PreChangeBackup $pre, Notifier $notifier, ModManagerService $mods, object $server): void
+    /** @param \Closure(): PreChangeBackup $pre */
+    private function startBackup(\Closure $pre, Notifier $notifier, ModManagerService $mods, object $server): void
     {
         if ((ModManagerSetting::forServer($this->serverUuid)->pre_change_backup ?? 'ask') === 'never') {
             $this->apply($mods, $notifier, $server, null);
@@ -100,7 +102,7 @@ class ApplyModUpdatesJob implements ShouldQueue
             return;
         }
 
-        $r = $pre->start($this->serverUuid, 'automatic mod updates');
+        $r = $pre()->start($this->serverUuid, 'automatic mod updates');
         match ($r['status']) {
             'disabled' => $this->apply($mods, $notifier, $server, null),
             'recent'   => $this->apply($mods, $notifier, $server, $r['name'] ?? null),
