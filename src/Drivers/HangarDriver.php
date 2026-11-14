@@ -26,6 +26,9 @@ class HangarDriver extends AbstractDriver
     /** Our loader slugs that Hangar can serve, mapped to Hangar platforms. */
     private const PLATFORM_MAP = [
         'paper'     => 'PAPER',
+        // Paper forks run Paper plugins (#125).
+        'purpur'     => 'PAPER',
+        'pufferfish' => 'PAPER',
         'waterfall' => 'WATERFALL',
         'velocity'  => 'VELOCITY',
     ];

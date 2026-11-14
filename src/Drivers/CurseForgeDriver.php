@@ -360,8 +360,9 @@ class CurseForgeDriver extends AbstractDriver
                     if (! $loader) {
                         return true;
                     }
-                    // Empty loader list = loader-agnostic (e.g. resource packs); keep it
-                    return empty($v->loaders) || in_array($loader, $v->loaders, true);
+                    // Empty loader list = loader-agnostic (e.g. resource packs); keep
+                    // it. A loader family counts (Quilt runs Fabric files, #125).
+                    return \ServerSuite\Support\LoaderCompat::runs($loader, $v->loaders);
                 })
                 ->values()
                 ->all();

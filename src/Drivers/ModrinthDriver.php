@@ -2,6 +2,7 @@
 
 namespace ServerSuite\Drivers;
 
+use ServerSuite\Support\LoaderCompat;
 use Illuminate\Support\Facades\Cache;
 use ServerSuite\Exceptions\RepositoryException;
 use ServerSuite\Support\Data\ModResult;
@@ -100,8 +101,10 @@ class ModrinthDriver extends AbstractDriver
             $facets = [['project_type:mod', 'project_type:plugin']];
         }
 
+        // Every loader the server runs, OR'd: a Purpur server also finds
+        // plugins tagged only paper/spigot/bukkit (#125).
         if ($loader) {
-            $facets[] = ["categories:{$loader}"];
+            $facets[] = array_map(fn ($l) => "categories:{$l}", LoaderCompat::accepts($loader));
         }
 
         if ($gameVersion) {
@@ -342,7 +345,7 @@ class ModrinthDriver extends AbstractDriver
             $params = [];
 
             if ($loader) {
-                $params['loaders'] = json_encode([$loader]);
+                $params['loaders'] = json_encode(LoaderCompat::accepts($loader));
             }
 
             if ($gameVersion) {
