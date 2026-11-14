@@ -116,3 +116,32 @@ it('uses the backup timezone for the fixed hour, falling back to the panel timez
     config(['serversuite.backups.timezone' => 'Not/AZone']);
     expect(BackupSchedule::timezone())->toBe('UTC');
 });
+
+it('rounds a 25 to 47 hour interval with a fixed hour up to whole days (#131)', function () {
+    // Was 7 runs in 7 days for 36h at 03:00.
+    expect(simulateTicks(36, 3, '2026-11-02 00:00', 24 * 7, '2026-11-01 03:00'))
+        ->toBe(['Tue 03:00', 'Thu 03:00', 'Sat 03:00'])
+        ->and(simulateTicks(25, 3, '2026-11-02 00:00', 24 * 4, '2026-11-01 03:00'))->toBe(['Tue 03:00', 'Thu 03:00'])
+        ->and(simulateTicks(48, 3, '2026-11-02 00:00', 24 * 4, '2026-11-01 03:00'))->toBe(['Tue 03:00', 'Thu 03:00'], '48h unchanged')
+        ->and(simulateTicks(24, 3, '2026-11-02 00:00', 24 * 3, '2026-11-01 03:00'))->toBe(['Mon 03:00', 'Tue 03:00', 'Wed 03:00'], 'daily unchanged');
+});
+
+it('keeps 5, 7 and 9 hour intervals evenly spaced across midnight (#131)', function () {
+    foreach ([5, 7, 9] as $h) {
+        $last = null;
+        $runs = [];
+        for ($t = at('2026-11-02 00:00'); $t->lt(at('2026-11-05 00:00')); $t = $t->addMinutes(15)) {
+            if (BackupSchedule::isDue($h, 2, $last, $t)) {
+                $runs[] = $t;
+                $last = $t;
+            }
+        }
+        $gaps = [];
+        for ($i = 1; $i < count($runs); $i++) {
+            $gaps[] = intdiv($runs[$i]->getTimestamp() - $runs[$i - 1]->getTimestamp(), 3600);
+        }
+        expect(count($runs))->toBeGreaterThan(5)->and(array_values(array_unique($gaps)))->toBe([$h], "{$h}h");
+    }
+    // A divisor of 24 still lands on the same hours every day.
+    expect(simulateTicks(6, 2, '2026-11-02 00:00', 24))->toBe(['Mon 02:00', 'Mon 08:00', 'Mon 14:00', 'Mon 20:00']);
+});
