@@ -1032,6 +1032,7 @@ class ModManagerService
             ->values();
     }
 
+    /** @return \Illuminate\Database\Eloquent\Collection<int, ServerMod> */
     public function installed(string $serverUuid): \Illuminate\Database\Eloquent\Collection
     {
         return ServerMod::forServer($serverUuid)->with('pendingUpdate')->get();
