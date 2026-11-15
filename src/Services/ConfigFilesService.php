@@ -49,8 +49,9 @@ class ConfigFilesService
     public static function safe(string $path, array $roots = self::ROOTS, array $hidden = []): string
     {
         $path = '/' . ltrim((string) preg_replace('#/+#', '/', $path), '/');
-        // "." segments too: /cfg/./users.cfg would slip past the hidden list.
-        if (str_contains($path, '..') || preg_match('#(^|/)\.(/|$)#', $path) || preg_match('/[\x00-\x1F]/', $path)) {
+        // "." and ".." segments (not names like mod..settings.yml, #141 item 38);
+        // "." too: /cfg/./users.cfg would slip past the hidden list.
+        if (preg_match('#(^|/)\.\.?(/|$)#', $path) || preg_match('/[\x00-\x1F]/', $path)) {
             throw new \InvalidArgumentException('Invalid path.');
         }
         if (in_array(rtrim($path, '/'), $hidden, true)) {
@@ -62,6 +63,24 @@ class ConfigFilesService
             }
         }
         throw new \InvalidArgumentException('Only files under ' . implode(', ', $roots) . ' can be edited here.');
+    }
+
+    /**
+     * safe() for a file the tab opens or saves: also one of the config types the
+     * listing shows (#141 item 37), so a jar or script can't be read or written
+     * here by typing its path. The File Manager is the place for those.
+     *
+     * @param list<string> $roots
+     * @param list<string> $hidden
+     */
+    public static function safeFile(string $path, array $roots = self::ROOTS, array $hidden = []): string
+    {
+        $path = self::safe($path, $roots, $hidden);
+        if (! in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), self::EXTS, true)) {
+            throw new \InvalidArgumentException('Only config files (' . implode(', ', self::EXTS) . ') can be edited here.');
+        }
+
+        return $path;
     }
 
     /**
@@ -103,7 +122,7 @@ class ConfigFilesService
      */
     public function open(string $uuid, string $path, array $roots = self::ROOTS, array $hidden = []): array
     {
-        $path = self::safe($path, $roots, $hidden);
+        $path = self::safeFile($path, $roots, $hidden);
         $raw = $this->files->readFile($uuid, $path, self::MAX_BYTES)
             ?? throw new \InvalidArgumentException('Could not read the file. It may be gone, or larger than 512 KiB (edit those in the File Manager).');
         $form = ConfigEditor::open($raw, basename($path));
@@ -124,7 +143,7 @@ class ConfigFilesService
      */
     public function render(string $uuid, string $path, string $hash, array $values, array $roots = self::ROOTS, array $hidden = []): string
     {
-        return ConfigEditor::save($this->current($uuid, $path, $hash, $roots, $hidden), basename(self::safe($path, $roots, $hidden)), $values)['content'];
+        return ConfigEditor::save($this->current($uuid, $path, $hash, $roots, $hidden), basename(self::safeFile($path, $roots, $hidden)), $values)['content'];
     }
 
     /**
@@ -138,7 +157,7 @@ class ConfigFilesService
      */
     public function save(string $uuid, string $path, string $hash, ?array $values, ?string $content, array $roots = self::ROOTS, array $hidden = []): array
     {
-        $path = self::safe($path, $roots, $hidden);
+        $path = self::safeFile($path, $roots, $hidden);
         $disk = $this->current($uuid, $path, $hash, $roots, $hidden);
         if ($values !== null) {
             $r = ConfigEditor::save($disk, basename($path), $values);

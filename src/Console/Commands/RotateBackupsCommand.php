@@ -46,12 +46,12 @@ class RotateBackupsCommand extends Command
         } catch (\Throwable $e) {
             $this->warn("  ! {$uuid}: unexpected error — {$e->getMessage()}");
 
-            return self::SUCCESS;
+            return self::FAILURE;   // item 54: a script calling --server must see this
         }
 
         $this->line($this->formatLine($uuid, $result));
 
-        return self::SUCCESS;
+        return $result->isFailed() ? self::FAILURE : self::SUCCESS;
     }
 
     /**

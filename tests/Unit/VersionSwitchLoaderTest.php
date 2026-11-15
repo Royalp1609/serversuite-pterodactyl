@@ -59,3 +59,23 @@ it('still lets a Paper server through', function () {
 
     expect(implode(' ', $pf['blockers']))->not->toContain('Paper servers');
 });
+
+it('deletes nothing when the egg refuses a value (#141 items 34, 70)', function () {
+    $this->loader = 'paper';
+    $ops = new class extends FakePanelServerOps {
+        public function setServerVariables(string $serverUuid, array $env): void
+        {
+            throw new InvalidArgumentException('The egg refuses BUILD_NUMBER');
+        }
+    };
+    $ops->states['srv-vsl'] = ['power' => 'offline', 'install' => null];
+    app()->instance(PanelServerOps::class, $ops);
+    $files = Mockery::mock(\ServerSuite\Services\FileDeliveryService::class);
+    $files->shouldNotReceive('deletePluginJars');
+    $files->shouldNotReceive('wipeForNuclear');
+    app()->instance(\ServerSuite\Services\FileDeliveryService::class, $files);
+
+    expect(fn () => app(VersionSwitchService::class)->apply(vslServer(), '1.21.4', null, false, true))
+        ->toThrow(InvalidArgumentException::class, 'refuses');
+    expect(array_filter($ops->log, fn ($e) => $e[0] === 'reinstall'))->toBe([]);
+});

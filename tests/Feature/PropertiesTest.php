@@ -73,3 +73,22 @@ it('refuses a stale file and reports a missing one', function () {
     unset($this->files->files['/server.properties']);
     expect($this->svc->open('s')['found'])->toBeFalse();
 });
+
+it('wipes only after a save asked for it, once (#141 item 39)', function () {
+    $this->power = 'offline';
+    expect(fn () => $this->svc->resetWorldStep('s'))->toThrow(InvalidArgumentException::class, 'No world reset is waiting')
+        ->and($this->wiped)->toBe([]);
+
+    $o = $this->svc->open('s');
+    $this->svc->save('s', $o['hash'], [propIds($o)['level-seed'] => '42'], 'reset_world');
+    expect($this->svc->resetWorldStep('s'))->toBe(['status' => 'done'])
+        ->and(fn () => $this->svc->resetWorldStep('s'))->toThrow(InvalidArgumentException::class, 'No world reset is waiting')
+        ->and($this->wiped)->toBe(['keep_plugins']);
+});
+
+it('does not restart when nothing changed (#141 item 120)', function () {
+    $o = $this->svc->open('s');
+    $r = $this->svc->save('s', $o['hash'], [propIds($o)['pvp'] => true], 'restart');
+
+    expect($r['status'])->toBe('saved')->and($this->signals)->toBe([]);
+});

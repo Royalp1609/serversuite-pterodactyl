@@ -88,3 +88,19 @@ it('enforces the limit and scopes/locks on the fake seam', function () {
 // can be exercised without the panel installed.
 class BackupLockedException extends \RuntimeException {}
 class TooManyBackupsException extends \RuntimeException {}
+
+it("applies the egg's rules to the values it writes, all or nothing (#141 item 34)", function () {
+    panelTables();
+    $egg = \Pterodactyl\Models\Egg::query()->create(['name' => 'Paper']);
+    $egg->variables()->create(['env_variable' => 'MINECRAFT_VERSION', 'default_value' => 'latest', 'rules' => 'required|string|max:20']);
+    $egg->variables()->create(['env_variable' => 'BUILD_NUMBER', 'default_value' => 'latest', 'rules' => 'required|string|max:20']);
+    $server = \Pterodactyl\Models\Server::query()->create(['uuid' => 'srv-rules', 'egg_id' => $egg->id]);
+    $ops = new \ServerSuite\Panel\PterodactylPanelServerOps();
+
+    expect(fn () => $ops->setServerVariables('srv-rules', ['MINECRAFT_VERSION' => '1.21.4', 'BUILD_NUMBER' => '']))
+        ->toThrow(InvalidArgumentException::class, 'The egg refuses BUILD_NUMBER');
+    expect(Illuminate\Support\Facades\DB::table('server_variables')->count())->toBe(0, 'nothing half-written');
+
+    $ops->setServerVariables('srv-rules', ['MINECRAFT_VERSION' => '1.21.4', 'BUILD_NUMBER' => '100']);
+    expect(Illuminate\Support\Facades\DB::table('server_variables')->pluck('variable_value')->sort()->values()->all())->toBe(['1.21.4', '100']);
+});

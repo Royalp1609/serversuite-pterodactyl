@@ -42,7 +42,7 @@ class VersionSwitchService
      *
      * @return array  the action taken (for the caller to begin polling install)
      */
-    public function apply(object $server, string $targetVersion, ?int $targetBuild = null, bool $requireBackup = true, bool $deletePlugins = true, string $wipeMode = 'none', ?string $downloadUrl = null): array
+    public function apply(object $server, string $targetVersion, ?int $targetBuild = null, bool $requireBackup = true, bool $deletePlugins = false, string $wipeMode = 'none', ?string $downloadUrl = null): array
     {
         $uuid = $server->uuid;
         $wipeMode = in_array($wipeMode, ['reset_world', 'clean_slate'], true) ? $wipeMode : 'none';
@@ -90,7 +90,25 @@ class VersionSwitchService
             throw new \RuntimeException("No build resolved for {$targetVersion}.");
         }
 
-        // File handling. A wipe supersedes plain plugin removal; on reset_world
+        // 1. Pin the exact version + build the egg's install script will fetch.
+        //    With a direct jar from MCJars (#22), DL_PATH points straight at it,
+        //    which gets around broken install scripts; eggs without DL_PATH
+        //    ignore it (only the egg's own variables are written).
+        $pin = $downloadUrl === null ? app(McJarsService::class)->pinFor(\ServerSuite\Models\ModManagerSetting::forServer($uuid)->loader, $targetVersion) : null;
+        $this->ops->setServerVariables($uuid, [
+            'MINECRAFT_VERSION' => $targetVersion,
+            'BUILD_NUMBER'      => (string) $build,
+        ] + ($downloadUrl !== null ? ['DL_PATH' => $downloadUrl] : []) + ($pin ? ['DL_PATH' => $pin['url'], 'SERVER_JARFILE' => $pin['file']] : []));
+
+        // 2. Move the Docker image only when the Java requirement actually changes.
+        $imageChanged = false;
+        if (($pf['image']['change'] ?? false) && ! empty($pf['image']['resolved'])) {
+            $this->ops->setDockerImage($uuid, $pf['image']['resolved']);
+            $imageChanged = true;
+        }
+
+        // File handling, after the panel writes above (#141/#139 item 70): if
+        // the egg refuses a value, nothing has been deleted yet. A wipe supersedes plain plugin removal; on reset_world
         // the caller may still opt to clear plugin jars too (useful downgrading).
         $wiped = [];
         $pluginsRemoved = [];
@@ -111,23 +129,6 @@ class VersionSwitchService
             // Plugins built for the old version very commonly halt boot on the
             // new one. Configs are kept. "Keep anyway" is the caller's choice.
             $pluginsRemoved = $this->files->deletePluginJars($uuid);
-        }
-
-        // 1. Pin the exact version + build the egg's install script will fetch.
-        //    With a direct jar from MCJars (#22), DL_PATH points straight at it,
-        //    which gets around broken install scripts; eggs without DL_PATH
-        //    ignore it (only the egg's own variables are written).
-        $pin = $downloadUrl === null ? app(McJarsService::class)->pinFor(\ServerSuite\Models\ModManagerSetting::forServer($uuid)->loader, $targetVersion) : null;
-        $this->ops->setServerVariables($uuid, [
-            'MINECRAFT_VERSION' => $targetVersion,
-            'BUILD_NUMBER'      => (string) $build,
-        ] + ($downloadUrl !== null ? ['DL_PATH' => $downloadUrl] : []) + ($pin ? ['DL_PATH' => $pin['url'], 'SERVER_JARFILE' => $pin['file']] : []));
-
-        // 2. Move the Docker image only when the Java requirement actually changes.
-        $imageChanged = false;
-        if (($pf['image']['change'] ?? false) && ! empty($pf['image']['resolved'])) {
-            $this->ops->setDockerImage($uuid, $pf['image']['resolved']);
-            $imageChanged = true;
         }
 
         // 3. Trigger the reinstall (re-runs the egg install script, which reads
@@ -319,21 +320,6 @@ class VersionSwitchService
      */
     public function hasRecentCompletedBackup(string $serverUuid, int $withinMinutes = 60): bool
     {
-        $cutoff = now()->subMinutes($withinMinutes);
-
-        foreach ($this->ops->listBackups($serverUuid) as $b) {
-            if (! ($b->isSuccessful ?? false) || ($b->completedAt ?? null) === null) {
-                continue;
-            }
-            try {
-                if (\Illuminate\Support\Carbon::parse($b->completedAt)->greaterThanOrEqualTo($cutoff)) {
-                    return true;
-                }
-            } catch (\Throwable $e) {
-                // unparseable timestamp — ignore this backup
-            }
-        }
-
-        return false;
+        return \ServerSuite\Support\RecentBackup::exists($this->ops, $serverUuid, $withinMinutes);
     }
 }

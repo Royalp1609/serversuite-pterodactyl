@@ -54,7 +54,17 @@ class InstallPlanner
             [$src, $mid, $vid, $kind, $depth] = array_shift($queue);
 
             $key = "{$src}:{$mid}";
-            if (isset($visited[$key]) || $depth > self::MAX_DEPTH) {
+            if (isset($visited[$key])) {
+                continue;
+            }
+            if ($depth > self::MAX_DEPTH) {
+                // Listed, not dropped (item 86): the user sees what's left to add.
+                $visited[$key] = true;
+                $items[] = new InstallPlanItem(
+                    source: $src, modId: $mid, modName: $mid, versionId: '', versionNumber: '',
+                    status: 'manual', kind: $kind,
+                    reason: 'Dependency chain deeper than ' . self::MAX_DEPTH . ' levels: install this one by hand if the mod needs it.',
+                );
                 continue;
             }
             $visited[$key] = true;

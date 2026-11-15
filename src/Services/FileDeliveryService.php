@@ -146,7 +146,7 @@ class FileDeliveryService
      *
      * @throws DeliveryException
      */
-    public function mergeInto(string $serverUuid, string $src, string $dst, int $depth = 0): array
+    public function mergeInto(string $serverUuid, string $src, string $dst, int $depth = 0, array $keepExisting = []): array
     {
         if ($depth > 32) {
             throw DeliveryException::daemonError("folders nested too deep under {$src}");
@@ -167,6 +167,10 @@ class FileDeliveryService
                 continue;
             }
             $existing = $dstEntries->get($name);
+            // The server's own copy wins for these (top level only).
+            if ($existing !== null && $depth === 0 && in_array($name, $keepExisting, true)) {
+                continue;
+            }
 
             if ($existing !== null && ! $e['is_file'] && ! $existing['is_file']) {
                 foreach ($this->mergeInto($serverUuid, $join($src, $name), $join($dst, $name), $depth + 1) as $p) {
@@ -474,11 +478,9 @@ class FileDeliveryService
      * Verify the pulled file landed correctly.
      *
      * Strategy: re-list the directory and find our filename. Confirm it exists
-     * and (when the repo gave us a size) that the size matches within a small
-     * tolerance. Hash verification is only possible when the daemon exposes a
-     * hash for the file; directory listings don't include hashes, so size is
-     * the reliable signal here and hashes are verified opportunistically when
-     * available via a dedicated read in a later phase.
+     * and (when the repo gave us a size) that the size matches exactly.
+     * Listings carry no hashes: the SHA-1, when the repository gives one, is
+     * checked separately by reading the file back (verifySha1).
      *
      * @return array{ok: bool, detail: string}
      */

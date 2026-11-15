@@ -70,7 +70,7 @@ final class PanelPermissions
         'backupsLock' => ['backup.delete'], 'backupsDelete' => ['backup.delete'],
         'backupsDownload' => ['backup.download'], 'backupsRestore' => ['backup.restore'],
         // After a restore (#60): the Mods tab's banner
-        'restoreSync' => ['mods.read'], 'restoreSyncDismiss' => ['mods.read'],
+        'restoreSync' => ['mods.read'], 'restoreSyncDismiss' => ['mods.update'],   // dismissing writes state (#141 item 35)
         // Versions
         'autoUpgradeState' => ['startup.read'], 'autoUpgradeSave' => self::VERSION_CHANGE,
         'serverVersions' => ['startup.read'], 'serverStatus' => ['startup.read'], 'loaders' => ['startup.read'],
@@ -82,7 +82,7 @@ final class PanelPermissions
         'prechangeMode' => ['mods.read'], 'prechangeSetMode' => ['mods.install'],
         'prechange' => ['mods.read'], 'prechangeState' => ['mods.read'],
         // Crash help (#25)
-        'crash' => ['mods.read'], 'crashDismiss' => ['mods.read'],
+        'crash' => ['mods.read'], 'crashDismiss' => ['mods.update'],
         // Errors tab (#87): reading the log is reading server files.
         'errors' => ['file.read-content'], 'errorsCrash' => ['file.read-content'],
         'crashDisable' => ['mods.remove'], 'crashEnable' => ['mods.install'],

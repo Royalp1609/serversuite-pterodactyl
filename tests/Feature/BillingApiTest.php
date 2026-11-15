@@ -105,3 +105,10 @@ it('needs the servers read permission to read and write to change', function () 
     $this->getJson(api('external:svc-42'))->assertForbidden();
     expect((int) ModManagerSetting::forServer('srv-b')->subdomain_limit)->toBe(0);
 });
+
+it('reads a server that has no settings yet without writing a row (#141 item 61)', function () {
+    Server::query()->create(['uuid' => 'srv-new', 'external_id' => 'svc-new', 'backup_limit' => 2]);
+
+    $this->getJson(api('external:svc-new'))->assertOk()->assertJsonPath('attributes.subdomains.allowance', 0);
+    expect(ModManagerSetting::query()->where('server_uuid', 'srv-new')->exists())->toBeFalse();
+});

@@ -85,7 +85,7 @@ class BillingApiController extends Controller
 
     private function state(Server $server): JsonResponse
     {
-        $s = ModManagerSetting::forServer($server->uuid);
+        $s = ModManagerSetting::peek($server->uuid);   // a GET writes nothing (item 61)
         $subs = Subdomain::query()->where('server_uuid', $server->uuid)->orderBy('fqdn')->get();
         $interval = (int) ($s->backup_interval_hours ?: config('serversuite.backups.default_interval_hours', 12));
         $hour = $s->backup_schedule_hour === null || $s->backup_schedule_hour === '' ? null : (int) $s->backup_schedule_hour;

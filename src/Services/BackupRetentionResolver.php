@@ -27,6 +27,8 @@ class BackupRetentionResolver
     public const PER_SERVER_COLUMN = 'backup_keep';
     public const GLOBAL_KEY        = 'backup_keep_default';
 
+    private static bool $hasColumn = false;
+
     public function resolve(string $serverUuid, ?int $override = null): int
     {
         if ($override !== null) {
@@ -51,7 +53,9 @@ class BackupRetentionResolver
     protected function perServerKeep(string $serverUuid): ?int
     {
         try {
-            if (! Schema::hasColumn('mod_manager_settings', self::PER_SERVER_COLUMN)) {
+            // Asked once per process once the column is there (item 53); a
+            // missing column is asked again, so it's seen as soon as migrated.
+            if (! self::$hasColumn && ! (self::$hasColumn = Schema::hasColumn('mod_manager_settings', self::PER_SERVER_COLUMN))) {
                 return null;
             }
 

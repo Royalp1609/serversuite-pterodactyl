@@ -265,9 +265,11 @@ class BedrockAddonService
     {
         $props = $this->files->readFile($uuid, '/server.properties', 262144) ?? throw new \RuntimeException('Could not read server.properties.');
         $line = 'texturepack-required=' . ($on ? 'true' : 'false');
-        $new = preg_match('/^texturepack-required=.*$/m', $props)
-            ? (string) preg_replace('/^texturepack-required=.*$/m', $line, $props, 1)
-            : rtrim($props, "\r\n") . (str_contains($props, "\r\n") ? "\r\n" : "\n") . $line . "\n";
+        $eol = str_contains($props, "\r\n") ? "\r\n" : "\n";
+        // [^\r\n]* keeps a CRLF line's \r (item 106); .* took it with the value.
+        $new = preg_match('/^texturepack-required=[^\r\n]*/m', $props)
+            ? (string) preg_replace('/^texturepack-required=[^\r\n]*/m', $line, $props, 1)
+            : rtrim($props, "\r\n") . $eol . $line . $eol;
         if ($new !== $props) {
             $this->files->writeFile($uuid, '/server.properties', $new);
         }
@@ -316,11 +318,31 @@ class BedrockAddonService
             $src = $tmpDir . ($p['nested'] !== null ? '/' . $nestedDirs[$p['nested']] : '') . ($p['root'] !== '' ? '/' . $p['root'] : '');
             $dest = self::DIRS[$p['type']];
             $folder = self::folderFor($p['name'], $p['uuid']);
-            $this->files->makeDirectory($uuid, $dest);
-            if ($p['old'] !== null) {
-                $this->files->deleteFiles($uuid, $dest, [$p['old']['folder']]);
+            try {
+                $this->files->makeDirectory($uuid, $dest);
+                // The old version moves aside and goes only once the new one is
+                // in (item 109), so a failed move leaves the old one working.
+                $aside = null;
+                if ($p['old'] !== null) {
+                    $aside = '.serversuite-old-' . $p['old']['folder'];
+                    $this->files->rename($uuid, $dest, $p['old']['folder'], $aside);
+                }
+                try {
+                    $this->files->rename($uuid, '/', ltrim($src, '/'), ltrim($dest, '/') . '/' . $folder);
+                } catch (\Throwable $e) {
+                    if ($aside !== null) {
+                        $this->files->rename($uuid, $dest, $aside, $p['old']['folder']);
+                    }
+                    throw $e;
+                }
+                if ($aside !== null) {
+                    $this->files->deleteFiles($uuid, $dest, [$aside]);
+                }
+            } catch (\Throwable $e) {
+                $done = array_merge($out['installed'], $out['updated']);
+                throw new \RuntimeException("{$p['name']} could not be put in place: {$e->getMessage()}"
+                    . ($done !== [] ? ' Already in place: ' . implode(', ', $done) . '.' : ''), previous: $e);
             }
-            $this->files->rename($uuid, '/', ltrim($src, '/'), ltrim($dest, '/') . '/' . $folder);
             $v = BedrockArchive::versionText($p['version']);
 
             if ($worldOk) {
@@ -385,16 +407,29 @@ class BedrockAddonService
                 if ($e['is_file'] || ! preg_match(self::OURS, (string) $e['name'], $m)) {
                     continue;
                 }
-                $raw = $this->files->readFile($uuid, "{$dir}/{$e['name']}/manifest.json", 262144);
-                $info = $raw === null ? null : BedrockArchive::manifest($raw);
-                if ($info === null || ! str_starts_with($info['uuid'], $m[1])) {
-                    continue;   // someone else's folder that happens to look like ours
+                // Manifest and name, read once per folder version (item 108): an
+                // install or update replaces the folder, so its time changes.
+                $read = function () use ($uuid, $dir, $e) {
+                    $raw = $this->files->readFile($uuid, "{$dir}/{$e['name']}/manifest.json", 262144);
+                    $info = $raw === null ? null : BedrockArchive::manifest($raw);
+                    if ($info === null) {
+                        return null;
+                    }
+                    $name = $info['name'];
+                    if (preg_match('/^[\w.]+$/', $name) && str_contains($name, '.')) {
+                        $lang = $this->files->readFile($uuid, "{$dir}/{$e['name']}/texts/en_US.lang", 262144);
+                        $name = BedrockArchive::langText($lang, $name);
+                    }
+
+                    return ['info' => $info, 'name' => $name];
+                };
+                $stamp = (string) ($e['modified_at'] ?? '');
+                $hit = $stamp === '' ? $read() : \Illuminate\Support\Facades\Cache::remember(
+                    'serversuite:bedrock-pack:' . sha1($uuid . '|' . $dir . '/' . $e['name'] . '|' . $stamp), 86400, fn () => $read() ?? false);
+                if (! is_array($hit) || ! str_starts_with($hit['info']['uuid'], $m[1])) {
+                    continue;   // unreadable, or someone else's folder that happens to look like ours
                 }
-                $name = $info['name'];
-                if (preg_match('/^[\w.]+$/', $name) && str_contains($name, '.')) {
-                    $lang = $this->files->readFile($uuid, "{$dir}/{$e['name']}/texts/en_US.lang", 262144);
-                    $name = BedrockArchive::langText($lang, $name);
-                }
+                ['info' => $info, 'name' => $name] = $hit;
                 $out[$type][$info['uuid']] = [
                     'uuid' => $info['uuid'], 'version' => BedrockArchive::versionText($info['version']), 'raw_version' => $info['version'],
                     'name' => BedrockArchive::plain($name) ?: (string) $e['name'], 'description' => BedrockArchive::plain($info['description']),

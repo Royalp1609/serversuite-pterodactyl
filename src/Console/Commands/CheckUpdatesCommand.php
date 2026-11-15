@@ -36,7 +36,13 @@ class CheckUpdatesCommand extends Command
         }
 
         $checked = $flagged = $queued = 0;
-        foreach ($serverUuids as $uuid) {
+        // Lookups are cached per mod for an hour, so servers sharing mods cost
+        // one request; the pause spaces out the rest on a big panel (item 90).
+        $pauseMs = max(0, (int) config('serversuite.scheduler.pause_ms', 200));
+        foreach ($serverUuids as $i => $uuid) {
+            if ($i > 0 && $pauseMs > 0) {
+                usleep($pauseMs * 1000);
+            }
             // Same lookup as an update (#120): the server's loader and game version.
             try {
                 $r = $mods->checkUpdates($mods->serverFor($uuid));

@@ -136,3 +136,11 @@ it('retries a throttled or busy run on the next tick instead of a whole interval
     $this->artisan('serversuite:rotate-backups')->assertExitCode(0);
     expect(ModManagerSetting::forServer('busy')->backup_last_run_at)->not->toBeNull();
 });
+
+it('fails --server when rotation throws (#141 item 54)', function () {
+    $rotation = Mockery::mock(BackupRotationService::class);
+    $rotation->shouldReceive('rotate')->andThrow(new RuntimeException('panel down'));
+    app()->instance(BackupRotationService::class, $rotation);
+
+    $this->artisan('serversuite:rotate-backups', ['--server' => 'x'])->assertExitCode(1);
+});

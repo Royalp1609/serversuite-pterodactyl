@@ -5,7 +5,7 @@ namespace ServerSuite\Http\Requests\Api;
 use Pterodactyl\Http\Requests\Api\Application\ApplicationApiRequest;
 use Pterodactyl\Services\Acl\Api\AdminAcl;
 
-/** #38: PUT .../backups { enabled, interval_hours, hour, keep } needs servers write. hour (0-23, the backup timezone) pins runs to a time of day; null lets them drift. keep is capped by the server's backup limit. */
+/** #38: PUT .../backups { enabled, interval_hours, hour, keep } needs servers write. hour (0-23, the backup timezone) pins runs to a time of day; null lets them drift. keep applies only to a server with no backup limit: with a limit, the limit is the retention (the response's effective_keep says which applies). */
 class SetBackupPlanRequest extends ApplicationApiRequest
 {
     protected ?string $resource = AdminAcl::RESOURCE_SERVERS;

@@ -71,7 +71,7 @@ class LoaderSwitchService
         $best = null;
         $bestJava = PHP_INT_MAX;
         foreach ((array) $targetEgg->docker_images as $label => $ref) {
-            if (preg_match('/java[_ ]?(\d+)/i', $ref . ' ' . $label, $m)) {
+            if (preg_match(ServerVersionService::JAVA_PATTERN, $ref . ' ' . $label, $m)) {
                 $j = (int) $m[1];
                 if ($j >= $min && $j <= $max && $j < $bestJava) {
                     $bestJava = $j;
@@ -162,6 +162,13 @@ class LoaderSwitchService
             }
         }
 
+        // Swap egg + variables + startup and set the target-egg image first
+        // (#141/#139 item 70): if the egg refuses a value, nothing is wiped.
+        $this->ops->changeEgg($uuid, $targetEggId, $env);
+        if ($image) {
+            $this->ops->setDockerImage($uuid, $image);
+        }
+
         // Mandatory clean slate — wipe everything but eula.txt.
         $wiped = $this->files->wipeForNuclear($uuid, 'clean_slate');
 
@@ -173,11 +180,6 @@ class LoaderSwitchService
             // non-fatal
         }
 
-        // Swap egg + variables + startup, set the target-egg image, reinstall.
-        $this->ops->changeEgg($uuid, $targetEggId, $env);
-        if ($image) {
-            $this->ops->setDockerImage($uuid, $image);
-        }
         $this->ops->reinstall($uuid);
 
         // Tell the Mod Manager the loader/version changed, or it keeps operating
@@ -291,22 +293,7 @@ class LoaderSwitchService
 
     private function hasRecentCompletedBackup(string $serverUuid, int $withinMinutes = 60): bool
     {
-        $cutoff = now()->subMinutes($withinMinutes);
-
-        foreach ($this->ops->listBackups($serverUuid) as $b) {
-            if (! ($b->isSuccessful ?? false) || ($b->completedAt ?? null) === null) {
-                continue;
-            }
-            try {
-                if (\Illuminate\Support\Carbon::parse($b->completedAt)->greaterThanOrEqualTo($cutoff)) {
-                    return true;
-                }
-            } catch (\Throwable $e) {
-                // unparseable — ignore
-            }
-        }
-
-        return false;
+        return \ServerSuite\Support\RecentBackup::exists($this->ops, $serverUuid, $withinMinutes);
     }
 
 }

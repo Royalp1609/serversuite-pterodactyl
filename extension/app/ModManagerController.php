@@ -58,7 +58,7 @@ class ModManagerController extends Controller
 
         $data = $request->validate([
             'source'  => ['required', 'string', 'in:modrinth,curseforge,hangar'],
-            'mod_id'  => ['required', 'string'],
+            'mod_id'  => ['required', 'string', 'max:128'],
             'loader'  => ['nullable', 'string'],
             'version' => ['nullable', 'string'],
         ]);
@@ -118,7 +118,12 @@ class ModManagerController extends Controller
             'repo_hangar_enabled'       => ['nullable'],
             'curseforge_api_key'        => ['nullable', 'string', 'max:255'],
             'clear_curseforge_api_key'  => ['nullable'],
-            'scheduler_interval'        => ['nullable', 'string', 'max:64'],
+            // A cron expression; a bad one would break the schedule (item 91).
+            'scheduler_interval'        => ['nullable', 'string', 'max:64', function ($attr, $value, $fail) {
+                if (! \Cron\CronExpression::isValidExpression(trim((string) $value))) {
+                    $fail('The update check schedule must be a cron expression, such as 0 3 * * *.');
+                }
+            }],
             'scheduler_auto_apply'      => ['nullable'],
             'auto_update_on_conflict'   => ['nullable'],
             'backup_rotation_enabled'   => ['nullable'],
@@ -129,9 +134,12 @@ class ModManagerController extends Controller
             'auto_upgrades_min_age_days' => ['nullable', 'integer', 'min:0', 'max:365'],
         ]);
 
-        // Checkboxes: absent = off. Stored as '1'/'0'.
+        // Checkboxes: each sends 0 (a hidden field) or 1, so a field that isn't
+        // in the request at all is left as it was (item 92). Stored as '1'/'0'.
         foreach (['repo_modrinth_enabled', 'repo_curseforge_enabled', 'repo_hangar_enabled', 'auto_update_on_conflict', 'backup_rotation_enabled', 'auto_upgrades_enabled'] as $box) {
-            ModManagerGlobalSetting::setValue($box, $request->has($box) ? '1' : '0');
+            if ($request->has($box)) {
+                ModManagerGlobalSetting::setValue($box, $request->boolean($box) ? '1' : '0');
+            }
         }
 
         if (isset($data['auto_upgrades_min_age_days'])) {
@@ -139,7 +147,9 @@ class ModManagerController extends Controller
         }
 
         // Auto-apply inverts to the stored/notify_only semantics.
-        ModManagerGlobalSetting::setValue('scheduler_notify_only', $request->has('scheduler_auto_apply') ? '0' : '1');
+        if ($request->has('scheduler_auto_apply')) {
+            ModManagerGlobalSetting::setValue('scheduler_notify_only', $request->boolean('scheduler_auto_apply') ? '0' : '1');
+        }
 
         if (! empty($data['scheduler_interval'])) {
             ModManagerGlobalSetting::setValue('scheduler_interval', trim($data['scheduler_interval']));
@@ -162,7 +172,7 @@ class ModManagerController extends Controller
             ModManagerGlobalSetting::setValue('curseforge_api_key', trim($data['curseforge_api_key']));
         }
 
-        return redirect()->to('/admin/extensions/serversuite?saved=1');
+        return $this->adminFlash(['saved' => '1']);
     }
 
     /**
@@ -184,9 +194,9 @@ class ModManagerController extends Controller
             $result = app(\ServerSuite\Services\EggManagerService::class)
                 ->importFromUrl(trim($data['egg_url']), (int) $data['nest_id']);
 
-            return redirect()->to('/admin/extensions/serversuite?egg_imported=' . urlencode((string) ($result['name'] ?? 'egg')));
+            return $this->adminFlash(['egg_imported' => (string) ($result['name'] ?? 'egg')]);
         } catch (\Throwable $e) {
-            return redirect()->to('/admin/extensions/serversuite?egg_error=' . urlencode($e->getMessage()));
+            return $this->adminFlash(['egg_error' => $e->getMessage()]);
         }
     }
 
@@ -227,9 +237,9 @@ class ModManagerController extends Controller
             $result = app(\ServerSuite\Services\EggManagerService::class)
                 ->importCatalogEgg(trim($data['nest_name']), trim($data['egg_url']));
 
-            return redirect()->to('/admin/extensions/serversuite?egg_imported=' . urlencode((string) ($result['name'] ?? 'egg')));
+            return $this->adminFlash(['egg_imported' => (string) ($result['name'] ?? 'egg')]);
         } catch (\Throwable $e) {
-            return redirect()->to('/admin/extensions/serversuite?egg_error=' . urlencode($e->getMessage()));
+            return $this->adminFlash(['egg_error' => $e->getMessage()]);
         }
     }
 
@@ -252,13 +262,9 @@ class ModManagerController extends Controller
             $result = app(\ServerSuite\Services\EggManagerService::class)->updateAllEggs($nestId);
             $c = $result['counts'];
 
-            return redirect()->to(
-                '/admin/extensions/serversuite?eggs_updated=' . $c['updated']
-                . '&eggs_skipped=' . $c['skipped']
-                . '&eggs_failed=' . $c['failed']
-            );
+            return $this->adminFlash(['eggs_updated' => $c['updated'], 'eggs_skipped' => $c['skipped'], 'eggs_failed' => $c['failed']]);
         } catch (\Throwable $e) {
-            return redirect()->to('/admin/extensions/serversuite?egg_error=' . urlencode($e->getMessage()));
+            return $this->adminFlash(['egg_error' => $e->getMessage()]);
         }
     }
 
@@ -291,10 +297,10 @@ class ModManagerController extends Controller
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
         $data = $request->validate([
-            'filename'   => ['required', 'string'],
+            'filename'   => ['required', 'string', 'max:255'],
             'source'     => ['required', 'string', 'in:modrinth,curseforge,hangar,manual'],
-            'mod_id'     => ['nullable', 'string'],
-            'version_id' => ['nullable', 'string'],
+            'mod_id'     => ['nullable', 'string', 'max:128'],
+            'version_id' => ['nullable', 'string', 'max:128'],
         ]);
 
         try {
@@ -408,7 +414,7 @@ class ModManagerController extends Controller
 
         $data = $request->validate([
             'source' => ['required', 'string', 'in:modrinth,curseforge,hangar'],
-            'mod_id' => ['required', 'string'],
+            'mod_id' => ['required', 'string', 'max:128'],
         ]);
 
         $versions = $this->mods->versionsFor($data['source'], $data['mod_id'], $srv);
@@ -572,7 +578,8 @@ class ModManagerController extends Controller
 
         $data = $request->validate([
             'egg_id'       => ['required', 'integer'],
-            'version'      => ['nullable', 'string', 'max:32'],
+            // Written into the egg's version variable: a version string, nothing else.
+            'version'      => ['nullable', 'string', 'max:32', 'regex:/^[A-Za-z0-9][A-Za-z0-9._+-]*$/'],
             'confirm_name' => ['required', 'string'],
         ]);
 
@@ -651,7 +658,7 @@ class ModManagerController extends Controller
                 $data['version'],
                 $data['build'] ?? null,
                 ! $this->backupsOff($srv),              // requireBackup, unless the server has no backup allocation
-                (bool) ($data['delete_plugins'] ?? true),
+                (bool) ($data['delete_plugins'] ?? false),   // deleting jars is opt-in; the tab always sends it
                 $data['wipe_mode'] ?? 'none',
             );
         } catch (\Throwable $e) {
@@ -678,8 +685,8 @@ class ModManagerController extends Controller
 
         $data = $request->validate([
             'source'     => ['required', 'string', 'in:modrinth,curseforge,hangar'],
-            'mod_id'     => ['required', 'string'],
-            'version_id' => ['required', 'string'],
+            'mod_id'     => ['required', 'string', 'max:128'],
+            'version_id' => ['required', 'string', 'max:128'],
         ]);
 
         $plan = $this->mods->planInstall($data['source'], $data['mod_id'], $data['version_id'], $srv);
@@ -733,8 +740,8 @@ class ModManagerController extends Controller
 
         $data = $request->validate([
             'source'     => ['required', 'string', 'in:modrinth,curseforge,hangar'],
-            'mod_id'     => ['required', 'string'],
-            'version_id' => ['required', 'string'],
+            'mod_id'     => ['required', 'string', 'max:128'],
+            'version_id' => ['required', 'string', 'max:128'],
             'queue'      => ['nullable', 'boolean'],
         ]);
 
@@ -971,12 +978,6 @@ class ModManagerController extends Controller
 
     // -------------------------------------------------------------------------
 
-    /**
-     * Resolve a Server by its UUID (passed from the React tab, which has the
-     * server UUID from ServerContext). Using the UUID rather than route-model
-     * binding keeps us on Blueprint's simple `web` router, matching the proven
-     * reference extension.
-     */
     /**
      * GET /{server}/backups
      * Backups list plus this server's effective limit and per-server settings.
@@ -1291,12 +1292,6 @@ class ModManagerController extends Controller
     }
 
     /**
-     * The clearance a mod change needs when the server backs up first: the
-     * redeemed clearance, or the 409 to send back.
-     *
-     * @return array{ok: bool, backup: ?string, message: ?string}|JsonResponse
-     */
-    /**
      * The panel gives this server no backups (backup_limit 0), so a switch goes
      * ahead without one; the confirm dialog says so. An unknown limit counts as
      * allowed, so the backup is still required.
@@ -1312,6 +1307,12 @@ class ModManagerController extends Controller
         return $limit !== null && $limit <= 0;
     }
 
+    /**
+     * The clearance a mod change needs when the server backs up first: the
+     * redeemed clearance, or the 409 to send back.
+     *
+     * @return array{ok: bool, backup: ?string, message: ?string}|JsonResponse
+     */
     protected function requireClearance(Request $request, Server $srv): array|JsonResponse
     {
         $c = app(\ServerSuite\Services\PreChangeBackup::class)->redeem($srv->uuid, $request->input('clearance'));
@@ -2167,7 +2168,12 @@ class ModManagerController extends Controller
                 })(),
                 'remove' => (function () use ($n, $d, $request) {
                     $targets = $d['targets'];
-                    array_splice($targets, (int) $request->input('index'), 1);
+                    $i = $request->input('index');
+                    // A missing or wrong index must not remove the first target (#141 item 47).
+                    if (! is_numeric($i) || ! array_key_exists((int) $i, $targets)) {
+                        throw new \InvalidArgumentException('That target is no longer there. Reload the page.');
+                    }
+                    array_splice($targets, (int) $i, 1);
                     $n->saveDefaults($targets, $d['events']);
 
                     return 'Removed.';
@@ -2195,7 +2201,7 @@ class ModManagerController extends Controller
             $q = ['notify_error' => $e->getMessage()];
         }
 
-        return redirect()->to('/admin/extensions/serversuite?' . http_build_query($q) . '#notifications');
+        return $this->adminFlash($q, '#notifications');
     }
 
     // -------------------------------------------------------------------------
@@ -2335,7 +2341,7 @@ class ModManagerController extends Controller
             \ServerSuite\Services\GameDetectionService::setOverride((int) $eggId, $game === '' ? null : $game);
         }
 
-        return redirect()->to('/admin/extensions/serversuite?' . http_build_query(['games_ok' => 'Games saved.']) . '#games');
+        return $this->adminFlash(['games_ok' => 'Games saved.'], '#games');
     }
 
     /** POST /admin/subdomain-allowances   { allowance: { <server uuid>: n } } */
@@ -2376,6 +2382,18 @@ class ModManagerController extends Controller
         return response()->json(['data' => ['ok' => true, 'fqdn' => is_string($result) ? $result : null]]);
     }
 
+    /**
+     * Back to the admin page with a message (#141 item 43). Messages go in the
+     * session, not the URL: exception text stays out of access logs and
+     * browser history, and the page can't be made to show text from a link.
+     *
+     * @param array<string, mixed> $messages
+     */
+    private function adminFlash(array $messages, string $anchor = ''): \Illuminate\Http\RedirectResponse
+    {
+        return redirect()->to('/admin/extensions/serversuite' . $anchor)->with('serversuite_admin', array_map(fn ($v) => mb_substr((string) $v, 0, 500), $messages));
+    }
+
     private function adminSubdomainRedirect(callable $fn, string $ok)
     {
         try {
@@ -2385,9 +2403,15 @@ class ModManagerController extends Controller
             $q = ['subdomains_error' => $e->getMessage()];
         }
 
-        return redirect()->to('/admin/extensions/serversuite?' . http_build_query($q) . '#subdomains');
+        return $this->adminFlash($q, '#subdomains');
     }
 
+    /**
+     * Resolve a Server by its UUID (passed from the React tab, which has the
+     * server UUID from ServerContext). Using the UUID rather than route-model
+     * binding keeps us on Blueprint's simple `web` router, matching the proven
+     * reference extension.
+     */
     protected function resolveServer(string $serverUuid): Server
     {
         return Server::query()->where('uuid', $serverUuid)->firstOrFail();

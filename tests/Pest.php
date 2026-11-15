@@ -46,6 +46,7 @@ function panelTables(): void
         $t->unsignedBigInteger('egg_id');
         $t->string('env_variable');
         $t->string('default_value')->nullable();
+        $t->string('rules')->nullable();
         $t->timestamps();
     });
     $schema->create('server_variables', function (Illuminate\Database\Schema\Blueprint $t) {

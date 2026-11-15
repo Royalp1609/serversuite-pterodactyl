@@ -88,16 +88,20 @@ const Badge = styled.span`
  */
 const MarkdownLite = ({ source }: { source: string }) => {
     // 1. strip raw HTML tags and image embeds
+    // Only things shaped like tags or comments go: "a < b and c > d" is text
+    // (#141 item 97). React escapes whatever is left, so text stays text.
     let text = source
-        .replace(/<[^>]+>/g, '')                 // any HTML tag
-        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')     // ![alt](url) images
+        .replace(/<!--[\s\S]*?-->/g, '')         // HTML comments
+        .replace(/<\/?[A-Za-z][^<>]*>/g, '')      // HTML tags
+        .replace(/!\[[^\]]*\]\((?:[^()\s]|\([^()\s]*\))*\)/g, '')     // ![alt](url) images
         .replace(/\r\n/g, '\n');
 
     // inline formatting -> React nodes (bold, italic, code, links)
     const renderInline = (line: string, keyBase: string): React.ReactNode[] => {
         const nodes: React.ReactNode[] = [];
         // tokenize on **bold**, *italic*, `code`, [text](url)
-        const regex = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+        // Link URLs may hold one level of brackets, as in wiki links: (a_(b))
+        const regex = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\((?:[^()\s]|\([^()\s]*\))+\))/g;
         let last = 0; let m: RegExpExecArray | null; let i = 0;
         while ((m = regex.exec(line)) !== null) {
             if (m.index > last) nodes.push(line.slice(last, m.index));
@@ -106,7 +110,7 @@ const MarkdownLite = ({ source }: { source: string }) => {
             else if (tok.startsWith('*')) nodes.push(<em key={`${keyBase}-${i}`}>{tok.slice(1, -1)}</em>);
             else if (tok.startsWith('`')) nodes.push(<code key={`${keyBase}-${i}`} className="px-1 rounded bg-neutral-800 text-indigo-300">{tok.slice(1, -1)}</code>);
             else {
-                const lm = tok.match(/\[([^\]]+)\]\(([^)]+)\)/);
+                const lm = tok.match(/^\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)$/);
                 if (lm) {
                     const href = safeExternalUrl(lm[2]);
                     nodes.push(href
@@ -122,17 +126,23 @@ const MarkdownLite = ({ source }: { source: string }) => {
 
     const lines = text.split('\n');
     const out: React.ReactNode[] = [];
+    let items: React.ReactNode[] = [];   // list items wait here until the list ends, then go in a <ul>
     let key = 0;
+    const endList = () => {
+        if (items.length) { out.push(<ul key={key++} className="mb-2">{items}</ul>); items = []; }
+    };
     for (let li = 0; li < lines.length; li++) {
         const raw = lines[li];
         const line = raw.trim();
+        if (/^[-*]\s+/.test(line)) { items.push(<li key={key++} className="ml-5 list-disc text-neutral-300">{renderInline(line.replace(/^[-*]\s+/, ''), `li${key}`)}</li>); continue; }
+        endList();
         if (line === '' || line === '---') { continue; }
         if (line.startsWith('### ')) { out.push(<h4 key={key++} className="text-base font-bold text-white mt-3 mb-1">{renderInline(line.slice(4), `h${key}`)}</h4>); continue; }
         if (line.startsWith('## ')) { out.push(<h3 key={key++} className="text-lg font-bold text-white mt-4 mb-1">{renderInline(line.slice(3), `h${key}`)}</h3>); continue; }
         if (line.startsWith('# ')) { out.push(<h2 key={key++} className="text-xl font-bold text-white mt-4 mb-2">{renderInline(line.slice(2), `h${key}`)}</h2>); continue; }
-        if (/^[-*]\s+/.test(line)) { out.push(<li key={key++} className="ml-5 list-disc text-neutral-300">{renderInline(line.replace(/^[-*]\s+/, ''), `li${key}`)}</li>); continue; }
         out.push(<p key={key++} className="text-neutral-300 mb-2 leading-relaxed">{renderInline(line, `p${key}`)}</p>);
     }
+    endList();
     return <div className="text-sm">{out}</div>;
 };
 
@@ -509,13 +519,14 @@ export default () => {
         if (entry === v) return true;
         const num = (x: string) => x.split('.').map(n => parseInt(n, 10) || 0);
         const cmp = (a: number[], b: number[]) => {
-            for (let i = 0; i < 3; i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; }
+            for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; }
             return 0;
         };
         if (entry.endsWith('.x')) return v === entry.slice(0, -2) || v.startsWith(entry.slice(0, -1));
-        if (entry.includes('-')) {
-            const [lo, hi] = entry.split('-', 2);
-            return cmp(num(v), num(lo)) >= 0 && cmp(num(v), num(hi)) <= 0;
+        // A range only when both ends are plain versions: "1.21-rc1" is one version.
+        const range = /^(\d+(?:\.\d+)*)-(\d+(?:\.\d+)*)$/.exec(entry);
+        if (range && /^\d+(?:\.\d+)*$/.test(v)) {
+            return cmp(num(v), num(range[1])) >= 0 && cmp(num(v), num(range[2])) <= 0;
         }
         return false;
     };
