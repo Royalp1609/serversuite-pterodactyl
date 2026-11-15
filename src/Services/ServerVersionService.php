@@ -25,6 +25,9 @@ class ServerVersionService
     /** Version lists move rarely; cache for an hour. */
     private const TTL = 3600;
 
+    /** The Java version in an image name or label: java21, java_21, java-21, "Java 21" (item 72). */
+    public const JAVA_PATTERN = '/java[ _-]?(\d+)/i';
+
     public function __construct(
         private LoaderDetectionService $loaders,
     ) {
@@ -252,7 +255,7 @@ class ServerVersionService
     public function resolveImage(array $allowed, ?string $currentImage, array $band): array
     {
         [$min, $max] = $band;
-        $javaOf = static fn (?string $img): ?int => $img && preg_match('/java[_-]?(\d+)/i', $img, $m) ? (int) $m[1] : null;
+        $javaOf = static fn (?string $img): ?int => $img && preg_match(ServerVersionService::JAVA_PATTERN, $img, $m) ? (int) $m[1] : null;
 
         $currentJava = $javaOf($currentImage);
 

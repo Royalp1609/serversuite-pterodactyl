@@ -288,8 +288,44 @@ it('installs a pack end to end', function () {
 
     $mods = ServerMod::forServer('srv-mp')->orderBy('source_id')->get();
     expect($mods->pluck('source_id')->all())->toBe(['MODA', 'MODB'])
-        ->and($mods->pluck('modpack_id')->all())->toBe([$pack->id, $pack->id])
+        ->and($mods->pluck('modpack_id')->all())->toBe([null, $pack->id], "MODA was the owner's: it stays theirs (#141 item 100)")
         ->and($mods[0]->target_filename)->toBe('a.jar');
+});
+
+it("leaves the owner's own mod in place when the pack that replaced it is removed (#141 item 100)", function () {
+    mpV1($this);
+    ServerMod::query()->create(['server_uuid' => 'srv-mp', 'source' => 'modrinth', 'source_id' => 'MODA', 'mod_name' => 'Mod MODA', 'installed_version' => 'old', 'target_filename' => 'a-old.jar', 'install_path' => '/mods']);
+    $this->wings->put('/mods/a-old.jar', 'old a');
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    mpRun();
+    $this->power = 'running';
+
+    mpSvc()->remove($this->server, 1);
+    $pack = Modpack::forServer('srv-mp');
+    for ($i = 0; $i < 20 && $pack->fresh()?->isRunning(); $i++) {
+        (new InstallModpackJob($pack->id))->handle(app(ModpackInstaller::class));
+    }
+
+    expect($this->wings->files['/mods/a.jar'])->toBe('jar:mods/a.jar:v1', 'the owner keeps the mod, at the version the pack put in')
+        ->and($this->wings->files)->not->toHaveKey('/mods/b.jar')
+        ->and(ServerMod::forServer('srv-mp')->pluck('source_id')->all())->toBe(['MODA']);
+});
+
+it("keeps the server's own server.properties and player lists over the pack's (#141 item 101)", function () {
+    mpPublish($this, 'v1', ['mods/a.jar' => ['mod' => 'MODA']], [
+        'overrides/server.properties' => "motd=pack\n",
+        'overrides/ops.json'          => '[{"name":"packauthor"}]',
+        'overrides/config/x.toml'     => 'pack',
+    ]);
+    $this->wings->put('/server.properties', "motd=mine\n");
+
+    mpSvc()->start($this->server, 'PACK', 'v1', 1);
+    $pack = mpRun();
+
+    expect($pack->status)->toBe(Modpack::STATUS_INSTALLED, (string) $pack->error)
+        ->and($this->wings->files['/server.properties'])->toBe("motd=mine\n")
+        ->and($this->wings->files['/ops.json'])->toBe('[{"name":"packauthor"}]', 'none on the server, so the pack\'s is used')
+        ->and($this->wings->files['/config/x.toml'])->toBe('pack');
 });
 
 it('updates: removes what the new version dropped and keeps unchanged files', function () {

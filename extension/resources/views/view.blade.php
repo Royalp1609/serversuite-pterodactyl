@@ -1,4 +1,6 @@
 @php
+    // Messages from the last admin action (#141 item 43): session flash, not the URL.
+    $ssFlash = (array) session('serversuite_admin', []);
     // Effective values: admin-saved overrides (already mapped onto config at
     // boot by the backend provider), falling back to config/.env defaults.
     $repoModrinth   = (bool) config('serversuite.repositories.modrinth', true);
@@ -27,15 +29,15 @@
             <form method="POST" action="/extensions/serversuite/admin/settings">
                 @csrf
                 <div class="box-body">
-                    @if (request()->query('saved'))
+                    @if (($ssFlash['saved'] ?? null))
                         <div class="alert alert-success">Settings saved. They take effect on the next request.</div>
                     @endif
 
                     <h4>Repositories</h4>
                     <div class="form-group">
-                        <label><input type="checkbox" name="repo_modrinth_enabled" value="1" {{ $repoModrinth ? 'checked' : '' }}> Modrinth</label><br>
-                        <label><input type="checkbox" name="repo_hangar_enabled" value="1" {{ $repoHangar ? 'checked' : '' }}> Hangar (PaperMC)</label><br>
-                        <label><input type="checkbox" name="repo_curseforge_enabled" value="1" {{ $repoCurseforge ? 'checked' : '' }}> CurseForge</label>
+                        <label><input type="hidden" name="repo_modrinth_enabled" value="0"><input type="checkbox" name="repo_modrinth_enabled" value="1" {{ $repoModrinth ? 'checked' : '' }}> Modrinth</label><br>
+                        <label><input type="hidden" name="repo_hangar_enabled" value="0"><input type="checkbox" name="repo_hangar_enabled" value="1" {{ $repoHangar ? 'checked' : '' }}> Hangar (PaperMC)</label><br>
+                        <label><input type="hidden" name="repo_curseforge_enabled" value="0"><input type="checkbox" name="repo_curseforge_enabled" value="1" {{ $repoCurseforge ? 'checked' : '' }}> CurseForge</label>
                         <p class="text-muted small">Disabled repositories are hidden from every server's Mod Manager tab.</p>
                     </div>
 
@@ -54,7 +56,7 @@
                         <label>Check interval (cron expression)</label>
                         <input type="text" class="form-control" name="scheduler_interval" value="{{ $interval }}" placeholder="0 3 * * *">
                         <label style="font-weight:normal; margin-top:8px;">
-                            <input type="checkbox" name="scheduler_auto_apply" value="1" {{ $notifyOnly ? '' : 'checked' }}>
+                            <input type="hidden" name="scheduler_auto_apply" value="0"><input type="checkbox" name="scheduler_auto_apply" value="1" {{ $notifyOnly ? '' : 'checked' }}>
                             Install updates automatically, in the background, after a backup (skipped when a server's pre-change backup is set to never). Disabled and modpack mods are left alone. Otherwise updates are only flagged and installed from the Mods tab.
                         </label>
                     </div>
@@ -62,7 +64,7 @@
                     <h4>Automatic version upgrades</h4>
                     <div class="form-group">
                         <label style="font-weight:normal;">
-                            <input type="checkbox" name="auto_upgrades_enabled" value="1" {{ config('serversuite.auto_upgrades.enabled', true) ? 'checked' : '' }}>
+                            <input type="hidden" name="auto_upgrades_enabled" value="0"><input type="checkbox" name="auto_upgrades_enabled" value="1" {{ config('serversuite.auto_upgrades.enabled', true) ? 'checked' : '' }}>
                             Allow automatic upgrades on this panel (each server still opts in on its Versions tab; only Paper servers with a backup allocation can)
                         </label>
                         <label style="display:block; margin-top:8px;">Days a release must be out first</label>
@@ -73,7 +75,7 @@
                     <h4>Install behaviour</h4>
                     <div class="form-group">
                         <label style="font-weight:normal;">
-                            <input type="checkbox" name="auto_update_on_conflict" value="1" {{ $autoConflict ? 'checked' : '' }}>
+                            <input type="hidden" name="auto_update_on_conflict" value="0"><input type="checkbox" name="auto_update_on_conflict" value="1" {{ $autoConflict ? 'checked' : '' }}>
                             When installing a mod that is already present at a different version, update it automatically instead of asking
                         </label>
                     </div>
@@ -81,7 +83,7 @@
                     <h4>Backup rotation</h4>
                     <div class="form-group">
                         <label style="font-weight:normal;">
-                            <input type="checkbox" name="backup_rotation_enabled" value="1" {{ $backupEnabled ? 'checked' : '' }}>
+                            <input type="hidden" name="backup_rotation_enabled" value="0"><input type="checkbox" name="backup_rotation_enabled" value="1" {{ $backupEnabled ? 'checked' : '' }}>
                             Enable scheduled backup rotation (master switch — individual servers still opt in from their own Backups tab)
                         </label>
                         <p class="text-muted small">When off, no automatic rotation runs for any server.</p>
@@ -133,14 +135,14 @@
         <div class="box">
             <div class="box-header with-border"><h3 class="box-title">Egg Manager</h3></div>
             <div class="box-body">
-                @if (request()->query('egg_imported'))
-                    <div class="alert alert-success">Imported "{{ request()->query('egg_imported') }}". It now appears under its nest in the panel.</div>
+                @if (($ssFlash['egg_imported'] ?? null))
+                    <div class="alert alert-success">Imported "{{ ($ssFlash['egg_imported'] ?? null) }}". It now appears under its nest in the panel.</div>
                 @endif
-                @if (request()->query('egg_error'))
-                    <div class="alert alert-danger">Egg Manager error: {{ request()->query('egg_error') }}</div>
+                @if (($ssFlash['egg_error'] ?? null))
+                    <div class="alert alert-danger">Egg Manager error: {{ ($ssFlash['egg_error'] ?? null) }}</div>
                 @endif
-                @if (request()->has('eggs_updated'))
-                    <div class="alert alert-success">Update all finished: {{ request()->query('eggs_updated') }} updated, {{ request()->query('eggs_skipped') }} skipped (no update URL), {{ request()->query('eggs_failed') }} failed.</div>
+                @if (isset($ssFlash['eggs_updated']))
+                    <div class="alert alert-success">Update all finished: {{ ($ssFlash['eggs_updated'] ?? null) }} updated, {{ ($ssFlash['eggs_skipped'] ?? null) }} skipped (no update URL), {{ ($ssFlash['eggs_failed'] ?? null) }} failed.</div>
                 @endif
 
                 <p class="text-muted">Pick a nest, then an egg from the community catalog. The nest is created on the panel if it doesn't already exist, mirroring the source's nest &gt; egg structure. Anything not listed can still be imported from a URL below.</p>
@@ -216,8 +218,8 @@
         <div class="box">
             <div class="box-header with-border"><h3 class="box-title">Games</h3></div>
             <div class="box-body">
-                @if (request()->query('games_ok'))
-                    <div class="alert alert-success">{{ request()->query('games_ok') }}</div>
+                @if (($ssFlash['games_ok'] ?? null))
+                    <div class="alert alert-success">{{ ($ssFlash['games_ok'] ?? null) }}</div>
                 @endif
                 <form method="POST" action="/extensions/serversuite/admin/egg-games">
                     @csrf
@@ -274,11 +276,11 @@
         <div class="box">
             <div class="box-header with-border"><h3 class="box-title">Subdomains (Cloudflare)</h3></div>
             <div class="box-body">
-                @if (request()->query('subdomains_ok'))
-                    <div class="alert alert-success">{{ request()->query('subdomains_ok') }}</div>
+                @if (($ssFlash['subdomains_ok'] ?? null))
+                    <div class="alert alert-success">{{ ($ssFlash['subdomains_ok'] ?? null) }}</div>
                 @endif
-                @if (request()->query('subdomains_error'))
-                    <div class="alert alert-danger">{{ request()->query('subdomains_error') }}</div>
+                @if (($ssFlash['subdomains_error'] ?? null))
+                    <div class="alert alert-danger">{{ ($ssFlash['subdomains_error'] ?? null) }}</div>
                 @endif
 
                 @foreach ($ssDomains as $d)
@@ -475,11 +477,11 @@
         <div class="box">
             <div class="box-header with-border"><h3 class="box-title">Default notifications (Discord, ntfy)</h3></div>
             <div class="box-body">
-                @if (request()->query('notify_ok'))
-                    <div class="alert alert-success">{{ request()->query('notify_ok') }}</div>
+                @if (($ssFlash['notify_ok'] ?? null))
+                    <div class="alert alert-success">{{ ($ssFlash['notify_ok'] ?? null) }}</div>
                 @endif
-                @if (request()->query('notify_error'))
-                    <div class="alert alert-danger">{{ request()->query('notify_error') }}</div>
+                @if (($ssFlash['notify_error'] ?? null))
+                    <div class="alert alert-danger">{{ ($ssFlash['notify_error'] ?? null) }}</div>
                 @endif
                 <p class="text-muted small">Where Server Suite events go for servers that haven't set up their own (on their Notifications tab). Unlike owners' targets, these may point at your own network. Stored encrypted; never shown again.</p>
                 <table class="table table-condensed">

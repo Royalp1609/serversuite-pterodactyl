@@ -173,3 +173,19 @@ it("doesn't mark a move when the allocation change rolls back, or for other upda
 
     expect(Subdomain::query()->firstOrFail()->move_pending_since)->toBeNull();
 });
+
+it('looks only at waiting moves between full scans (#141 item 59)', function () {
+    $server = hookedServer();
+    $sub = Subdomain::query()->firstOrFail();
+    $new = Allocation::query()->create(['ip' => '198.51.100.9', 'port' => 25599]);
+    DB::table('servers')->where('id', $server->id)->update(['allocation_id' => $new->id]);   // no hook
+
+    $started = now()->subMinute();
+    $asked = 0;
+    expect(wings($started, $asked)->applyPendingMoves(false))->toBe(0)
+        ->and($sub->fresh()->move_pending_since)->toBeNull('not noticed on a quick pass')
+        ->and($asked)->toBe(0);
+
+    wings($started)->applyPendingMoves(true);
+    expect($sub->fresh()->move_pending_since)->not->toBeNull('a full scan notices it');
+});

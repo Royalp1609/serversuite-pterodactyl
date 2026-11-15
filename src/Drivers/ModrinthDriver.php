@@ -121,7 +121,8 @@ class ModrinthDriver extends AbstractDriver
             default     => 'relevance',
         };
 
-        $cacheKey = "serversuite.modrinth.search." . md5($query . $loader . $gameVersion . $limit . $index . $offset);
+        // Joined with a separator (item 82): "xpaper" + no loader and "x" + paper differ.
+        $cacheKey = "serversuite.modrinth.search." . md5(json_encode([$query, $loader, $gameVersion, $limit, $index, $offset]));
 
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($query, $facets, $limit, $index, $offset) {
             $response = $this->http()->get('/search', [
@@ -137,7 +138,9 @@ class ModrinthDriver extends AbstractDriver
             }
 
             return collect($response->json('hits', []))
+                ->filter(fn ($hit) => self::wellFormed($hit, 'project_id'))   // item 79: one bad hit can't fail the search
                 ->map(fn (array $hit) => $this->hitToModResult($hit))
+                ->values()
                 ->all();
         });
     }
@@ -175,7 +178,7 @@ class ModrinthDriver extends AbstractDriver
                 throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
             }
 
-            return collect($res->json('hits', []))->map(fn (array $hit) => $this->hitToModResult($hit, 'modpack'))->all();
+            return collect($res->json('hits', []))->filter(fn ($hit) => self::wellFormed($hit, 'project_id'))->map(fn (array $hit) => $this->hitToModResult($hit, 'modpack'))->values()->all();
         });
     }
 
@@ -220,17 +223,23 @@ class ModrinthDriver extends AbstractDriver
         $versions = [];
         foreach (array_chunk($sha1s, 500) as $chunk) {
             $res = $this->http()->post('/version_files', ['hashes' => $chunk, 'algorithm' => 'sha1']);
-            if ($res->successful()) {
-                $versions += (array) $res->json();
+            if (! $res->successful()) {   // item 81: an outage is not "no matches"
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
             }
+            $versions += (array) $res->json();
         }
 
         $projects = [];
         $ids = array_values(array_unique(array_filter(array_column($versions, 'project_id'))));
         foreach (array_chunk($ids, 100) as $chunk) {
             $res = $this->http()->get('/projects', ['ids' => json_encode($chunk)]);
-            foreach ($res->successful() ? (array) $res->json() : [] as $p) {
-                $projects[$p['id']] = $this->projectToModResult($p);
+            if (! $res->successful()) {
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
+            }
+            foreach ((array) $res->json() as $p) {
+                if (self::wellFormed($p, 'id')) {
+                    $projects[$p['id']] = $this->projectToModResult($p);
+                }
             }
         }
 
@@ -280,19 +289,27 @@ class ModrinthDriver extends AbstractDriver
     {
         $cacheKey = "serversuite.modrinth.project.{$modId}";
 
-        return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($modId) {
-            $response = $this->http()->get("/project/{$modId}");
+        // A missing project is cached too, as false (item 80): Cache::remember
+        // can't tell a stored null from a miss, so null meant a request every time.
+        $found = Cache::remember($cacheKey, self::CACHE_TTL, function () use ($modId) {
+            $response = $this->http()->get("/project/" . rawurlencode($modId));
 
             if ($response->status() === 404) {
-                return null;
+                return false;
             }
 
             if (! $response->successful()) {
                 throw RepositoryException::httpError($this->key(), $response->status(), $response->body());
             }
+            $project = $response->json();
+            if (! self::wellFormed($project, 'id')) {
+                return false;
+            }
 
-            return $this->projectToModResult($response->json());
+            return $this->projectToModResult($project, $this->ownerName((string) $project['id']));
         });
+
+        return $found instanceof ModResult ? $found : null;
     }
 
     // -------------------------------------------------------------------------
@@ -315,7 +332,9 @@ class ModrinthDriver extends AbstractDriver
             $response = $this->http()->get('/tag/game_version');
 
             if (! $response->successful()) {
-                return [];
+                // Thrown, so nothing is cached (item 81): the caller falls back
+                // to the static list and asks again next time.
+                throw RepositoryException::httpError($this->key(), $response->status(), $response->body());
             }
 
             // Release versions only — snapshots/betas would clutter the filter
@@ -352,7 +371,7 @@ class ModrinthDriver extends AbstractDriver
                 $params['game_versions'] = json_encode([$gameVersion]);
             }
 
-            $response = $this->http()->get("/project/{$modId}/version", $params);
+            $response = $this->http()->get("/project/" . rawurlencode($modId) . "/version", $params);
 
             if ($response->status() === 404) {
                 return [];
@@ -384,6 +403,39 @@ class ModrinthDriver extends AbstractDriver
     // Mappers — raw API response → our DTOs
     // -------------------------------------------------------------------------
 
+    /** A hit or project with the fields every result needs (item 79). */
+    private static function wellFormed(mixed $p, string $idKey): bool
+    {
+        return is_array($p) && is_string($p[$idKey] ?? null) && $p[$idKey] !== ''
+            && is_string($p['slug'] ?? null) && $p['slug'] !== '' && is_string($p['title'] ?? null);
+    }
+
+    /** "plugin" for plugin-only projects, else "mod" (item 78): Modrinth's own page paths. */
+    private static function pageKind(array $loaders): string
+    {
+        $plugin = ['paper', 'spigot', 'bukkit', 'purpur', 'folia', 'bungeecord', 'waterfall', 'velocity', 'sponge'];
+        $loaders = array_map(fn ($l) => strtolower((string) $l), $loaders);
+
+        return $loaders !== [] && array_diff($loaders, $plugin) === [] ? 'plugin' : 'mod';
+    }
+
+    /** The project owner's user name, or '' if Modrinth doesn't say (organisation projects, outages). */
+    private function ownerName(string $projectId): string
+    {
+        try {
+            $res = $this->http()->get('/project/' . rawurlencode($projectId) . '/members');
+            if (! $res->successful()) {
+                return '';
+            }
+            $members = collect((array) $res->json());
+            $owner = $members->first(fn ($m) => ($m['is_owner'] ?? false) === true || strcasecmp((string) ($m['role'] ?? ''), 'owner') === 0) ?? $members->first();
+
+            return mb_substr((string) ($owner['user']['username'] ?? ''), 0, 64);
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
     /**
      * Map a /search hit to ModResult.
      * Search hits have a different shape from /project/{id} responses.
@@ -399,7 +451,7 @@ class ModrinthDriver extends AbstractDriver
             author:       $hit['author'] ?? '',
             downloads:    (int) ($hit['downloads'] ?? 0),
             iconUrl:      $hit['icon_url'] ?? null,
-            pageUrl:      "https://modrinth.com/{$kind}/{$hit['slug']}",
+            pageUrl:      "https://modrinth.com/" . ($kind === 'mod' ? self::pageKind($this->extractLoaders($hit)) : $kind) . "/{$hit['slug']}",
             loaders:      $this->extractLoaders($hit),
             gameVersions: $hit['versions'] ?? [],
             dependencies: [],  // not available in search results; fetched on get()
@@ -434,7 +486,7 @@ class ModrinthDriver extends AbstractDriver
     /**
      * Map a /project/{id} response to ModResult.
      */
-    private function projectToModResult(array $project): ModResult
+    private function projectToModResult(array $project, string $author = ''): ModResult
     {
         return new ModResult(
             source:       $this->key(),
@@ -442,10 +494,11 @@ class ModrinthDriver extends AbstractDriver
             slug:         $project['slug'],
             name:         $project['title'],
             description:  $project['description'] ?? '',
-            author:       $project['team'] ?? '',
+            // The team's owner (item 77). The project only carries a team id.
+            author:       $author,
             downloads:    (int) ($project['downloads'] ?? 0),
             iconUrl:      $project['icon_url'] ?? null,
-            pageUrl:      "https://modrinth.com/mod/{$project['slug']}",
+            pageUrl:      "https://modrinth.com/" . self::pageKind((array) ($project['loaders'] ?? [])) . "/{$project['slug']}",
             loaders:      $project['loaders'] ?? [],
             gameVersions: $project['game_versions'] ?? [],
             dependencies: [],  // use getdependencies endpoint if needed; resolved in Phase 6

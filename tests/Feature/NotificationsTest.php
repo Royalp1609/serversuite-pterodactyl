@@ -27,7 +27,7 @@ it('stores server targets encrypted and never serialises them', function () {
     expect($raw)->not->toContain('discord.com')
         ->and($this->n->forServer('srv-n')['targets'][0]['url'])->toBe(HOOK)
         ->and(ModManagerSetting::forServer('srv-n')->toArray())->not->toHaveKey('notify')
-        ->and(Notifier::label(['type' => 'discord', 'url' => HOOK]))->toBe('Discord webhook …_token');
+        ->and(Notifier::label(['type' => 'discord', 'url' => HOOK]))->toBe('Discord webhook …123456');
 });
 
 it('keeps owner targets on the public internet; the admin default may be local', function () {
@@ -37,6 +37,7 @@ it('keeps owner targets on the public internet; the admin default may be local',
         [['type' => 'ntfy', 'server' => 'https://10.0.0.5', 'topic' => 'x'], 'private network'],
         [['type' => 'ntfy', 'server' => 'https://127.0.0.1:8080', 'topic' => 'x'], 'private network'],
         [['type' => 'ntfy', 'server' => 'https://[::1]', 'topic' => 'x'], 'private network'],
+        [['type' => 'ntfy', 'server' => 'https://100.64.1.1', 'topic' => 'x'], 'private network'],
         [['type' => 'ntfy', 'server' => 'https://ntfy.sh', 'topic' => 'a b'], 'topic'],
     ] as [$t, $msg]) {
         expect(fn () => $this->n->saveServer('srv-n', [$t], []))->toThrow(InvalidArgumentException::class, $msg);
@@ -99,4 +100,10 @@ it('reports a crash after a mod change once', function () {
 
     Queue::assertPushed(SendNotificationJob::class, 1);
     Queue::assertPushed(SendNotificationJob::class, fn ($j) => $j->message['title'] === 'Crashed after: install Sodium' && str_contains($j->message['body'], 'Before Sodium'));
+});
+
+it('returns the checked addresses so delivery can pin them (#141 item 28)', function () {
+    expect(Notifier::assertPublic('https://1.1.1.1/topic'))->toBe(['1.1.1.1'])
+        ->and(fn () => Notifier::assertPublic('https://100.127.255.254'))->toThrow(InvalidArgumentException::class, 'private network')
+        ->and(Notifier::label(['type' => 'discord', 'url' => HOOK]))->not->toContain('token');
 });

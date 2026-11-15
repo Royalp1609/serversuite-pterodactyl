@@ -344,8 +344,15 @@ class ModManagerServiceProvider extends ServiceProvider
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
             $args = config('serversuite.scheduler.notify_only', true) ? [] : ['--apply'];
 
+            // A stored value that isn't a cron expression would stop the whole
+            // schedule from building (item 91): fall back to the default.
+            $cron = trim((string) config('serversuite.scheduler.interval', '0 3 * * *'));
+            if (! \Cron\CronExpression::isValidExpression($cron)) {
+                logger()->warning('[Server Suite] the update check schedule is not a cron expression, using 0 3 * * *', ['value' => $cron]);
+                $cron = '0 3 * * *';
+            }
             $schedule->command(CheckUpdatesCommand::class, $args)
-                ->cron(config('serversuite.scheduler.interval', '0 3 * * *'))
+                ->cron($cron)
                 ->withoutOverlapping()
                 ->runInBackground()
                 ->appendOutputTo(storage_path('logs/serversuite-updates.log'));

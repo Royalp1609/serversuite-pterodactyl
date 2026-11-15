@@ -272,6 +272,7 @@ class ModpackService
 
         $newPaths = array_merge(array_column($index->installable(), 'path'), $overrides);
         $remove = $old->filter(fn ($f) => ! in_array($f['path'], $newPaths, true)
+            && ($f['kind'] ?? 'download') !== 'user'   // the owner's own mod (item 100)
             && (($f['kind'] ?? 'download') === 'download' || str_ends_with(strtolower($f['path']), '.jar')))
             ->pluck('path')->values()->all();
 

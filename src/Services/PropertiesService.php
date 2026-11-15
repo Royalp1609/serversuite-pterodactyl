@@ -22,6 +22,8 @@ class PropertiesService
     public function __construct(protected DaemonFileClient $files, protected PanelServerOps $ops, protected FileDeliveryService $delivery) {}
 
     /** @return array{found: bool, hash: ?string, fields: list<array<string, mixed>>, seed: ?string, power: ?string} */
+    private const RESET_KEY = 'serversuite.properties.reset-world.';
+
     public function open(string $uuid): array
     {
         $raw = $this->files->readFile($uuid, self::FILE, self::MAX_BYTES);
@@ -64,8 +66,13 @@ class PropertiesService
             $this->files->writeFile($uuid, self::FILE, $r['content']);
         }
 
+        if ($after === 'reset_world') {
+            // resetWorldStep only wipes after this (#141 item 39).
+            \Illuminate\Support\Facades\Cache::put(self::RESET_KEY . $uuid, true, now()->addMinutes(30));
+        }
         $status = match ($after) {
-            'restart' => $this->signal($uuid, 'restart', 'restarting'),
+            // Nothing written means nothing to pick up (#141 item 120).
+            'restart' => $r['changed'] !== [] ? $this->signal($uuid, 'restart', 'restarting') : 'saved',
             'reset_world' => $this->signal($uuid, 'stop', 'stopping'),
             default => 'saved',
         };
@@ -82,9 +89,14 @@ class PropertiesService
      */
     public function resetWorldStep(string $uuid): array
     {
+        // Only after a save that changed the seed and asked for the reset.
+        if (! \Illuminate\Support\Facades\Cache::has(self::RESET_KEY . $uuid)) {
+            throw new \InvalidArgumentException('No world reset is waiting. Change the seed and save with "reset the world" first.');
+        }
         if (($this->ops->runtimeState($uuid)['power'] ?? null) !== 'offline') {
             return ['status' => 'stopping'];
         }
+        \Illuminate\Support\Facades\Cache::forget(self::RESET_KEY . $uuid);
         $this->delivery->wipeForNuclear($uuid, 'keep_plugins');
         $this->ops->power($uuid, 'start');
 

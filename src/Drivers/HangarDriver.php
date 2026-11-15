@@ -118,7 +118,7 @@ class HangarDriver extends AbstractDriver
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($slug) {
             // Hangar accepts /projects/{slug} and also /projects/{author}/{slug};
             // the slug-only form is the documented canonical lookup.
-            $resp = $this->http()->get("/projects/{$slug}");
+            $resp = $this->http()->get("/projects/" . rawurlencode($slug));
 
             if (! $resp->successful()) {
                 return null;
@@ -138,7 +138,7 @@ class HangarDriver extends AbstractDriver
         $cacheKey = 'serversuite.hangar.versions.' . md5($modId . $loader . $gameVersion);
 
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($slug, $loader, $gameVersion, $modId) {
-            $resp = $this->http()->get("/projects/{$slug}/versions", ['limit' => 25]);
+            $resp = $this->http()->get("/projects/" . rawurlencode($slug) . "/versions", ['limit' => 25]);
 
             if (! $resp->successful()) {
                 return [];
@@ -265,7 +265,7 @@ class HangarDriver extends AbstractDriver
             $downloadUrl = $d['downloadUrl']
                 ?? $d['externalUrl']
                 ?? ($slug && $versionName
-                    ? $this->baseUrl() . "/projects/{$slug}/versions/{$versionName}/{$platformKey}/download"
+                    ? $this->baseUrl() . "/projects/" . rawurlencode($slug) . "/versions/" . rawurlencode($versionName) . "/{$platformKey}/download"
                     : '');
         }
 

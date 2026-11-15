@@ -62,7 +62,7 @@ abstract class AbstractDriver implements RepositoryContract
     {
         return [
             'Accept'     => 'application/json',
-            'User-Agent' => 'PterodactylModManager/1.0 (contact@example.com)',
+            'User-Agent' => (string) config('serversuite.versions.user_agent', 'ServerSuite'),   // item 76: one identifying agent, set in config
         ];
     }
 }

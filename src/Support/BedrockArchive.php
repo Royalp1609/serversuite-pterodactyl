@@ -36,8 +36,9 @@ final class BedrockArchive
     public static function packs(string $zipPath, int $maxUnpacked = 536870912): array
     {
         $tmp = [];
+        $budget = $maxUnpacked;   // shared by the archive and every pack inside it (item 105)
         try {
-            return self::scan($zipPath, $maxUnpacked, null, $tmp);
+            return self::scan($zipPath, $budget, null, $tmp, $maxUnpacked);
         } finally {
             foreach ($tmp as $f) {
                 @unlink($f);
@@ -45,8 +46,11 @@ final class BedrockArchive
         }
     }
 
-    /** @param list<string> $tmp temp files to clean up */
-    private static function scan(string $zipPath, int $maxUnpacked, ?string $nested, array &$tmp): array
+    /**
+     * @param int          $budget bytes still allowed to unpack, across nested packs too
+     * @param list<string> $tmp    temp files to clean up
+     */
+    private static function scan(string $zipPath, int &$budget, ?string $nested, array &$tmp, int $limit): array
     {
         $zip = new \ZipArchive();
         if ($zip->open($zipPath, \ZipArchive::RDONLY) !== true) {
@@ -67,11 +71,12 @@ final class BedrockArchive
                     throw new \RuntimeException("The archive contains a symlink ({$name}), which isn't allowed.");
                 }
                 $total += (int) ($st['size'] ?? 0);
-                if ($total > $maxUnpacked) {
-                    throw new \RuntimeException('The archive unpacks to more than ' . intdiv($maxUnpacked, 1048576) . ' MB.');
+                if ($total > $budget) {
+                    throw new \RuntimeException('The archive unpacks to more than ' . intdiv($limit, 1048576) . ' MB.');
                 }
                 $names[$i] = $name;
             }
+            $budget -= $total;
 
             // A pack is the folder holding a manifest.json; only the outermost counts.
             $roots = [];
@@ -116,10 +121,16 @@ final class BedrockArchive
                 if ($in === false || $out === false) {
                     throw new \RuntimeException("Could not read {$name} from the archive.");
                 }
-                stream_copy_to_stream($in, $out);
+                // No more than its stated size (already counted above): a
+                // lying header can't fill the disk while it's copied out.
+                $declared = (int) ($zip->statIndex($i)['size'] ?? 0);
+                $copied = stream_copy_to_stream($in, $out, $declared + 1);
                 fclose($in);
                 fclose($out);
-                array_push($packs, ...self::scan($file, $maxUnpacked, $name, $tmp));
+                if ($copied === false || $copied > $declared) {
+                    throw new \RuntimeException("{$name} is larger than the archive says.");
+                }
+                array_push($packs, ...self::scan($file, $budget, $name, $tmp, $limit));
             }
 
             if ($packs === [] && $nested === null) {

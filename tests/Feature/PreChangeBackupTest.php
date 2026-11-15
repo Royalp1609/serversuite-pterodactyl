@@ -72,3 +72,16 @@ it('reuses a recent backup, and goes ahead where backups are off', function () {
     $this->limit = 0;
     expect($this->svc->clear('srv', 'update X', true)['status'])->toBe('disabled');
 });
+
+it('waits for a backup already running instead of failing (#141 item 50)', function () {
+    $this->backups = [new BackupRef('b-run', 'Owner backup', 0, false, false, now()->subMinutes(2)->toIso8601String())];
+
+    expect($this->svc->start('srv', 'install Sodium'))->toBe(['status' => 'started', 'uuid' => 'b-run', 'name' => 'Owner backup'])
+        ->and($this->backups)->toHaveCount(1, 'no second backup');
+});
+
+it('counts any limit of 0 or less as backups off (#141 item 49)', function () {
+    $this->limit = -1;
+
+    expect($this->svc->start('srv', 'x'))->toBe(['status' => 'disabled']);
+});

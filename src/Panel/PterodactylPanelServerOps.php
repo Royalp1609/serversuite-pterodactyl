@@ -304,15 +304,21 @@ class PterodactylPanelServerOps implements PanelServerOps
         // variables). Unknown env names are silently skipped.
         $byEnv = [];
         foreach (($server->egg->variables ?? []) as $v) {
-            $byEnv[$v->env_variable] = $v->id;
+            $byEnv[$v->env_variable] = $v;
         }
 
+        // Check every value first, so a refused one leaves nothing half-written.
+        foreach ($env as $name => $value) {
+            if (isset($byEnv[$name])) {
+                self::assertEggRules($byEnv[$name], (string) $value);
+            }
+        }
         foreach ($env as $name => $value) {
             if (! isset($byEnv[$name])) {
                 continue;
             }
             \Illuminate\Support\Facades\DB::table('server_variables')->updateOrInsert(
-                ['server_id' => $server->id, 'variable_id' => $byEnv[$name]],
+                ['server_id' => $server->id, 'variable_id' => $byEnv[$name]->id],
                 ['variable_value' => (string) $value],
             );
         }
@@ -331,6 +337,11 @@ class PterodactylPanelServerOps implements PanelServerOps
             $egg = $eggModel::with('variables')->findOrFail($eggId);
         } catch (\Throwable $e) {
             throw BackupException::fromPanel($e);
+        }
+        foreach ($egg->variables as $v) {
+            if (array_key_exists($v->env_variable, $environment)) {
+                self::assertEggRules($v, (string) $environment[$v->env_variable]);
+            }
         }
 
         \Illuminate\Support\Facades\DB::transaction(function () use ($server, $egg, $environment) {
@@ -363,6 +374,26 @@ class PterodactylPanelServerOps implements PanelServerOps
                 ]);
             }
         });
+    }
+
+    /**
+     * The egg's own rules for a variable (#141/#139 item 34): the same check
+     * the panel's startup page applies, so a switch can't store a value the
+     * egg would refuse.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertEggRules(object $variable, string $value): void
+    {
+        $rules = $variable->rules ?? null;
+        if ($rules === null || $rules === '' || $rules === []) {
+            return;
+        }
+        $env = (string) $variable->env_variable;
+        $v = \Illuminate\Support\Facades\Validator::make([$env => $value], [$env => $rules]);
+        if ($v->fails()) {
+            throw new \InvalidArgumentException("The egg refuses {$env}=\"" . mb_substr($value, 0, 64) . '": ' . $v->errors()->first($env));
+        }
     }
 
     public function setDockerImage(string $serverUuid, string $image): void

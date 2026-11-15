@@ -180,9 +180,15 @@ class ReconciliationService
             return null;
         }
 
+        // Only a close match is suggested (item 95: 40 % similarity suggested
+        // unrelated mods): the same name or slug once spaces and punctuation
+        // are ignored, or 75 % alike.
+        $norm = fn (string $s): string => (string) preg_replace('/[^a-z0-9]/', '', mb_strtolower($s));
+        $q = $norm($query);
         foreach ($results as $candidate) {
-            similar_text(mb_strtolower($candidate->name), mb_strtolower($query), $pct);
-            if ($pct >= 40) {
+            $name = $norm($candidate->name);
+            similar_text($name, $q, $pct);
+            if ($q !== '' && ($name === $q || $norm((string) $candidate->slug) === $q || $pct >= 75)) {
                 return [
                     'confidence'     => 'fuzzy',
                     'source'         => $candidate->source,

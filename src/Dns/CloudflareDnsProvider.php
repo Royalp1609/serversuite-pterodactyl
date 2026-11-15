@@ -29,6 +29,21 @@ class CloudflareDnsProvider implements DnsProvider
 
     private const COMMENT = 'Server Suite (Pterodactyl) managed';
 
+    /** Which server the records are for, in the record comment (#141 item 122). */
+    private ?string $serverRef = null;
+
+    public function forServer(?string $serverUuid): static
+    {
+        $this->serverRef = $serverUuid !== null && $serverUuid !== '' ? substr($serverUuid, 0, 8) : null;
+
+        return $this;
+    }
+
+    private function comment(): string
+    {
+        return self::COMMENT . ($this->serverRef !== null ? ' · server ' . $this->serverRef : '');
+    }
+
     public function __construct(
         private string $token,
         private string $zone,
@@ -86,7 +101,7 @@ class CloudflareDnsProvider implements DnsProvider
     {
         self::assertLabel($label);
         $fqdn = $label . '.' . $this->zone;
-        $address = self::addressRecord($fqdn, $target);
+        $address = ['comment' => $this->comment()] + self::addressRecord($fqdn, $target);
         $base = $this->recordsUrl();
 
         $a = $this->http()->post($base, $address);
@@ -111,7 +126,7 @@ class CloudflareDnsProvider implements DnsProvider
 
     public function updateRecords(string $fqdn, ?string $aRecordId, ?string $srvRecordId, string $target, int $port, string $srvService = '_minecraft._tcp'): array
     {
-        $address = self::addressRecord($fqdn, $target);
+        $address = ['comment' => $this->comment()] + self::addressRecord($fqdn, $target);
         $base = $this->recordsUrl();
 
         if ($aRecordId) {
@@ -126,6 +141,7 @@ class CloudflareDnsProvider implements DnsProvider
                 if (! $res->successful() || ! $res->json('success')) {
                     throw self::failure("Cloudflare {$address['type']} record update failed", $res);
                 }
+                $previous = ['content' => (string) $cur->json('result.content')];
             } else {
                 // A, AAAA and CNAME can't share a name, so a type change is a
                 // delete and a create. If the create fails, the next move
@@ -140,6 +156,15 @@ class CloudflareDnsProvider implements DnsProvider
         if ($srvRecordId) {
             $res = $this->http()->patch("{$base}/{$srvRecordId}", $this->srvRecord($fqdn, $port, $srvService, self::srvTarget($fqdn, $target)));
             if (! $res->successful() || ! $res->json('success')) {
+                // Put the address back (item 65), so the name keeps pointing at
+                // one consistent place until the next try moves both.
+                if (isset($previous) && $previous['content'] !== '') {
+                    try {
+                        $this->http()->patch("{$base}/{$aRecordId}", ['content' => $previous['content']]);
+                    } catch (\Throwable) {
+                        // the retry sets both anyway
+                    }
+                }
                 throw self::failure('Cloudflare SRV record update failed', $res);
             }
         }
@@ -285,7 +310,7 @@ class CloudflareDnsProvider implements DnsProvider
         return [
             'type' => 'SRV', 'name' => self::srvName($fqdn, $service),
             'data' => ['priority' => 0, 'weight' => 5, 'port' => $port, 'target' => $target ?? $fqdn],
-            'ttl' => 300, 'comment' => self::COMMENT,
+            'ttl' => 300, 'comment' => $this->comment(),
         ];
     }
 

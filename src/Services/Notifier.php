@@ -174,6 +174,7 @@ class Notifier
     {
         $http = Http::timeout(8)->withoutRedirecting()->withUserAgent('ServerSuite');
         if ($t['type'] === 'discord') {
+            // discord.com only (checked by DISCORD when saved), so no address check
             $r = $http->post($t['url'], [
                 'username' => 'Server Suite',
                 'allowed_mentions' => ['parse' => []],
@@ -188,7 +189,17 @@ class Notifier
         } else {
             $url = rtrim($t['server'], '/') . '/' . rawurlencode($t['topic']);
             if ($userSupplied) {
-                self::assertPublic($url);
+                // Pin the connection to the addresses just checked, so a second
+                // DNS answer (rebinding) can't point the request somewhere private.
+                $ips = self::assertPublic($url);
+                $port = (int) (parse_url($url, PHP_URL_PORT) ?: (str_starts_with($url, 'https://') ? 443 : 80));
+                $host = trim((string) parse_url($url, PHP_URL_HOST), '[]');
+                if (! filter_var($host, FILTER_VALIDATE_IP)) {
+                    $http = $http->withOptions(['curl' => [CURLOPT_RESOLVE => [$host . ':' . $port . ':' . implode(',', array_map(
+                        fn (string $ip) => str_contains($ip, ':') ? '[' . $ip . ']' : $ip,
+                        $ips,
+                    ))]]]);
+                }
             }
             $headers = array_filter([
                 'Title' => self::headerText(($msg['server'] ? $msg['server'] . ': ' : '') . $msg['title']),
@@ -207,8 +218,9 @@ class Notifier
     /** @param array<string, string> $t */
     public static function label(array $t): string
     {
+        // The webhook id, never any part of the token (that's the secret).
         return $t['type'] === 'discord'
-            ? 'Discord webhook …' . substr($t['url'], -6)
+            ? 'Discord webhook ' . (preg_match('#/webhooks/(\d+)/#', $t['url'], $m) ? '…' . substr($m[1], -6) : '')
             : 'ntfy ' . (parse_url($t['server'], PHP_URL_HOST) ?: $t['server']) . '/' . $t['topic'];
     }
 
@@ -286,11 +298,14 @@ class Notifier
 
     /**
      * Refuse a URL whose host resolves to a private, loopback, link-local
-     * or reserved address. Checked when saved and again when sending.
+     * or reserved address (and carrier-grade NAT, 100.64.0.0/10). Checked when
+     * saved and again when sending. Returns the addresses it checked.
+     *
+     * @return list<string>
      *
      * @throws \InvalidArgumentException
      */
-    private static function assertPublic(string $url): void
+    public static function assertPublic(string $url): array
     {
         $host = (string) parse_url($url, PHP_URL_HOST);
         $host = trim($host, '[]');
@@ -302,10 +317,20 @@ class Notifier
             throw new \InvalidArgumentException("{$host} doesn't resolve.");
         }
         foreach ($ips as $ip) {
-            if (! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            if (! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) || self::isCgnat($ip)) {
                 throw new \InvalidArgumentException("{$host} is on a private network. Ask a panel admin to set it as the default instead.");
             }
         }
+
+        return array_values($ips);
+    }
+
+    /** 100.64.0.0/10 (RFC 6598), which PHP's filters don't count as private. */
+    private static function isCgnat(string $ip): bool
+    {
+        $long = ip2long($ip);
+
+        return $long !== false && ($long & 0xFFC00000) === (ip2long('100.64.0.0') & 0xFFC00000);
     }
 
     /** HTTP headers are Latin-1: keep a title readable without breaking the request. */

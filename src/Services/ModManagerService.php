@@ -290,9 +290,10 @@ class ModManagerService
             return $v === $base || str_starts_with($v, $base . '.');
         }
 
-        if (str_contains($entry, '-')) {
-            [$lo, $hi] = array_pad(explode('-', $entry, 2), 2, '');
-            return $this->cmpVersion($v, $lo) >= 0 && $this->cmpVersion($v, $hi) <= 0;
+        // A range only when both ends are plain versions (item 85): "1.21-rc1"
+        // or "1.20-pre2" are single pre-release versions, not ranges.
+        if (preg_match('/^(\d+(?:\.\d+)*)-(\d+(?:\.\d+)*)$/', $entry, $m) && preg_match('/^\d+(?:\.\d+)*$/', $v)) {
+            return $this->cmpVersion($v, $m[1]) >= 0 && $this->cmpVersion($v, $m[2]) <= 0;
         }
 
         return false;
@@ -303,7 +304,7 @@ class ModManagerService
         $pa = array_map('intval', explode('.', $a));
         $pb = array_map('intval', explode('.', $b));
 
-        for ($i = 0; $i < 3; $i++) {
+        for ($i = 0, $n = max(count($pa), count($pb)); $i < $n; $i++) {   // every part (item 85)
             $d = ($pa[$i] ?? 0) - ($pb[$i] ?? 0);
             if ($d !== 0) {
                 return $d <=> 0;
@@ -503,11 +504,14 @@ class ModManagerService
         $minorRange = range(21, 16);
         $patchMax = [16 => 5, 17 => 1, 18 => 2, 19 => 4, 20 => 6, 21 => 11];
 
+        // Each line's first release is "1.21", not "1.21.0" (item 84), so it
+        // comes after its patches. Only used when Modrinth's list can't be read.
         $versions = [];
         foreach ($minorRange as $minor) {
             for ($patch = ($patchMax[$minor] ?? 0); $patch >= 1; $patch--) {
                 $versions[] = "1.{$minor}.{$patch}";
             }
+            $versions[] = "1.{$minor}";
         }
 
         return $versions;
@@ -974,16 +978,23 @@ class ModManagerService
 
     protected function resolveServer(string $serverUuid): object
     {
+        $panel = false;
         foreach (['\Pterodactyl\Models\Server', '\App\Models\Server'] as $class) {
             if (class_exists($class)) {
+                $panel = true;
                 $server = $class::query()->where('uuid', $serverUuid)->first();
                 if ($server) {
                     return $server;
                 }
             }
         }
+        // On a panel, a server that isn't there is gone (item 94): stop rather
+        // than carry on with a stand-in that has only a uuid.
+        if ($panel) {
+            throw new \ServerSuite\Exceptions\DeliveryException("Server {$serverUuid} no longer exists.");
+        }
 
-        // Fallback object carrying just the uuid (enough for delivery).
+        // No panel models loaded (tests, CLI tools): an object carrying the uuid.
         return (object) ['uuid' => $serverUuid];
     }
 

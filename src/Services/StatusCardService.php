@@ -56,9 +56,18 @@ class StatusCardService
     /** @return array{fqdn: ?string, online: bool, players: ?int, max: ?int, motd: string, version: string, icon: ?string, checked_at: string} */
     private function live(string $uuid, ?string $fqdn): array
     {
-        $ttl = max(5, (int) config('serversuite.status_cards.cache_seconds', 30));
+        $key = self::cacheKey($uuid, $fqdn);
+        $hit = Cache::get($key);
+        if (is_array($hit)) {
+            return $hit;
+        }
+        $r = $this->check($uuid, $fqdn);
+        // Offline only briefly (item 64): a server that just started shows
+        // online within seconds, not after the full cache period.
+        $ttl = $r['online'] ? max(5, (int) config('serversuite.status_cards.cache_seconds', 30)) : 5;
+        Cache::put($key, $r, $ttl);
 
-        return Cache::remember(self::cacheKey($uuid, $fqdn), $ttl, fn () => $this->check($uuid, $fqdn));
+        return $r;
     }
 
     private static function cacheKey(string $uuid, ?string $fqdn): string

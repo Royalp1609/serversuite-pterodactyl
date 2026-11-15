@@ -84,6 +84,21 @@ class ModManagerSetting extends Model
     /**
      * Fetch (or create with defaults) the settings row for a given server.
      */
+    /**
+     * The server's settings without creating a row (#141/#139 item 61): an
+     * unsaved row with the defaults when there is none. For reads.
+     */
+    public static function peek(string $serverUuid): self
+    {
+        return static::query()->where('server_uuid', $serverUuid)->first() ?? new self([
+            'server_uuid'        => $serverUuid,
+            'modrinth_enabled'   => config('serversuite.repositories.modrinth', true),
+            'curseforge_enabled' => config('serversuite.repositories.curseforge', true),
+            'hangar_enabled'     => config('serversuite.repositories.hangar', true),
+            'auto_update_checks' => true,
+        ]);
+    }
+
     public static function forServer(string $serverUuid): self
     {
         return static::firstOrCreate(

@@ -35,7 +35,8 @@ class PreChangeBackup
     public function start(string $serverUuid, string $label, bool $mayEvict = true): array
     {
         try {
-            if ($this->ops->serverBackupLimit($serverUuid) === 0) {
+            $limit = $this->ops->serverBackupLimit($serverUuid);
+            if ($limit !== null && $limit <= 0) {   // item 49: any limit of 0 or less
                 return ['status' => 'disabled'];
             }
 
@@ -46,6 +47,12 @@ class PreChangeBackup
                 ->sortByDesc('completedAt')->first();
             if ($recent !== null) {
                 return ['status' => 'recent', 'uuid' => $recent->uuid, 'name' => $recent->name];
+            }
+            // One already running (another change, or the owner's own): wait
+            // for that one rather than fail to start a second (item 50).
+            $running = \ServerSuite\Support\RecentBackup::running($this->ops, $serverUuid);
+            if ($running !== null) {
+                return ['status' => 'started', 'uuid' => $running->uuid, 'name' => $running->name];
             }
 
             $name = mb_substr("Pre-mod-change \u{2192} {$label}", 0, 180);

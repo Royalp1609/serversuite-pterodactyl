@@ -83,6 +83,7 @@ final class MrpackIndex
         }
 
         $entries = [];
+        $seen = [];
         foreach ((array) ($data['files'] ?? []) as $ref) {
             $id = (string) ($ref['fileID'] ?? '');
             $f = $files[$id] ?? null;
@@ -102,6 +103,16 @@ final class MrpackIndex
                 ! self::allowedUrl($url, self::CURSEFORGE_HOSTS) => ['action' => 'blocked', 'reason' => 'not hosted on CurseForge\'s CDN'] + $entry,
                 default => ['url' => $url] + $entry,
             };
+            // Same rule as parse(): one file per path. A repeat (often the same
+            // file id twice) is not installed again.
+            $last = array_key_last($entries);
+            if ($entries[$last]['action'] === 'install') {
+                $key = strtolower($entries[$last]['path']);
+                if (isset($seen[$key])) {
+                    $entries[$last] = ['action' => 'invalid', 'reason' => 'listed twice in the pack'] + $entries[$last];
+                }
+                $seen[$key] = true;
+            }
         }
 
         $overrides = trim((string) ($data['overrides'] ?? 'overrides'), '/') ?: 'overrides';
@@ -215,7 +226,7 @@ final class MrpackIndex
 
         return ($parts['scheme'] ?? '') === 'https'
             && in_array(strtolower($parts['host'] ?? ''), $hosts ?? self::ALLOWED_HOSTS, true)
-            && ! isset($parts['user'], $parts['pass']);
+            && ! isset($parts['user']) && ! isset($parts['pass']);   // no credentials of any kind
     }
 
     /** @param array<string, mixed> $f */

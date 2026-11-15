@@ -298,7 +298,7 @@ class CurseForgeDriver extends AbstractDriver
         $cacheKey = "serversuite.curseforge.mod.{$modId}";
 
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($modId) {
-            $response = $this->http()->get("/mods/{$modId}");
+            $response = $this->http()->get("/mods/" . rawurlencode($modId));
 
             if ($response->status() === 404) {
                 return null;
@@ -343,7 +343,7 @@ class CurseForgeDriver extends AbstractDriver
         $cacheKey = "serversuite.curseforge.files.{$modId}." . md5((string)$loader . (string)$gameVersion);
 
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($modId, $params, $loader) {
-            $response = $this->http()->get("/mods/{$modId}/files", $params);
+            $response = $this->http()->get("/mods/" . rawurlencode($modId) . "/files", $params);
 
             if ($response->status() === 404) {
                 return [];

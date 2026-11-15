@@ -92,7 +92,7 @@ return [
         'mojang_manifest' => env('SERVER_SUITE_MOJANG_MANIFEST', 'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json'),
         'fabric_meta'     => env('SERVER_SUITE_FABRIC_META', 'https://meta.fabricmc.net/v2'),
         // Set a real contact (URL or email). Paper may reject generic UAs.
-        'user_agent' => env('SERVER_SUITE_USER_AGENT', 'ServerSuite/0.13 (+set SERVER_SUITE_USER_AGENT with a contact)'),
+        'user_agent' => env('SERVER_SUITE_USER_AGENT', 'ServerSuite (Pterodactyl panel; set SERVER_SUITE_USER_AGENT to add a contact)'),
         // #22: on a version or loader switch, point the egg's DL_PATH at the
         // direct jar from MCJars (mcjars.app), around broken install scripts.
         'mcjars' => env('SERVERSUITE_MCJARS', true),
@@ -147,6 +147,8 @@ return [
     ],
 
     'scheduler' => [
+        // Pause between servers in check-updates, in milliseconds (#141 item 90).
+        'pause_ms' => (int) env('MOD_MANAGER_UPDATE_PAUSE_MS', 200),
         'interval'    => env('MOD_MANAGER_UPDATE_INTERVAL', '0 3 * * *'),
         'notify_only' => env('MOD_MANAGER_NOTIFY_ONLY', true),
     ],

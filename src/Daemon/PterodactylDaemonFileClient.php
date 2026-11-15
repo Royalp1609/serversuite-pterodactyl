@@ -141,6 +141,9 @@ class PterodactylDaemonFileClient implements DaemonFileClient
             $response = $repo->getHttpClient()->get("/api/servers/{$serverUuid}/files/contents", [
                 'query' => ['file' => $path], 'stream' => true, 'timeout' => 30,
             ]);
+            if ($response->getStatusCode() >= 400) {
+                return null;   // an error body is not log text
+            }
             $body = $response->getBody();
             $tail = '';
             $size = 0;

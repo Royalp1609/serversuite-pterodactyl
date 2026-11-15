@@ -291,7 +291,8 @@ class AutoUpgradeService
 
         $players = $this->playersOnline($server->uuid);
         if ($players === null) {
-            $this->hold($s, 'players_unknown', "{$target} is due, but the panel couldn't read the player count, so it won't upgrade.", true, $target);
+            // Never upgrade blind (item 66); the notice says what to fix.
+            $this->hold($s, 'players_unknown', "{$target} is due, but the panel couldn't read the player count, so it won't upgrade. The panel has to reach the server's game port (check firewalls and NAT between them).", true, $target);
 
             return;
         }
@@ -532,7 +533,12 @@ class AutoUpgradeService
             return;
         }
         $players = $this->playersOnline($s->server_uuid);
-        if ($players === null || $players > 0) {
+        if ($players === null) {   // item 67: say which it was
+            $this->cancel($s, 'players_unknown', "{$run['to']} is due, but after the backup the panel couldn't read the player count. Trying again later.");
+
+            return;
+        }
+        if ($players > 0) {
             $this->cancel($s, 'players_online', "{$run['to']} is due, but players joined during the backup. Trying again later.");
 
             return;
@@ -632,13 +638,17 @@ class AutoUpgradeService
         }
 
         $reported = (string) ($status['version']['name'] ?? '');
-        if (preg_match_all('/\d+\.\d+(?:\.\d+)?/', $reported, $m) && ! in_array($run['to'], $m[0], true)) {
+        $found = preg_match_all('/\d+\.\d+(?:\.\d+)?/', $reported, $m) > 0;
+        if ($found && ! in_array($run['to'], $m[0], true)) {
             $this->fail($s, $run, "The server came back up reporting \"{$reported}\", not {$run['to']}.");
 
             return;
         }
+        // A plugin can replace the version text (item 68): it's up, but say the
+        // version couldn't be confirmed rather than claim it was.
+        $unconfirmed = $found ? '' : " The server reports \"" . mb_substr($reported, 0, 60) . "\" as its version, so the panel couldn't confirm {$run['to']}.";
 
-        $body = trim(($run['plugins'] ?? '') . " Backup from before the upgrade: {$run['backup_name']}.");
+        $body = trim(($run['plugins'] ?? '') . " Backup from before the upgrade: {$run['backup_name']}." . $unconfirmed);
         $this->notifier->notify($s->server_uuid, 'autoupgrade', "Upgraded to Minecraft {$run['to']}", "Automatically upgraded from {$run['from']}. {$body}", 'info', 'done:' . $run['started_at']);
         SuiteActivity::logFor($s->server_uuid, 'server:serversuite.auto-upgrade', ['from' => $run['from'], 'to' => $run['to'], 'backup' => $run['backup_name']]);
         $s->forceFill(['auto_upgrade_run' => null])->save();

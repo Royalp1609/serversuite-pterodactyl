@@ -99,6 +99,20 @@ class SubdomainService
      */
     public function claim(object $server, string $label, int|string $domain, ?int $userId = null): Subdomain
     {
+        // One claim at a time (#141/#139 item 58): the allowance and "already
+        // taken" checks then can't both pass for two requests at once.
+        // Claims are rare, so one panel-wide lock is enough.
+        try {
+            return \Illuminate\Support\Facades\Cache::lock('serversuite:subdomain-claim', 60)
+                ->block(20, fn () => $this->claimLocked($server, $label, $domain, $userId));
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            throw new SubdomainException('Another subdomain is being set up right now. Try again in a moment.');
+        }
+    }
+
+    /** @throws SubdomainException */
+    private function claimLocked(object $server, string $label, int|string $domain, ?int $userId): Subdomain
+    {
         $label = strtolower(trim($label));
         if (! preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/', $label)) {
             throw new SubdomainException('Use 1-63 characters: a-z, 0-9 and hyphens (not at the start or end).');
@@ -132,6 +146,9 @@ class SubdomainService
             $dns = $this->provider($d->token, $d->zone, $d->zone_id);
         }
 
+        if ($dns instanceof CloudflareDnsProvider) {
+            $dns->forServer($server->uuid);
+        }
         $zone = $dns->zoneName();
         if (Subdomain::query()->where('fqdn', "{$label}.{$zone}")->exists()) {
             throw new SubdomainException("{$label}.{$zone} is already taken.");
@@ -254,7 +271,7 @@ class SubdomainService
      * allocation the game isn't on. Run every minute by the scheduler; also
      * retries moves that failed at Cloudflare. Returns how many moved.
      */
-    public function applyPendingMoves(): int
+    public function applyPendingMoves(bool $full = true): int
     {
         $model = '\\Pterodactyl\\Models\\Server';
         if (! class_exists($model)) {
@@ -262,7 +279,9 @@ class SubdomainService
         }
 
         $moved = 0;
-        foreach (Subdomain::query()->distinct()->pluck('server_uuid')->chunk(200) as $uuids) {
+        // $full = false: only servers with a move already waiting.
+        $scope = Subdomain::query()->when(! $full, fn ($q) => $q->whereNotNull('move_pending_since'));
+        foreach ($scope->distinct()->pluck('server_uuid')->chunk(200) as $uuids) {
             $subs = Subdomain::query()->whereIn('server_uuid', $uuids)->get()->groupBy('server_uuid');
             $servers = $model::query()->with('allocation')->whereIn('uuid', $uuids)->get();
             foreach ($servers as $server) {
@@ -653,14 +672,18 @@ class SubdomainService
         if ($sub->domain_id !== null) {
             $d = SubdomainDomain::query()->find($sub->domain_id);
 
-            return $d ? $this->provider($d->token, $d->zone, $d->zone_id) : null;
+            $dns = $d ? $this->provider($d->token, $d->zone, $d->zone_id) : null;
+
+            return $dns instanceof CloudflareDnsProvider ? $dns->forServer($sub->server_uuid) : $dns;
         }
 
         $setting = ModManagerSetting::forServer($sub->server_uuid);
 
-        return ($setting->own_dns_token !== null && $setting->own_dns_zone === $sub->zone)
+        $dns = ($setting->own_dns_token !== null && $setting->own_dns_zone === $sub->zone)
             ? $this->provider($setting->own_dns_token, $setting->own_dns_zone, $setting->own_dns_zone_id)
             : null;
+
+        return $dns instanceof CloudflareDnsProvider ? $dns->forServer($sub->server_uuid) : $dns;
     }
 
     private function provider(string $token, string $zone, ?string $zoneId): DnsProvider

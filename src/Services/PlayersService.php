@@ -220,12 +220,19 @@ class PlayersService
             if ($r->status() === 404 || $r->status() === 204) {
                 return false;
             }
+            if ($r->status() === 429) {
+                return 'limited';   // item 111: busy, not unreachable
+            }
 
             return $r->successful() && is_string($r->json('id')) ? ['uuid' => self::dashed($r->json('id')), 'name' => (string) $r->json('name')] : null;
         });
         if ($found === false) {
             Cache::forget('serversuite:mojang:' . strtolower($name));
             throw new \RuntimeException("There is no Minecraft account called {$name}.");
+        }
+        if ($found === 'limited') {
+            Cache::forget('serversuite:mojang:' . strtolower($name));
+            throw new \RuntimeException("Mojang is limiting lookups right now, so {$name} couldn't be checked. Try again in a minute.");
         }
         if ($found === null) {
             Cache::forget('serversuite:mojang:' . strtolower($name));
@@ -314,7 +321,8 @@ class PlayersService
     /** One line of plain text: it goes on the end of a console command. */
     private function reason(string $reason): string
     {
-        return mb_substr(trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $reason)), 0, 120);
+        // Invalid UTF-8 is repaired, not dropped (item 112): /u gives up on the whole string.
+        return mb_substr(trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', ' ', mb_scrub($reason, 'UTF-8'))), 0, 120);
     }
 
     private function now(): string

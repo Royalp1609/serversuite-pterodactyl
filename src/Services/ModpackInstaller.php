@@ -38,6 +38,13 @@ use ServerSuite\Support\SuiteActivity;
  */
 class ModpackInstaller
 {
+    /**
+     * Files in the server root that a pack's overrides never replace (item
+     * 101): the server's settings, its player lists and the EULA answer.
+     * A pack's copy is used only when the server has none.
+     */
+    private const KEEP_SERVER_FILES = ['server.properties', 'eula.txt', 'ops.json', 'whitelist.json', 'banned-players.json', 'banned-ips.json', 'usercache.json'];
+
     public const STAGING = '/.serversuite/modpack';
 
     /** Seconds of work per job run before handing over to a fresh job. */
@@ -148,7 +155,7 @@ class ModpackInstaller
             $res = $this->rotation->backupNow($pack->server_uuid, mb_substr($name, 0, 180), (bool) ($state['may_evict'] ?? true));
 
             if ($res->isRotated() && $res->created !== null) {
-                $pack->mergeState(['backup_uuid' => $res->created->uuid]);
+                $pack->mergeState(['backup_uuid' => $res->created->uuid, 'backup_started_at' => now()->getTimestamp()]);
 
                 return 10;
             }
@@ -181,7 +188,9 @@ class ModpackInstaller
 
             return 0;
         }
-        if (now()->getTimestamp() - $pack->started_at->getTimestamp() > 3600) {
+        // An hour from when the backup started, not the install (item 102):
+        // stopping the server first doesn't eat into it.
+        if (now()->getTimestamp() - (int) ($state['backup_started_at'] ?? $pack->started_at->getTimestamp()) > 3600) {
             throw new ModpackException('The pre-modpack backup took more than an hour. Nothing was changed.');
         }
 
@@ -217,6 +226,9 @@ class ModpackInstaller
         foreach ((array) ($pack->files ?? []) as $f) {
             $path = (string) ($f['path'] ?? '');
             $isJar = str_ends_with(strtolower($path), '.jar');
+            if (($f['kind'] ?? '') === 'user') {
+                continue;   // the owner's own mod, from before the pack (item 100)
+            }
             if ($path === '' || (($f['kind'] ?? 'download') !== 'download' && ! $isJar && ! $withConfigs)) {
                 continue;
             }
@@ -225,7 +237,13 @@ class ModpackInstaller
         $removed = 0;
         foreach ($byDir as $dir => $names) {
             try {
-                $this->daemon->deleteFiles($uuid, $dir, array_values(array_unique($names)));
+                // Count only files that were there (item 104).
+                $present = array_map(fn ($e) => (string) $e['name'], $this->daemon->listDirectory($uuid, $dir));
+                $names = array_values(array_intersect(array_unique($names), $present));
+                if ($names === []) {
+                    continue;
+                }
+                $this->daemon->deleteFiles($uuid, $dir, $names);
                 $removed += count($names);
             } catch (\Throwable $e) {
                 Log::warning("[Server Suite] modpack remove: could not delete files in {$dir}: {$e->getMessage()}");
@@ -344,6 +362,7 @@ class ModpackInstaller
         $items = (array) ($plan['install'] ?? []);
         $failures = $pack->failures ?? [];
         $made = (array) ($state['dirs'] ?? []);
+        $listed = [];   // dir => names, one listing per folder per run (item 98)
 
         while ($pack->progress_done < count($items)) {
             $item = $items[$pack->progress_done];
@@ -356,7 +375,8 @@ class ModpackInstaller
                     $made[] = $dir;
                 }
                 // Replace, never write next to, an existing file.
-                if (collect($this->daemon->listDirectory($uuid, $dir))->contains(fn ($e) => $e['name'] === $file)) {
+                $listed[$dir] ??= array_flip(array_map(fn ($e) => (string) $e['name'], $this->daemon->listDirectory($uuid, $dir)));
+                if (isset($listed[$dir][$file])) {
                     $this->daemon->deleteFiles($uuid, $dir, [$file]);
                 }
                 $this->delivery->deliverFile($uuid, (string) $item['url'], $dir, $file, (int) $item['size'], (string) ($item['sha1'] ?? ''));
@@ -389,7 +409,7 @@ class ModpackInstaller
             if (in_array($folder, $present, true)) {
                 // Zips made on Windows often carry mode 000; the server couldn't read them.
                 $this->delivery->normalisePermissions($uuid, self::STAGING . '/' . $folder);
-                $placed = array_merge($placed, $this->delivery->mergeInto($uuid, self::STAGING . '/' . $folder, '/'));
+                $placed = array_merge($placed, $this->delivery->mergeInto($uuid, self::STAGING . '/' . $folder, '/', 0, self::KEEP_SERVER_FILES));
             }
         }
         $pack->mergeState(['placed_overrides' => count(array_unique($placed))]);
@@ -403,21 +423,24 @@ class ModpackInstaller
         $plan = $pack->plan ?? [];
         $failed = array_column($pack->failures ?? [], 'path');
 
-        // Files the pack now owns: downloads that landed, unchanged ones, and overrides.
+        $userOwned = $this->recordMods($pack, $failed);
+
+        // Files the pack now owns: downloads that landed, unchanged ones, and
+        // overrides. A mod the owner had installed before stays theirs (item
+        // 100): 'user' files are left in place when the pack is removed.
+        $kind = fn (string $path) => in_array($path, $userOwned, true) ? 'user' : 'download';
         $files = [];
         foreach ((array) ($plan['unchanged'] ?? []) as $f) {
-            $files[] = ['path' => $f['path'], 'sha1' => $f['sha1'], 'size' => $f['size'], 'kind' => 'download'];
+            $files[] = ['path' => $f['path'], 'sha1' => $f['sha1'], 'size' => $f['size'], 'kind' => $kind($f['path'])];
         }
         foreach ((array) ($plan['install'] ?? []) as $f) {
             if (! in_array($f['path'], $failed, true)) {
-                $files[] = ['path' => $f['path'], 'sha1' => $f['sha1'], 'size' => $f['size'], 'kind' => 'download'];
+                $files[] = ['path' => $f['path'], 'sha1' => $f['sha1'], 'size' => $f['size'], 'kind' => $kind($f['path'])];
             }
         }
         foreach ((array) ($plan['overrides'] ?? []) as $path) {
             $files[] = ['path' => $path, 'sha1' => null, 'size' => 0, 'kind' => 'override'];
         }
-
-        $this->recordMods($pack, $failed);
 
         $t = $pack->target ?? [];
         $pack->forceFill([
@@ -458,9 +481,16 @@ class ModpackInstaller
         }
     }
 
-    /** Manifest: the pack's mods are tracked mods linked to the pack. */
-    private function recordMods(Modpack $pack, array $failed): void
+    /**
+     * Manifest: the pack's mods are tracked mods linked to the pack. A mod
+     * already tracked as the owner's own (no pack) keeps that: its row is
+     * updated, not taken over. Returns those files' paths.
+     *
+     * @return list<string>
+     */
+    private function recordMods(Modpack $pack, array $failed): array
     {
+        $userOwned = [];
         $plan = $pack->plan ?? [];
 
         // Rows for files the new version removed.
@@ -472,6 +502,18 @@ class ModpackInstaller
         foreach ((array) ($plan['install'] ?? []) as $f) {
             $mod = $f['mod'] ?? null;
             if ($mod === null || in_array($f['path'], $failed, true)) {
+                continue;
+            }
+            $key = ['server_uuid' => $pack->server_uuid, 'source' => $plan['source'] ?? 'modrinth', 'source_id' => $mod['project_id']];
+            $own = ServerMod::query()->where($key)->whereNull('modpack_id')->first();
+            if ($own !== null) {
+                $own->update([
+                    'installed_version' => $mod['version_number'],
+                    'target_filename'   => basename($f['path']),
+                    'install_path'      => '/' . ltrim(dirname('/' . $f['path']), '/'),
+                    'dependencies'      => $mod['dependencies'] ?? [],
+                ]);
+                $userOwned[] = $f['path'];
                 continue;
             }
             ServerMod::query()->updateOrCreate(
@@ -492,6 +534,8 @@ class ModpackInstaller
                 ],
             );
         }
+
+        return $userOwned;
     }
 
     private function cleanStaging(string $uuid): void
@@ -500,6 +544,13 @@ class ModpackInstaller
             $this->daemon->deleteFiles($uuid, '/.serversuite', ['modpack']);
         } catch (\Throwable) {
             // not there yet, or already gone
+        }
+        // And the folder itself once nothing else uses it (item 103).
+        try {
+            if ($this->daemon->listDirectory($uuid, '/.serversuite') === []) {
+                $this->daemon->deleteFiles($uuid, '/', ['.serversuite']);
+            }
+        } catch (\Throwable) {
         }
     }
 }
