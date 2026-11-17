@@ -23,6 +23,15 @@ class DeliveryException extends RuntimeException
         );
     }
 
+    public static function needsNewerJava(string $modName, string $version, int $need, int $have): self
+    {
+        return new self(
+            "{$modName} {$version} needs Java {$need}, and this server runs Java {$have}. Nothing was installed. "
+            . "Pick an older version in the mod's Details, or switch the server to a Java {$need} image on its Startup page.",
+            'java_too_old',
+        );
+    }
+
     public static function daemonError(string $detail, ?\Throwable $previous = null): self
     {
         return new self(

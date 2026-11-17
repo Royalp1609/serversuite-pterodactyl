@@ -35,6 +35,12 @@ return [
     | Which mod repositories are enabled globally. Individual servers can
     | disable specific repositories in their per-server settings.
     */
+    /*
+    | Refuse mod/plugin builds that need a newer Java than the server's image
+    | (read from the jar over HTTP Range requests; unknown = allowed) (#174).
+    */
+    'java_check' => (bool) env('SERVERSUITE_JAVA_CHECK', true),
+
     'repositories' => [
         'modrinth'   => env('MOD_MANAGER_MODRINTH_ENABLED', true),
         'curseforge' => env('MOD_MANAGER_CURSEFORGE_ENABLED', true),
