@@ -57,6 +57,22 @@ it('groups a Minecraft log and names the plugin', function () {
         ->and($r['notice'])->toBeNull();
 });
 
+it('names the jar Paper could not load, not its loader class (#175)', function () {
+    $log = "[20:49:41 ERROR]: [ModernPluginLoadingStrategy] Could not load plugin 'worldedit-bukkit-7.4.6.jar' in folder 'plugins'\n"
+        . "java.lang.UnsupportedClassVersionError: com/sk89q/worldedit/bukkit/WorldEditPlugin has been compiled by a more recent version of the Java Runtime (class file version 69.0)\n"
+        . "[20:49:42 ERROR]: Could not load 'plugins/Old-Plugin_v1.2.jar' in folder 'plugins'\n";
+    $this->files->put('/logs/latest.log', $log);
+
+    $groups = collect($this->svc->report('mc', false)['groups']);
+    $we = $groups->first(fn ($g) => str_contains($g['message'], 'worldedit'));
+    $old = $groups->first(fn ($g) => str_contains($g['message'], 'Old-Plugin'));
+    expect($we['culprit']['file'])->toBe('worldedit-bukkit-7.4.6.jar')
+        ->and($we['culprit']['name'])->toBe('worldedit')
+        ->and($we['mod']['mod_name'])->toBe('worldedit')
+        ->and($old['culprit']['file'])->toBe('Old-Plugin_v1.2.jar')
+        ->and($old['culprit']['name'])->toBe('Old-Plugin');
+});
+
 it('names the Oxide plugin for compile, timer and hook errors and marks missing members', function () {
     $g = LogErrors::parse(errorsFixture('rust-oxide.txt'), true, [], 'oxide');
 
