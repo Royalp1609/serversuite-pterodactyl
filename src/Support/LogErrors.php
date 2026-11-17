@@ -290,6 +290,13 @@ final class LogErrors
             return null;
         }
 
+        // Paper/Spigot couldn't load a plugin jar (wrong Java, missing dependency,
+        // bad plugin.yml): name the jar, not the loader class in the prefix
+        // ([ModernPluginLoadingStrategy], [PluginInitializerManager], ...) (#175).
+        if (preg_match("/Could not load (?:plugin )?'(?:[^']*\\/)?([^'\\/]+\\.jar)'/", $message, $m)) {
+            return ['id' => null, 'name' => self::jarName($m[1]), 'file' => $m[1], 'evidence' => mb_substr($message, 0, 300), 'strength' => 'strong'];
+        }
+
         foreach ([
             '/Could not pass event \S+ to ([^\s]+) v/',
             '/(?:Plugin|Task #\d+ for) ([^\s]+) v\S+ generated an exception/',
@@ -303,5 +310,15 @@ final class LogErrors
         $suspects = CrashParser::parse($detail, $knownPackages)['suspects'];
 
         return $suspects[0] ?? null;
+    }
+
+    /** "worldedit-bukkit-7.4.6.jar" -> "worldedit": drop the extension, version and platform suffix. */
+    private static function jarName(string $file): string
+    {
+        $base = (string) preg_replace('/\.jar$/i', '', $file);
+        $base = (string) preg_replace('/[-_ ]v?\d[\w.+-]*$/i', '', $base);
+        $base = (string) preg_replace('/[-_ ](bukkit|paper|spigot)$/i', '', $base);
+
+        return $base !== '' ? $base : $file;
     }
 }
