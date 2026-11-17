@@ -62,7 +62,7 @@ interface OpenFile { path: string; content: string; hash: string; fields: Config
 
 const errorOf = (e: any, fallback: string) => e?.response?.data?.error || e?.response?.data?.message || fallback;
 
-const MINECRAFT_ROOTS = ['/plugins', '/config', '/defaultconfigs', '/kubejs'];
+export const MINECRAFT_ROOTS = ['/plugins', '/config', '/defaultconfigs', '/kubejs'];
 
 export default ({ uuid, roots = MINECRAFT_ROOTS }: { uuid: string; roots?: string[] }) => {
     const base = `/extensions/serversuite/${uuid}/configs`;

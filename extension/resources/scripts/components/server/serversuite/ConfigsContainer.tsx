@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSlidersH } from '@fortawesome/free-solid-svg-icons';
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
-import ConfigsPanel from './ConfigsPanel';
+import ConfigsPanel, { MINECRAFT_ROOTS } from './ConfigsPanel';
 import { BackupPromptHost } from './BackupPrompt';
 
 /*
@@ -47,7 +47,7 @@ export default () => {
                         <h1 className="text-2xl font-bold text-white">Configs</h1>
                         <p className="text-xs text-neutral-500">
                             {game
-                                ? `${game.name} config files in ${game.config_roots.map((r) => r.replace(/^\//, '')).join(', ')}. A folder shows up once the server or a ${game.mods_label.toLowerCase() === 'plugins' ? 'plugin' : 'mod'} has written it.`
+                                ? `${game.name} config files in ${(game.config_roots.length ? game.config_roots : MINECRAFT_ROOTS).map((r) => r.replace(/^\//, '')).join(', ')}. A folder shows up once the server or a ${game.mods_label.toLowerCase() === 'plugins' ? 'plugin' : 'mod'} has written it.`
                                 : error || 'Loading…'}
                         </p>
                     </div>
