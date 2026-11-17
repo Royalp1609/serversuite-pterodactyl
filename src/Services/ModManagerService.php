@@ -27,7 +27,13 @@ class ModManagerService
         protected FileDeliveryService $fileDelivery,
         protected ManifestService $manifest,
         protected InstallPlanner $planner,
+        protected ?JavaCompatService $java = null,
     ) {}
+
+    protected function java(): JavaCompatService
+    {
+        return $this->java ??= app(JavaCompatService::class);
+    }
 
     /**
      * Build an install plan (read-only) for a mod version on a server.
@@ -553,6 +559,7 @@ class ModManagerService
             ->where('source_id', $modId)
             ->first();
 
+        $this->java()->assertRuns($server, $version, $modName);
         $result = $this->fileDelivery->deliver($server->uuid, $version, $modName);
 
         if ($existing
@@ -674,6 +681,7 @@ class ModManagerService
 
         // Deliver the new file first.
         $mod    = $driver->get($serverMod->source_id);
+        $this->java()->assertRuns($server, $latest, $serverMod->mod_name);
         $result = $this->fileDelivery->deliver($server->uuid, $latest, $serverMod->mod_name);
 
         // Remove the old file if its filename differs from the new one.
