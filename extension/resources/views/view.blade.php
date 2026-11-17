@@ -284,7 +284,7 @@
                 @endif
 
                 @foreach ($ssDomains as $d)
-                    @php($ssWarn = \ServerSuite\Services\SubdomainService::tokenWarning($d))
+                    @php $ssWarn = \ServerSuite\Services\SubdomainService::tokenWarning($d); @endphp
                     @if ($ssWarn)
                         <div class="alert alert-{{ $ssWarn['level'] === 'error' ? 'danger' : 'warning' }}">
                             <strong>{{ $ssWarn['title'] }}.</strong> {{ $ssWarn['body'] }}
@@ -301,7 +301,7 @@
                             <td><code>{{ $d->zone }}</code></td>
                             <td>{{ $ssDomainUse[$d->id] ?? 0 }}</td>
                             <td>{!! $d->enabled ? '<span class="label label-success">offered</span>' : '<span class="label label-default">disabled</span>' !!}</td>
-                            @php($ssWarn = \ServerSuite\Services\SubdomainService::tokenWarning($d))
+                            @php $ssWarn = \ServerSuite\Services\SubdomainService::tokenWarning($d); @endphp
                             <td>
                                 @if ($ssWarn)
                                     <span class="label label-{{ $ssWarn['level'] === 'error' ? 'danger' : 'warning' }}">{{ $ssWarn['short'] }}</span>
