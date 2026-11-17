@@ -62,6 +62,7 @@ def check(path: Path) -> list[str]:
         problems.append(f"version mismatch: conf.yml {conf.get('info.version')} vs composer.json {composer_version}")
     problems += check_conf(conf)
     problems += check_placeholders()
+    problems += check_blade_php()
     return problems
 
 
@@ -106,6 +107,27 @@ REQUIRED = ["info.name", "info.identifier", "info.description", "info.version", 
 PATHS = ["info.icon", "admin.view", "admin.controller", "admin.css", "admin.wrapper", "dashboard.css",
          "dashboard.wrapper", "dashboard.components", "requests.app", "requests.views",
          "requests.routers.web", "database.migrations"]
+
+
+def check_blade_php() -> list[str]:
+    """A Blade view must not mix inline @php(...) with @php ... @endphp blocks.
+
+    Blade compiles @php ... @endphp blocks first with a lazy match from any
+    "@php" to the next "@endphp", so an inline @php($x = ...) earlier in the file
+    swallows everything up to the next block's @endphp as PHP: the view fails to
+    compile ("unexpected end of file") and the page is a 500. That broke the
+    admin page from 0.17.8 to 0.17.10.
+    """
+    problems = []
+    for f in sorted((ROOT / "extension").rglob("*.blade.php")):
+        text = f.read_text(encoding="utf-8")
+        if "@endphp" not in text:
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            if re.search(r"(?<!@)@php\s*\(", line):
+                problems.append(f"{f.relative_to(ROOT)}:{n}: inline @php(...) in a view that also has @php ... @endphp "
+                                "blocks; Blade pairs it with the next @endphp. Use @php ... @endphp here too.")
+    return problems
 
 
 def check_conf(conf: dict[str, str]) -> list[str]:
