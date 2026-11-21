@@ -69,7 +69,8 @@ def notes(version: str) -> str:
         f"Server Suite {version} for Pterodactyl.", "",
         "## Install / upgrade",
         "Download both files below and follow `INSTALL.md` (in the backend zip and the repo): replace "
-        "`packages/serversuite/` with the backend zip, `composer update`, migrate, then "
+        "`packages/serversuite/` with the backend zip, "
+        "`composer require \"pterodactyl-serversuite/serversuite:*@dev\"`, migrate, then "
         "`blueprint -install serversuite`. After a panel upgrade, use the \"After a Pterodactyl panel "
         "upgrade\" section.", "",
         "Docs: https://royalp1609.github.io/serversuite-site/", "",
