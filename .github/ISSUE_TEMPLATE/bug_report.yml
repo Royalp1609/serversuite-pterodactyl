@@ -1,0 +1,75 @@
+name: Bug report
+description: Something in Server Suite doesn't work as described.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please check the [troubleshooting page](https://royalp1609.github.io/serversuite-site/troubleshooting/) first.
+        **Security problems:** don't file them here, see [SECURITY.md](https://github.com/Royalp1609/serversuite-pterodactyl/blob/main/SECURITY.md).
+        Remove anything private (panel URLs, IPs, tokens, player names) from what you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Mods tab on a Paper 1.21.10 server
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Mods
+        - Configs
+        - Modpacks
+        - Backups
+        - Versions / loaders
+        - Properties
+        - Players
+        - Errors / crash help
+        - Crossplay
+        - Velocity
+        - Subdomains / status cards
+        - Notifications
+        - Admin settings / Egg Manager
+        - Billing API
+        - Install / update
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: serversuite
+    attributes:
+      label: Server Suite version
+      description: From Admin → Extensions → Server Suite, or `grep '"version"' vendor/pterodactyl-serversuite/serversuite/composer.json`
+      placeholder: 1.0.0-rc.1
+    validations:
+      required: true
+  - type: input
+    id: panel
+    attributes:
+      label: Pterodactyl, Blueprint and PHP versions
+      placeholder: Pterodactyl 1.15.2, Blueprint beta-2026-08, PHP 8.3
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game, loader and version
+      placeholder: Minecraft Paper 1.21.10 / Rust Oxide / Valheim BepInEx
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant lines from `storage/logs/laravel-*.log` on the panel, and the browser console if it's a UI problem.
+      render: text
