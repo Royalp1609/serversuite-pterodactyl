@@ -1,0 +1,25 @@
+name: Feature request
+description: An idea for Server Suite.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+      description: Who runs into it (server owners, subusers, panel admins, hosts) and when.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds or alternatives you've tried
+  - type: markdown
+    attributes:
+      value: |
+        Mod, modpack and game-version installs stay free: requests to sell or gate them can't be accepted (Modrinth and CurseForge terms).

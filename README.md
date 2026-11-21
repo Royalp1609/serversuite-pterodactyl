@@ -270,6 +270,9 @@ Include the Pterodactyl and Server Suite versions, and the relevant lines from
 `storage/logs/laravel-*.log` (remove anything private first). Security
 problems: please don't open a public issue; see [SECURITY.md](SECURITY.md).
 
+Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[code of conduct](CODE_OF_CONDUCT.md).
+
 Issue and pull request numbers in commit messages from before November 2026
 refer to the project's earlier, private tracker, not to this repository.
 
