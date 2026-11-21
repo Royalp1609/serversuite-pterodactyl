@@ -12,8 +12,11 @@ It ships as two parts that are always deployed together:
 | **Backend** | Composer package `pterodactyl-serversuite/serversuite`: all the logic, models, migrations and scheduled commands | `serversuite-pterodactyl-backend-v<version>.zip` |
 | **Extension** | [Blueprint](https://blueprint.zip) extension `serversuite`: the React tabs, the admin page and the routes | `serversuite.blueprint` |
 
-A sister project, Server Suite for Pelican, is the same suite as a native
-Pelican plugin.
+**Website and docs:** https://royalp1609.github.io/serversuite-site/
+
+> **Coming later:** Server Suite for **Pelican** (a native Pelican plugin) and
+> for **Pterodactyl v2**. Both are in development and not released yet. This
+> repository is Server Suite for Pterodactyl 1.x.
 
 ---
 
@@ -183,15 +186,16 @@ Pelican plugin.
 
 | Pterodactyl | Blueprint | Server Suite |
 |---|---|---|
-| 1.14.x (Laravel 11) | beta-2026-06 or newer | 0.16.0+ |
-| 1.15.x (Laravel 12) | **beta-2026-08** or newer | **0.17.0+** |
+| 1.14.x (Laravel 11) | beta-2026-06 or newer | 1.0.0-rc.1+ |
+| 1.15.x (Laravel 12) | **beta-2026-08** or newer | 1.0.0-rc.1+ |
+| 2.x | — | not yet (coming later) |
 
 PHP 8.2 or 8.3 · Node 22 for the Blueprint build. Every change is tested in CI
 against real Pterodactyl 1.14.0 and 1.15.2 checkouts.
 
 ## Install and update
 
-Download both files from the latest release on the **Releases** page, then
+Download both files from the [latest release](https://github.com/royalp1609/serversuite-pterodactyl/releases/latest), then
 follow [INSTALL.md](INSTALL.md). It covers a fresh install, updating, the steps
 to repeat **after every Pterodactyl upgrade** (the upgrade removes the backend's
 Composer entry), subdomain setup, and common errors.
@@ -258,6 +262,16 @@ tools/        build-blueprint.py (package + checks), release.py
   and commit the rebuilt `serversuite.blueprint`.
 
 More detail: [PROVIDERS.md](PROVIDERS.md) (mod repositories), [EGGS.md](EGGS.md).
+
+## Bugs and feature requests
+
+Open an issue on [GitHub Issues](https://github.com/royalp1609/serversuite-pterodactyl/issues).
+Include the Pterodactyl and Server Suite versions, and the relevant lines from
+`storage/logs/laravel-*.log` (remove anything private first). Security
+problems: please don't open a public issue; see [SECURITY.md](SECURITY.md).
+
+Issue and pull request numbers in commit messages from before November 2026
+refer to the project's earlier, private tracker, not to this repository.
 
 ## Licence
 

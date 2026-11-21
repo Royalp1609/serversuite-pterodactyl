@@ -2,7 +2,7 @@
 """Build the release files for a version tag, and optionally publish them.
 
     python3 tools/release.py v0.17.0             # build into dist/ only
-    python3 tools/release.py v0.17.0 --publish   # also create the Gitea release
+    python3 tools/release.py v0.17.0 --publish   # also create the GitHub release
     python3 tools/release.py v0.17.0 --publish --draft   # as a draft (testing)
 
 Files (into dist/):
@@ -14,17 +14,17 @@ Files (into dist/):
 The tag must be v<version> with <version> equal to composer.json's (and so
 conf.yml's, which tools/build-blueprint.py --check enforces).
 
---publish needs GITEA_TOKEN, GITHUB_SERVER_URL and GITHUB_REPOSITORY (set by
-Gitea Actions). It fails if a release for the tag already exists.
+--publish needs GITHUB_TOKEN, GITHUB_API_URL and GITHUB_REPOSITORY (set by
+GitHub Actions). It fails if a release for the tag already exists. The change
+list comes from GitHub's generated release notes (merged pull requests since
+the previous release).
 """
 import json
 import mimetypes
 import os
-import re
 import subprocess
 import sys
 import urllib.request
-import uuid
 import zipfile
 from pathlib import Path
 
@@ -63,50 +63,39 @@ def zip_paths(out: Path, paths: list[str]) -> None:
             z.writestr(info, f.read_bytes())
 
 
-def notes(tag: str, version: str) -> str:
-    # Previous release = the highest version below this one whose tag is an
-    # ancestor of it. pelican-server-suite has imported tags (alpha58 ..
-    # beta1.1.0) all on main's first commit, incl. the rolled-back beta1.1.0,
-    # which sorts above later beta1.0.x releases and must be skipped.
-    ordered = git("tag", "--list", "v*", "--sort=-v:refname").splitlines()
-    below = ordered[ordered.index(tag) + 1:] if tag in ordered else ordered
-    tags = [t for t in below
-            if subprocess.run(["git", "merge-base", "--is-ancestor", t, tag], cwd=ROOT).returncode == 0]
-    prev = tags[0] if tags else None
-    rng = f"{prev}..{tag}" if prev else tag
-    merges = "\n".join(
-        "- " + re.sub(r"^Merge pull request '(.*)' \((#\d+)\) from .*$", r"\1 (\2)", line)
-        for line in git("log", "--first-parent", "--merges", "--format=%s", rng).splitlines())
-    body = [f"Server Suite {version} for Pterodactyl.", ""]
-    body += ["## Changes" + (f" since {prev}" if prev else ""), merges or "- (no merged pull requests)", ""]
-    body += ["## Install / upgrade",
-             "Follow `INSTALL.md` (in the backend zip and the repo): replace `packages/serversuite/` with the "
-             "backend zip, `composer update`, migrate, then `blueprint -install serversuite`. "
-             "After a panel upgrade, use the \"After a Pterodactyl panel upgrade\" section."]
-    return "\n".join(body)
+def notes(version: str) -> str:
+    """Our part of the release body; GitHub appends the generated change list."""
+    return "\n".join([
+        f"Server Suite {version} for Pterodactyl.", "",
+        "## Install / upgrade",
+        "Download both files below and follow `INSTALL.md` (in the backend zip and the repo): replace "
+        "`packages/serversuite/` with the backend zip, `composer update`, migrate, then "
+        "`blueprint -install serversuite`. After a panel upgrade, use the \"After a Pterodactyl panel "
+        "upgrade\" section.", "",
+        "Docs: https://royalp1609.github.io/serversuite-site/", "",
+    ])
 
 
 def api(method: str, url: str, token: str, data: bytes | None = None, ctype: str = "application/json") -> dict:
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Authorization": f"token {token}", "Content-Type": ctype})
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28", "Content-Type": ctype})
     with urllib.request.urlopen(req) as r:
         return json.load(r)
 
 
 def publish(tag: str, version: str, files: list[Path], draft: bool = False) -> None:
-    token = os.environ["GITEA_TOKEN"]
-    base = f"{os.environ['GITHUB_SERVER_URL']}/api/v1/repos/{os.environ['GITHUB_REPOSITORY']}"
+    token = os.environ["GITHUB_TOKEN"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    base = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{repo}"
     rel = api("POST", f"{base}/releases", token, json.dumps({
-        "tag_name": tag, "name": f"Server Suite {version}", "body": notes(tag, version),
-        "prerelease": "-" in version, "draft": draft,
+        "tag_name": tag, "name": f"Server Suite {version}", "body": notes(version),
+        "generate_release_notes": True, "prerelease": "-" in version, "draft": draft,
     }).encode())
+    upload = rel["upload_url"].split("{", 1)[0]
     for f in files:
-        boundary = uuid.uuid4().hex
         ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
-        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"{f.name}\"\r\n"
-                f"Content-Type: {ctype}\r\n\r\n").encode() + f.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
-        api("POST", f"{base}/releases/{rel['id']}/assets?name={f.name}", token, body,
-            f"multipart/form-data; boundary={boundary}")
+        api("POST", f"{upload}?name={f.name}", token, f.read_bytes(), ctype)
         print(f"attached {f.name}")
     print(f"published {rel['html_url']}")
 
