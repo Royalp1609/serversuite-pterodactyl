@@ -40,7 +40,7 @@ jobs:
           cp .env.example .env
           composer config repositories.serversuite \
             "{\"type\":\"path\",\"url\":\"$GITHUB_WORKSPACE\",\"options\":{\"symlink\":false}}"
-          composer require --no-interaction --no-progress --prefer-dist "pterodactyl-serversuite/serversuite:*"
+          composer require --no-interaction --no-progress --prefer-dist "pterodactyl-serversuite/serversuite:*@dev"
       - name: Service provider boots, commands register
         working-directory: ${{ env.PANEL }}
         run: |
