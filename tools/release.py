@@ -18,6 +18,10 @@ conf.yml's, which tools/build-blueprint.py --check enforces).
 GitHub Actions). It fails if a release for the tag already exists. The change
 list comes from GitHub's generated release notes (merged pull requests since
 the previous release).
+
+A security release: tag it annotated with a message starting "Security release"
+(git tag -a v1.2.3 -m "Security release: ..."). The notes then start with a
+"Security release" line, which panels show as a security update notice.
 """
 import json
 import mimetypes
@@ -63,9 +67,20 @@ def zip_paths(out: Path, paths: list[str]) -> None:
             z.writestr(info, f.read_bytes())
 
 
-def notes(version: str) -> str:
+def is_security(tag: str) -> bool:
+    """A security release: its annotated tag message starts with "Security release"
+    (git tag -a v1.2.3 -m "Security release: ..."). Panels read the matching line
+    in the notes and show the update notice as a security one (#12)."""
+    if git("tag", "--list", "--format=%(objecttype)", tag).strip() != "tag":
+        return False  # lightweight tag (or none): no message of its own
+    return git("tag", "--list", "--format=%(contents)", tag).strip().lower().startswith("security release")
+
+
+def notes(version: str, security: bool = False) -> str:
     """Our part of the release body; GitHub appends the generated change list."""
-    return "\n".join([
+    return "\n".join(([
+        "**Security release.** Upgrade soon: this release fixes a security problem.", "",
+    ] if security else []) + [
         f"Server Suite {version} for Pterodactyl.", "",
         "## Install / upgrade",
         "Download both files below and follow `INSTALL.md` (in the backend zip and the repo): replace "
@@ -85,12 +100,12 @@ def api(method: str, url: str, token: str, data: bytes | None = None, ctype: str
         return json.load(r)
 
 
-def publish(tag: str, version: str, files: list[Path], draft: bool = False) -> None:
+def publish(tag: str, version: str, files: list[Path], draft: bool = False, security: bool = False) -> None:
     token = os.environ["GITHUB_TOKEN"]
     repo = os.environ["GITHUB_REPOSITORY"]
     base = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{repo}"
     rel = api("POST", f"{base}/releases", token, json.dumps({
-        "tag_name": tag, "name": f"Server Suite {version}", "body": notes(version),
+        "tag_name": tag, "name": f"Server Suite {version}", "body": notes(version, security),
         "generate_release_notes": True, "prerelease": "-" in version, "draft": draft,
     }).encode())
     upload = rel["upload_url"].split("{", 1)[0]
@@ -124,7 +139,7 @@ def main() -> int:
     print(f"wrote {backend.relative_to(ROOT)}")
 
     if do_publish:
-        publish(tag, version, [blueprint, backend], draft)
+        publish(tag, version, [blueprint, backend], draft, is_security(tag))
     return 0
 
 

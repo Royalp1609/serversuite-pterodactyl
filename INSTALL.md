@@ -118,6 +118,15 @@ sudo systemctl reload apache2        # Apache running PHP itself (mod_php: `apac
 blueprint -remove serversuite && blueprint -install serversuite   # if the UI changed
 ```
 
+**Knowing when to update:** Admin → Server Suite shows a notice when a newer
+release is out, red for a security release, with a link to its notes and
+"Dismiss until the next release". The panel asks GitHub's releases API once a
+day (`serversuite:check-release` in the scheduler, 06:40); nothing about the
+panel is sent, and admin default notification targets get one message per new
+release. Pre-releases are offered only to panels already on a pre-release.
+Turn it off under "New Server Suite releases" if the panel can't reach the
+internet. It never updates anything itself.
+
 `sudo -u www-data php artisan cache:clear` additionally flushes the 5-minute
 search caches and the 10-minute per-server version-sourcing cache — use it when
 testing detection changes, otherwise results look stale.
