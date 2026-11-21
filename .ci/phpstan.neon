@@ -1,5 +1,5 @@
 # PHPStan for CI. Run from the root of a Pterodactyl panel checkout that has
-# this package installed (see .gitea/workflows/ci.yml), so panel classes
+# this package installed (see .github/workflows/ci.yml), so panel classes
 # (Pterodactyl\Models\Server, the Wings repositories, ...) resolve against
 # the real panel source, using the panel's own Larastan.
 #

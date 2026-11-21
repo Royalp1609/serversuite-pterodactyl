@@ -4,9 +4,9 @@ info:
   description: "A suite of server management modules for Pterodactyl: mod management (Modrinth, CurseForge, Hangar) and automated backup rotation, with more modules to come."
   version: "0.17.11"
   target: "beta-2026-08"
-  author: "You"
+  author: "royalp1609"
   icon: 'resources/icon.png'
-  website: ''
+  website: "https://royalp1609.github.io/serversuite-site/"
 
 admin:
   view: 'resources/views/view.blade.php'

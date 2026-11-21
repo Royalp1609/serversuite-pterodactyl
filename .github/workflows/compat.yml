@@ -1,80 +1,21 @@
-name: CI
+name: Compat
+
+# One run of the panel jobs from ci.yml against a single pterodactyl/panel tag.
+# Run it when pterodactyl/panel ships a release: Actions -> Compat -> Run
+# workflow, with the new panel tag.
+# Keep these steps in step with ci.yml's.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      panel_ref:
+        description: "pterodactyl/panel tag to test against, e.g. a new release"
+        required: true
 
 jobs:
-  lint:
-    name: PHP lint (8.2) + package check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.2"   # lowest PHP the panels support
-          tools: none
-          coverage: none
-      - name: php -l
-        run: |
-          find src tests database config routes extension -name '*.php' -print0 \
-            | xargs -0 -n1 -P4 php -l -d display_errors=1 > /dev/null
-      - name: serversuite.blueprint matches extension/, versions match
-        run: python3 tools/build-blueprint.py --check
-
-  tests:
-    name: Pest (Laravel ${{ matrix.laravel }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Pterodactyl 1.14 is on Laravel 11, 1.15 on Laravel 12.
-          - laravel: "11"
-            testbench: "^9.0"
-            pest: "^2.0"
-          - laravel: "12"
-            testbench: "^10.0"
-            pest: "^3.0"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.3"
-          tools: composer:v2
-          coverage: none
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/composer
-          key: composer-tests-l${{ matrix.laravel }}-${{ hashFiles('composer.json') }}
-          restore-keys: composer-tests-l${{ matrix.laravel }}-
-      - name: Pin Laravel ${{ matrix.laravel }}
-        run: |
-          composer require --no-update --no-interaction \
-            "illuminate/support:^${{ matrix.laravel }}.0" "illuminate/database:^${{ matrix.laravel }}.0" \
-            "illuminate/http:^${{ matrix.laravel }}.0" "illuminate/console:^${{ matrix.laravel }}.0" \
-            "illuminate/events:^${{ matrix.laravel }}.0"
-          composer require --dev --no-update --no-interaction \
-            "orchestra/testbench:${{ matrix.testbench }}" "pestphp/pest:${{ matrix.pest }}"
-      # Laravel 11 is out of security support and every 11.x release has open
-      # advisories, which Composer >= 2.10 refuses to install. Pterodactyl 1.14
-      # ships on it anyway, so allow it for this test-only leg.
-      - name: Allow advisory-affected laravel/framework (Laravel 11 only)
-        if: matrix.laravel == '11'
-        run: composer config policy.advisories.ignore --json '["laravel/framework"]'
-      - name: composer update
-        run: composer update --no-interaction --no-progress --prefer-dist
-      - name: Pest
-        run: vendor/bin/pest --colors=never
-
   panel:
-    name: Pterodactyl ${{ matrix.panel }} (install + PHPStan)
+    name: Pterodactyl ${{ github.event.inputs.panel_ref }} (install + PHPStan)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        panel: [v1.14.0, v1.15.2]
     env:
       PANEL: ${{ github.workspace }}/../panel
     steps:
@@ -89,10 +30,10 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/composer
-          key: composer-panel-${{ matrix.panel }}-${{ hashFiles('composer.json') }}
-          restore-keys: composer-panel-${{ matrix.panel }}-
-      - name: Clone pterodactyl/panel ${{ matrix.panel }}
-        run: git clone --quiet --depth 1 --branch "${{ matrix.panel }}" https://github.com/pterodactyl/panel.git "$PANEL"
+          key: composer-panel-${{ github.event.inputs.panel_ref }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-panel-${{ github.event.inputs.panel_ref }}-
+      - name: Clone pterodactyl/panel ${{ github.event.inputs.panel_ref }}
+        run: git clone --quiet --depth 1 --branch "${{ github.event.inputs.panel_ref }}" https://github.com/pterodactyl/panel.git "$PANEL"
       - name: Install the package into the panel (as INSTALL.md does)
         working-directory: ${{ env.PANEL }}
         run: |
@@ -136,12 +77,8 @@ jobs:
           php -d memory_limit=1G vendor/bin/phpstan analyse -c "$GITHUB_WORKSPACE/.ci/phpstan.neon" --no-progress
 
   extension:
-    name: Extension typecheck (Pterodactyl ${{ matrix.panel }})
+    name: Extension typecheck (Pterodactyl ${{ github.event.inputs.panel_ref }})
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        panel: [v1.14.0, v1.15.2]
     env:
       PANEL: ${{ github.workspace }}/../panel
     steps:
@@ -149,12 +86,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"   # panel package.json: engines.node >= 22
-      - name: Clone pterodactyl/panel ${{ matrix.panel }}
-        run: git clone --quiet --depth 1 --branch "${{ matrix.panel }}" https://github.com/pterodactyl/panel.git "$PANEL"
+      - name: Clone pterodactyl/panel ${{ github.event.inputs.panel_ref }}
+        run: git clone --quiet --depth 1 --branch "${{ github.event.inputs.panel_ref }}" https://github.com/pterodactyl/panel.git "$PANEL"
       - uses: actions/cache@v4
         with:
           path: ${{ env.PANEL }}/node_modules
-          key: panel-node-modules-${{ matrix.panel }}
+          key: panel-node-modules-${{ github.event.inputs.panel_ref }}
       - name: yarn install (panel frontend)
         working-directory: ${{ env.PANEL }}
         run: |
@@ -181,11 +118,3 @@ jobs:
             "export default { account: [] as R[], server: [] as R[] };" > resources/scripts/blueprint/extends/routers/routes.ts
           node -e 'const fs=require("fs"),c=JSON.parse(fs.readFileSync("tsconfig.json"));c.compilerOptions.paths["@blueprint/*"]=["./resources/scripts/blueprint/*"];fs.writeFileSync("tsconfig.json",JSON.stringify(c,null,2))'
           yarn -s tsc
-      - name: Build serversuite.blueprint
-        if: matrix.panel == 'v1.14.0'
-        run: python3 tools/build-blueprint.py -o "$RUNNER_TEMP/serversuite.blueprint"
-      - uses: actions/upload-artifact@v3
-        if: matrix.panel == 'v1.14.0'
-        with:
-          name: serversuite.blueprint
-          path: ${{ runner.temp }}/serversuite.blueprint

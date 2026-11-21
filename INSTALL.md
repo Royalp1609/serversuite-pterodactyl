@@ -147,9 +147,9 @@ specific Blueprint release; older ones break on the new panel):
 
 | Pterodactyl | Blueprint needed | Server Suite |
 |---|---|---|
-| 1.14.x | beta-2026-06 or newer | any |
-| 1.15.1 | **beta-2026-08** or newer | 0.17.0+ |
-| 1.15.2 | **beta-2026-08** or newer | 0.17.0+ (same panel code as 1.15.1) |
+| 1.14.x | beta-2026-06 or newer | 1.0.0-rc.1+ |
+| 1.15.1 | **beta-2026-08** or newer | 1.0.0-rc.1+ |
+| 1.15.2 | **beta-2026-08** or newer | 1.0.0-rc.1+ (same panel code as 1.15.1) |
 
 1.15.2 is a PHP security release (php2shell, CVE-2026-109618/109619) with no
 panel code changes. Outside Docker, update PHP to 8.2.35 or 8.3.36 and every
@@ -159,9 +159,9 @@ does both); then `systemctl reload apache2` or php-fpm.
 `conf.yml`'s `target` is `beta-2026-08`. On an older Blueprint the install
 only warns ("built for version ..."); it isn't a hard requirement.
 
-Backend compatibility: 0.17.0+ supports Pterodactyl 1.14 (Laravel 11) and
-1.15 (Laravel 12). 0.16.0 and older only install on Laravel 11, so on 1.15
-`composer require` fails with `requires illuminate/support ^11.0`.
+Backend compatibility: every public release (1.0.0-rc.1 onwards) supports
+Pterodactyl 1.14 (Laravel 11) and 1.15 (Laravel 12). Pterodactyl 2.x is not
+supported yet.
 
 ## Subdomains (Cloudflare)
 
