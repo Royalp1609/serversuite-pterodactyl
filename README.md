@@ -22,6 +22,8 @@ It ships as two parts that are always deployed together:
 
 ## Screenshots
 
+![Installing a plugin: search, pick a version, install behind a backup, see it in Manage](https://royalp1609.github.io/serversuite-site/assets/screenshots/pterodactyl/mod-install.gif)
+
 | | |
 |---|---|
 | ![Browse mods from Modrinth, CurseForge and Hangar](https://royalp1609.github.io/serversuite-site/assets/screenshots/pterodactyl/mods-browse.png) | ![Installed mods with update badges](https://royalp1609.github.io/serversuite-site/assets/screenshots/pterodactyl/mods-manage.png) |
