@@ -287,6 +287,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 \ServerSuite\Console\Commands\WatchCrashesCommand::class,
                 \ServerSuite\Console\Commands\AutoUpgradesCommand::class,
                 \ServerSuite\Console\Commands\CheckDnsTokensCommand::class,
+                \ServerSuite\Console\Commands\SyncEdgeRoutesCommand::class,
                 \ServerSuite\Console\Commands\CheckReleaseCommand::class,
             ]);
         }
@@ -326,6 +327,9 @@ class ModManagerServiceProvider extends ServiceProvider
                 'backup_timezone'          => ['serversuite.backups.timezone',               'string'],
                 'auto_upgrades_enabled'    => ['serversuite.auto_upgrades.enabled',          'bool'],
                 'auto_upgrades_min_age_days' => ['serversuite.auto_upgrades.min_age_days',   'string'],
+                'edge_enabled'             => ['serversuite.subdomains.edge.enabled',       'bool'],
+                'edge_address'             => ['serversuite.subdomains.edge.address',       'string'],
+                'edge_router_url'          => ['serversuite.subdomains.edge.router_url',    'string'],
             ];
 
             foreach (ModManagerGlobalSetting::allSettings() as $key => $value) {
@@ -368,6 +372,14 @@ class ModManagerServiceProvider extends ServiceProvider
             $schedule->command(\ServerSuite\Console\Commands\RetrySubdomainCleanupCommand::class)
                 ->hourlyAt(23)
                 ->withoutOverlapping();
+
+            // Edge routes a restarted router lost (#2). One GET when nothing
+            // is missing; skipped when no router is configured.
+            if (trim((string) config('serversuite.subdomains.edge.router_url', '')) !== '') {
+                $schedule->command(\ServerSuite\Console\Commands\SyncEdgeRoutesCommand::class)
+                    ->everyTenMinutes()
+                    ->withoutOverlapping();
+            }
 
             // Admin domains' Cloudflare tokens: warn before they expire and
             // after they stop working (#139). Two requests per domain.

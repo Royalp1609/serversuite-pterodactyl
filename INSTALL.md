@@ -216,6 +216,65 @@ to 120 requests a minute per IP; behind a CDN they can be cached for the same
 time (`Cache-Control: public`). The panel pings the server's allocation itself,
 so it must be able to reach the game port.
 
+## Edge mode (mc-router)
+
+For hosts that don't want a public port per server. Players of **Java
+Minecraft** servers join on one public port (25565) of an edge, where
+[mc-router](https://github.com/itzg/mc-router) reads the name they typed and
+forwards them to that server's internal `IP:port`. Tested with mc-router 1.56.5.
+
+With edge mode on, a new Java subdomain gets an address record to the edge (no
+SRV record) and a route on the router. Releasing or deleting the server removes
+the route; an allocation change moves the route (on the same "after the next
+start" rule as DNS moves). Bedrock, PocketMine/Nukkit and other games keep
+direct records: their clients don't send a host name. Subdomains made before
+edge mode was turned on stay direct until released and claimed again.
+
+Run mc-router on the edge (pin the version):
+
+```yaml
+services:
+  mc-router:
+    image: itzg/mc-router:1.56.5
+    restart: unless-stopped
+    ports:
+      - "25565:25565"            # public
+      - "10.0.0.5:8080:8080"     # API: internal address only
+    volumes:
+      - ./routes.json:/data/routes.json
+    command: >
+      -api-binding :8080
+      -routes-config /data/routes.json
+      -connection-rate-limit 50
+```
+
+- **The API has no authentication.** Bind it to an internal address and
+  firewall it so only the panel can reach it. Anyone who can reach it can
+  send any name anywhere.
+- **`-routes-config`** saves API changes to the file, so routes survive a
+  restart. Without it the panel puts back missing routes within 10 minutes
+  (`serversuite:edge-sync`), but players can't join until then.
+  Create the file first: `{"default-server": null, "mappings": {}}`.
+- **`-connection-rate-limit`** defaults to 1 connection per second for the
+  whole router. Raise it for more than a handful of players.
+- **Players' real IPs:** add `-use-proxy-protocol` and set
+  `proxies.proxy-protocol: true` in each server's
+  `config/paper-global.yml` (Velocity: `haproxy-protocol = true`). A server
+  without it then can't be joined through the edge, and one with it can't be
+  joined directly, so switch both together.
+- The route backend is the allocation's IP (not its alias). For an allocation
+  on `0.0.0.0` the node's FQDN is used, so the edge must be able to reach the
+  nodes on their game ports.
+- mc-router is now the single way in: run it with restarts and monitoring.
+  The panel manages one router; several instances for high availability
+  aren't supported yet.
+
+Then, under Admin → Server Suite → Subdomains → **Edge mode**: tick "Use the
+edge", enter the edge address the DNS records should point at (an IP or a host
+name) and the router API URL (`http://10.0.0.5:8080`), and use **Test the
+router**. The same settings can be set in `.env` (`SERVERSUITE_EDGE`,
+`SERVERSUITE_EDGE_ADDRESS`, `SERVERSUITE_EDGE_ROUTER_URL`); the admin page wins.
+
 ## Configuration
 
 All runtime settings live in **Admin → Extensions → Server Suite** (repo

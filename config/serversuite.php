@@ -417,6 +417,24 @@ return [
     'subdomains' => [
         'reserved' => ['www', 'mail', 'smtp', 'imap', 'pop', 'ftp', 'admin', 'panel', 'api',
                        'ns1', 'ns2', 'mc', 'root', 'node', 'wings', 'status', 'billing'],
+
+        /*
+        | Edge mode (#2): Java Minecraft subdomains go through one public
+        | port on a hostname router (mc-router) instead of each server's own
+        | port. A claim then gets a plain A/AAAA/CNAME record to `address`
+        | (no SRV: players join on 25565) and a route on the router to the
+        | server's internal IP:port. Other games keep their direct records.
+        | The admin page's values win over these.
+        |
+        | router_url: mc-router's API (-api-binding). It has no
+        | authentication, so it must only be reachable from the panel.
+        */
+        'edge' => [
+            'enabled'    => env('SERVERSUITE_EDGE', false),
+            'address'    => env('SERVERSUITE_EDGE_ADDRESS', ''),
+            'router_url' => env('SERVERSUITE_EDGE_ROUTER_URL', ''),
+            'timeout'    => 5,
+        ],
     ],
 
     // Public status cards (#29): /status/<fqdn> and /status/<fqdn>/badge.svg,
