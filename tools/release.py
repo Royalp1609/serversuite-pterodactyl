@@ -20,6 +20,7 @@ list comes from GitHub's generated release notes (merged pull requests since
 the previous release).
 """
 import json
+import re
 import mimetypes
 import os
 import subprocess
@@ -70,7 +71,7 @@ def notes(version: str) -> str:
         "## Install / upgrade",
         "Download both files below and follow `INSTALL.md` (in the backend zip and the repo): replace "
         "`packages/serversuite/` with the backend zip, "
-        "`composer require \"pterodactyl-serversuite/serversuite:*@dev\"`, migrate, then "
+        "`composer require \"pterodactyl-serversuite/serversuite:*@rc\"`, migrate, then "
         "`blueprint -install serversuite`. After a panel upgrade, use the \"After a Pterodactyl panel "
         "upgrade\" section.", "",
         "Docs: https://royalp1609.github.io/serversuite-site/", "",
@@ -111,6 +112,12 @@ def main() -> int:
     version = json.loads((ROOT / "composer.json").read_text())["version"]
     if tag != f"v{version}":
         print(f"::error::tag {tag} doesn't match composer.json version {version} (expected v{version})")
+        return 1
+
+    # The install docs require "*@rc": Composer then accepts stable and rc
+    # versions only, so a -beta or -alpha release couldn't be installed.
+    if "-" in version and not re.fullmatch(r"\d+\.\d+\.\d+-rc\.\d+", version):
+        print(f"::error::version {version}: pre-releases must be -rc.N (installs use the \"*@rc\" constraint)")
         return 1
 
     if subprocess.run([sys.executable, str(ROOT / "tools/build-blueprint.py"), "--check"], cwd=ROOT).returncode:
