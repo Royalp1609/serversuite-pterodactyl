@@ -2383,6 +2383,46 @@ class ModManagerController extends Controller
     }
 
     /**
+     * POST /admin/edge { action: save|test } (#2): edge mode settings, or
+     * ask the router for its routes to check the URL works.
+     */
+    public function adminEdge(Request $request)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $data = $request->validate([
+            'edge_enabled'    => ['nullable'],
+            'edge_address'    => ['nullable', 'string', 'max:253'],
+            'edge_router_url' => ['nullable', 'string', 'max:300'],
+        ]);
+        $address = trim((string) ($data['edge_address'] ?? ''));
+        $url = trim((string) ($data['edge_router_url'] ?? ''));
+        if (($bad = \ServerSuite\Edge\EdgeMode::invalid($address, $url)) !== null) {
+            return $this->adminFlash(['edge_error' => $bad], '#edge');
+        }
+
+        if ($request->input('action') === 'test') {
+            if ($url === '') {
+                return $this->adminFlash(['edge_error' => 'Enter the router API URL first.'], '#edge');
+            }
+            $routes = (new \ServerSuite\Edge\McRouterClient($url))->routes();
+
+            return $this->adminFlash($routes === null
+                ? ['edge_error' => 'The router did not answer at that URL (GET /routes).']
+                : ['edge_ok' => 'The router answered: ' . count($routes) . ' route(s).'], '#edge');
+        }
+
+        $on = $request->boolean('edge_enabled');
+        if ($on && ($address === '' || $url === '')) {
+            return $this->adminFlash(['edge_error' => 'Edge mode needs both the edge address and the router API URL.'], '#edge');
+        }
+        ModManagerGlobalSetting::setValue('edge_enabled', $on ? '1' : '0');
+        ModManagerGlobalSetting::setValue('edge_address', $address !== '' ? $address : null);
+        ModManagerGlobalSetting::setValue('edge_router_url', $url !== '' ? $url : null);
+
+        return $this->adminFlash(['edge_ok' => 'Edge settings saved.'], '#edge');
+    }
+
+    /**
      * Back to the admin page with a message (#141 item 43). Messages go in the
      * session, not the URL: exception text stays out of access logs and
      * browser history, and the page can't be made to show text from a link.

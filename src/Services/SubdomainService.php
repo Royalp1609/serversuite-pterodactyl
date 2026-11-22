@@ -4,6 +4,7 @@ namespace ServerSuite\Services;
 
 use Illuminate\Support\Facades\DB;
 use ServerSuite\Contracts\DnsProvider;
+use ServerSuite\Edge\EdgeMode;
 use ServerSuite\Dns\CloudflareDnsProvider;
 use ServerSuite\Exceptions\DnsAuthException;
 use ServerSuite\Exceptions\SubdomainException;
@@ -79,7 +80,8 @@ class SubdomainService
                 'port'  => $s->port,
                 'stale' => $ip !== null && ($s->ip !== $ip || $s->port !== $port),
                 'move_pending' => $s->move_pending_since !== null,
-                'address' => $s->srv_record_id !== null ? $s->fqdn : $s->fqdn . ':' . $s->port,
+                'address' => $s->srv_record_id !== null || $s->edge_backend !== null ? $s->fqdn : $s->fqdn . ':' . $s->port,
+                'edge'    => $s->edge_backend !== null,
                 'status_public' => (bool) $s->status_public,
                 'card_url'  => $s->status_public && StatusCardService::enabled() ? StatusCardService::url($s->fqdn) : null,
                 'badge_url' => $s->status_public && StatusCardService::enabled() ? StatusCardService::url($s->fqdn, true) : null,
@@ -161,6 +163,13 @@ class SubdomainService
 
         $srvService = $this->game($server)->srvService;
 
+        // Edge mode (#2): Java Minecraft joins through the hostname router.
+        $edge = EdgeMode::appliesTo($server, $this->game($server)) ? EdgeMode::fromConfig() : null;
+        $backend = $edge !== null ? EdgeMode::backend($server) : null;
+        if ($edge !== null && $backend === null) {
+            throw new SubdomainException('This server has no internal address for the edge router to send players to.');
+        }
+
         try {
             // #117: the zone may already use the name (the admin's shop, wiki,
             // or records an earlier release couldn't remove). Never add to it.
@@ -173,22 +182,37 @@ class SubdomainService
         }
 
         try {
-            $res = $dns->createRecords($label, $ip, $port, $srvService);
+            // On the edge: the address record points at the edge, players
+            // join on its port 25565, so no SRV record.
+            $res = $edge !== null
+                ? $dns->createRecords($label, $edge->address, EdgeMode::PORT, null)
+                : $dns->createRecords($label, $ip, $port, $srvService);
         } catch (\Throwable $e) {
             throw $this->dnsFailure($e, $d);
         }
 
+        if ($edge !== null) {
+            try {
+                $edge->router->put($res['fqdn'], $backend);
+            } catch (\RuntimeException $e) {
+                $dns->deleteRecords($res['a_record_id'], $res['srv_record_id']);
+                logger()->warning('[Server Suite] edge route failed', ['fqdn' => $res['fqdn'], 'error' => $e->getMessage()]);
+                throw new SubdomainException('The subdomain could not be set up on the edge router. Try again in a few minutes, or ask a panel admin to check it.', previous: $e);
+            }
+        }
+
         try {
-            return $this->saveClaim($server, $dns, $domainId, $label, $zone, $res, $ip, $port, $userId);
+            return $this->saveClaim($server, $dns, $domainId, $label, $zone, $res, $ip, $port, $userId, $backend);
         } catch (\Throwable $e) {
             // The records are made but nothing in the panel knows them: remove them.
             $dns->deleteRecords($res['a_record_id'], $res['srv_record_id']);
+            $edge?->router->remove($res['fqdn']);
             throw $e;
         }
     }
 
     /** @param array{fqdn: string, a_record_id: string, srv_record_id: ?string} $res */
-    private function saveClaim(object $server, DnsProvider $dns, ?int $domainId, string $label, string $zone, array $res, string $ip, int $port, ?int $userId): Subdomain
+    private function saveClaim(object $server, DnsProvider $dns, ?int $domainId, string $label, string $zone, array $res, string $ip, int $port, ?int $userId, ?string $edgeBackend = null): Subdomain
     {
         return Subdomain::query()->create([
             'server_uuid'   => $server->uuid,
@@ -202,6 +226,7 @@ class SubdomainService
             'ip'            => $ip,
             'port'          => $port,
             'created_by'    => $userId,
+            'edge_backend'  => $edgeBackend,
         ]);
     }
 
@@ -219,6 +244,7 @@ class SubdomainService
         if ($dns !== null && ! $dns->deleteRecords($sub->a_record_id, $sub->srv_record_id)) {
             throw new SubdomainException("Couldn't remove the DNS records for {$sub->fqdn} at Cloudflare, so the subdomain is kept. Try again in a few minutes. If it keeps failing, the domain's API token may need replacing.");
         }
+        $this->removeEdgeRoute($sub);
         $sub->delete();
     }
 
@@ -233,6 +259,24 @@ class SubdomainService
         [$ip, $port] = $this->target($server);
         if ($ip === null || $port === null) {
             throw new SubdomainException('This server has no primary allocation to point the subdomain at.');
+        }
+
+        // On the edge (#2) the DNS record stays on the edge: move the route.
+        if ($sub->edge_backend !== null) {
+            $router = EdgeMode::router();
+            $backend = EdgeMode::backend($server);
+            if ($router === null || $backend === null) {
+                throw new SubdomainException('The edge router is not configured, so this subdomain can\'t be moved. Ask a panel admin.');
+            }
+            try {
+                $router->put($sub->fqdn, $backend);
+            } catch (\RuntimeException $e) {
+                logger()->warning('[Server Suite] edge route move failed', ['fqdn' => $sub->fqdn, 'error' => $e->getMessage()]);
+                throw new SubdomainException('The edge router could not be updated. Try again in a few minutes.', previous: $e);
+            }
+            $sub->forceFill(['ip' => $ip, 'port' => $port, 'move_pending_since' => null, 'edge_backend' => $backend])->save();
+
+            return $sub;
         }
 
         $dns = $this->providerFor($sub);
@@ -363,6 +407,7 @@ class SubdomainService
 
                 continue;
             }
+            $this->removeEdgeRoute($sub);
             $sub->delete();
         }
 
@@ -648,6 +693,46 @@ class SubdomainService
         $ip = ($alloc->ip_alias ?? null) ?: ($alloc->ip ?? null);
 
         return [$ip ? (string) $ip : null, isset($alloc->port) ? (int) $alloc->port : null];
+    }
+
+    /**
+     * Put back edge routes the router lost or that point elsewhere (#2): a
+     * restarted router without -routes-config, or a route changed by hand.
+     * Never removes routes it didn't make. Returns how many were fixed, or
+     * null when the router isn't configured or can't be reached.
+     */
+    public function syncEdgeRoutes(): ?int
+    {
+        $router = EdgeMode::router();
+        if ($router === null || ($routes = $router->routes()) === null) {
+            return null;
+        }
+        $fixed = 0;
+        foreach (Subdomain::query()->whereNotNull('edge_backend')->get() as $sub) {
+            if (($routes[strtolower($sub->fqdn)] ?? null) === $sub->edge_backend) {
+                continue;
+            }
+            try {
+                $router->put($sub->fqdn, $sub->edge_backend);
+                $fixed++;
+            } catch (\RuntimeException $e) {
+                logger()->warning('[Server Suite] edge route resync failed', ['fqdn' => $sub->fqdn, 'error' => $e->getMessage()]);
+            }
+        }
+
+        return $fixed;
+    }
+
+    /** Best effort: a route left behind only reaches a name whose DNS is gone. */
+    private function removeEdgeRoute(Subdomain $sub): void
+    {
+        if ($sub->edge_backend === null) {
+            return;
+        }
+        $router = EdgeMode::router();
+        if ($router === null || ! $router->remove($sub->fqdn)) {
+            logger()->warning('[Server Suite] edge route could not be removed', ['fqdn' => $sub->fqdn]);
+        }
     }
 
     /** @throws SubdomainException */

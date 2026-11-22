@@ -16,6 +16,35 @@ use ServerSuite\Services\SubdomainService;
 /** #14: Cloudflare subdomains (A + SRV) for game servers. */
 
 const CF = 'https://api.cloudflare.com/client/v4';
+const ROUTER = 'http://10.9.0.2:8080';
+
+/** mc-router 1.56.5's routes API, as probed against the real binary. */
+function fakeRouter(Request $r): \GuzzleHttp\Promise\PromiseInterface
+{
+    if ($GLOBALS['routerDown']) {
+        throw new Illuminate\Http\Client\ConnectionException('Connection refused');
+    }
+    $path = (string) parse_url($r->url(), PHP_URL_PATH);
+    if ($r->method() === 'GET' && $path === '/routes') {
+        return Http::response(array_map(fn ($b) => ['backend' => $b, 'scalingTarget' => ''], $GLOBALS['routes']));
+    }
+    if ($r->method() === 'POST' && $path === '/routes') {
+        $GLOBALS['routes'][strtolower($r['serverAddress'])] = $r['backend'];
+
+        return Http::response(null, 201);
+    }
+    if ($r->method() === 'DELETE' && str_starts_with($path, '/routes/')) {
+        $name = rawurldecode(substr($path, 8));
+        if (! isset($GLOBALS['routes'][$name])) {
+            return Http::response(null, 404);
+        }
+        unset($GLOBALS['routes'][$name]);
+
+        return Http::response(null, 200);
+    }
+
+    return Http::response(null, 404);
+}
 
 function cfServer(string $uuid = 'srv-1', ?string $ip = '203.0.113.10', ?int $port = 25565, ?string $alias = null): object
 {
@@ -38,9 +67,15 @@ function fakeCloudflare(): void
     // Records in the fake zone (#117/#132): id => [type, name]; and a switch for failing DELETEs.
     $GLOBALS['cfRecords'] = [];
     $GLOBALS['cfDeleteFails'] = false;
+    // A fake mc-router (#2) at ROUTER: name => backend, and a switch for it being down.
+    $GLOBALS['routes'] = [];
+    $GLOBALS['routerDown'] = false;
     Http::fake(function (Request $r) use (&$n) {
         $srvFails = $GLOBALS['cfSrvFails'];
         $url = $r->url();
+        if (str_starts_with($url, ROUTER)) {
+            return fakeRouter($r);
+        }
         // Token health (#139): null = active with no expiry, 'down' = 503,
         // 'account' = an account-owned token (/user/tokens/verify says invalid).
         $verify = $GLOBALS['cfVerify'] ?? null;
@@ -685,4 +720,150 @@ it('recreates an address record removed by hand on the next move (#132)', functi
     cfService()->repoint(cfServer(ip: '198.51.100.7'), $sub->id);
     $id = $sub->fresh()->a_record_id;
     expect($id)->not->toBe('a-1')->and($GLOBALS['cfRecords'][$id])->toBe(['A', 'smp.play.example.com']);
+});
+
+
+// -------------------------------------------------------------------------
+// Edge mode (#2): Java subdomains through mc-router
+// -------------------------------------------------------------------------
+
+function edgeOn(): void
+{
+    config(['serversuite.subdomains.edge' => ['enabled' => true, 'address' => '198.51.100.7', 'router_url' => ROUTER, 'timeout' => 5]]);
+}
+
+function lanServer(string $uuid = 'srv-1', int $port = 25570): object
+{
+    return (object) [
+        'uuid'       => $uuid,
+        'allocation' => (object) ['ip' => '10.9.0.20', 'ip_alias' => '203.0.113.10', 'port' => $port],
+    ];
+}
+
+it('points an edge subdomain at the edge with no SRV record, and routes it to the internal address', function () {
+    edgeOn();
+    $d = panelDomain();
+    allow('srv-1', 1);
+
+    $sub = cfService()->claim(lanServer(), 'mysmp', $d->id);
+
+    expect($sub->srv_record_id)->toBeNull()
+        ->and($sub->edge_backend)->toBe('10.9.0.20:25570')
+        ->and($GLOBALS['routes'])->toBe(['mysmp.play.example.com' => '10.9.0.20:25570']);
+    Http::assertSent(fn (Request $r) => $r->method() === 'POST' && ($r['type'] ?? null) === 'A' && $r['content'] === '198.51.100.7');
+    Http::assertNotSent(fn (Request $r) => $r->method() === 'POST' && ($r['type'] ?? null) === 'SRV');
+    $o = cfService()->overview(lanServer());
+    expect($o['items'][0]['address'])->toBe('mysmp.play.example.com')->and($o['items'][0]['edge'])->toBeTrue();
+});
+
+it('removes the DNS records again when the router refuses the route', function () {
+    edgeOn();
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $GLOBALS['routerDown'] = true;
+
+    expect(fn () => cfService()->claim(lanServer(), 'mysmp', $d->id))->toThrow(SubdomainException::class, 'edge router');
+    expect($GLOBALS['cfRecords'])->toBe([])->and(Subdomain::query()->count())->toBe(0);
+});
+
+it('keeps Bedrock and other games on direct records in edge mode', function () {
+    edgeOn();
+    $d = panelDomain();
+    cfService()->setAllowance('rust-1', 1);
+    allow('bed-1', 1);
+
+    $rust = cfService()->claim(cfRust(), 'rusty', $d->id);
+    $bedrock = (object) ['uuid' => 'bed-1', 'startup' => './bedrock_server', 'allocation' => (object) ['ip' => '10.9.0.21', 'ip_alias' => null, 'port' => 19132]];
+    $bed = cfService()->claim($bedrock, 'bed', $d->id);
+
+    expect($rust->edge_backend)->toBeNull()->and($bed->edge_backend)->toBeNull()->and($GLOBALS['routes'])->toBe([]);
+});
+
+it('uses the node address for an allocation on every interface', function () {
+    $server = (object) ['uuid' => 'x', 'node' => (object) ['fqdn' => 'node1.lan'], 'allocation' => (object) ['ip' => '0.0.0.0', 'ip_alias' => null, 'port' => 25566]];
+
+    expect(\ServerSuite\Edge\EdgeMode::backend($server))->toBe('node1.lan:25566')
+        ->and(\ServerSuite\Edge\EdgeMode::backend((object) ['allocation' => (object) ['ip' => 'fd00::5', 'port' => 25565]]))->toBe('[fd00::5]:25565');
+});
+
+it('moves the route, not the DNS record, when an edge server changes allocation', function () {
+    edgeOn();
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(lanServer(), 'mysmp', $d->id);
+
+    cfService()->repoint(lanServer('srv-1', 25580), $sub->id);
+
+    expect($GLOBALS['routes']['mysmp.play.example.com'])->toBe('10.9.0.20:25580')
+        ->and($sub->fresh()->edge_backend)->toBe('10.9.0.20:25580')
+        ->and($sub->fresh()->port)->toBe(25580);
+    Http::assertNotSent(fn (Request $r) => $r->method() === 'PATCH');
+});
+
+it('removes the route on release and when the server is deleted', function () {
+    edgeOn();
+    $d = panelDomain();
+    allow('srv-1', 2);
+    $a = cfService()->claim(lanServer(), 'one', $d->id);
+    cfService()->claim(lanServer(), 'two', $d->id);
+
+    cfService()->release(lanServer(), $a->id);
+    expect(array_keys($GLOBALS['routes']))->toBe(['two.play.example.com']);
+
+    cfService()->cleanupServer('srv-1');
+    expect($GLOBALS['routes'])->toBe([])->and(Subdomain::query()->count())->toBe(0);
+});
+
+it('still releases when the router is down, and removes routes after edge mode is turned off', function () {
+    edgeOn();
+    $d = panelDomain();
+    allow('srv-1', 2);
+    $a = cfService()->claim(lanServer(), 'one', $d->id);
+    $b = cfService()->claim(lanServer(), 'two', $d->id);
+
+    $GLOBALS['routerDown'] = true;
+    cfService()->release(lanServer(), $a->id);
+    expect(Subdomain::query()->find($a->id))->toBeNull();
+
+    $GLOBALS['routerDown'] = false;
+    config(['serversuite.subdomains.edge.enabled' => false]);
+    cfService()->release(lanServer(), $b->id);
+    expect($GLOBALS['routes'])->toBe(['one.play.example.com' => '10.9.0.20:25570']);
+});
+
+it('makes direct subdomains while edge mode is off or incomplete', function () {
+    config(['serversuite.subdomains.edge' => ['enabled' => true, 'address' => '', 'router_url' => ROUTER]]);
+    $d = panelDomain();
+    allow('srv-1', 1);
+
+    $sub = cfService()->claim(lanServer(), 'mysmp', $d->id);
+
+    expect($sub->edge_backend)->toBeNull()->and($sub->srv_record_id)->not->toBeNull()->and($GLOBALS['routes'])->toBe([]);
+});
+
+it('puts back routes the router lost, and leaves other routes alone', function () {
+    edgeOn();
+    $d = panelDomain();
+    allow('srv-1', 2);
+    cfService()->claim(lanServer(), 'one', $d->id);
+    cfService()->claim(lanServer(), 'two', $d->id);
+    $GLOBALS['routes'] = ['two.play.example.com' => '10.9.0.99:1', 'hub.example.net' => '10.9.0.50:25565'];
+
+    expect(cfService()->syncEdgeRoutes())->toBe(2)
+        ->and($GLOBALS['routes'])->toBe(['two.play.example.com' => '10.9.0.20:25570', 'hub.example.net' => '10.9.0.50:25565', 'one.play.example.com' => '10.9.0.20:25570'])
+        ->and(cfService()->syncEdgeRoutes())->toBe(0);
+
+    $GLOBALS['routerDown'] = true;
+    expect(cfService()->syncEdgeRoutes())->toBeNull();
+});
+
+it('checks the edge admin settings', function () {
+    $bad = fn ($a, $u) => \ServerSuite\Edge\EdgeMode::invalid($a, $u);
+
+    expect($bad('198.51.100.7', 'http://10.9.0.2:8080'))->toBeNull()
+        ->and($bad('edge.example.com', 'https://router.lan'))->toBeNull()
+        ->and($bad('198.51.100.7:25565', ''))->not->toBeNull()
+        ->and($bad('', 'ftp://10.0.0.1'))->not->toBeNull()
+        ->and($bad('', 'http://user:pw@10.0.0.1'))->not->toBeNull()
+        ->and($bad('', 'not a url'))->not->toBeNull();
 });

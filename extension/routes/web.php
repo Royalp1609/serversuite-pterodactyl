@@ -157,6 +157,8 @@ Route::post('/admin/domains/{id}/token', [ModManagerController::class, 'adminRep
     ->whereNumber('id')->name('extension.serversuite.admin-replace-domain-token');
 Route::post('/admin/domains/{id}/remove', [ModManagerController::class, 'adminRemoveDomain'])
     ->whereNumber('id')->name('extension.serversuite.admin-remove-domain');
+Route::post('/admin/edge', [ModManagerController::class, 'adminEdge'])
+    ->name('extension.serversuite.admin-edge');
 Route::post('/admin/egg-games', [ModManagerController::class, 'adminSaveEggGames'])
     ->name('extension.serversuite.admin-egg-games');
 Route::post('/admin/subdomain-allowances', [ModManagerController::class, 'adminSaveAllowances'])

@@ -30,7 +30,7 @@ class Subdomain extends Model
 
     protected $fillable = [
         'server_uuid', 'domain_id', 'provider', 'label', 'zone', 'fqdn',
-        'a_record_id', 'srv_record_id', 'ip', 'port', 'created_by', 'status_public', 'move_pending_since',
+        'a_record_id', 'srv_record_id', 'ip', 'port', 'created_by', 'status_public', 'move_pending_since', 'edge_backend',
     ];
 
     protected $casts = [

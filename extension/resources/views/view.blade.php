@@ -376,6 +376,46 @@
                     </table>
                     <button type="submit" class="btn btn-primary">Save allowances</button>
                 </form>
+
+                <hr>
+                <h4 id="edge">Edge mode (mc-router)</h4>
+                @php
+                    $ssEdge = (array) config('serversuite.subdomains.edge', []);
+                    $ssEdgeCount = \ServerSuite\Models\Subdomain::query()->whereNotNull('edge_backend')->count();
+                @endphp
+                @if (($ssFlash['edge_ok'] ?? null))
+                    <div class="alert alert-success">{{ $ssFlash['edge_ok'] }}</div>
+                @endif
+                @if (($ssFlash['edge_error'] ?? null))
+                    <div class="alert alert-danger">{{ $ssFlash['edge_error'] }}</div>
+                @endif
+                <p class="text-muted small">
+                    Java Minecraft subdomains join through one public port (25565) on a hostname router instead of each server's own port.
+                    A new claim gets an address record to the edge (no SRV record) and a route on
+                    <a href="https://github.com/itzg/mc-router" target="_blank" rel="noopener noreferrer">mc-router</a> to the server's internal IP:port.
+                    Bedrock and other games keep direct records. Subdomains made before edge mode was turned on stay direct.
+                    In use: {{ $ssEdgeCount }}.
+                </p>
+                <form method="POST" action="/extensions/serversuite/admin/edge" autocomplete="off">
+                    @csrf
+                    <div class="form-group">
+                        <label style="font-weight:normal;">
+                            <input type="hidden" name="edge_enabled" value="0"><input type="checkbox" name="edge_enabled" value="1" {{ ($ssEdge['enabled'] ?? false) ? 'checked' : '' }}>
+                            Use the edge for new Java Minecraft subdomains
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Edge address (what the DNS records point at)</label>
+                        <input type="text" class="form-control" name="edge_address" value="{{ $ssEdge['address'] ?? '' }}" placeholder="203.0.113.5 or edge.example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Router API URL (internal only)</label>
+                        <input type="text" class="form-control" name="edge_router_url" value="{{ $ssEdge['router_url'] ?? '' }}" placeholder="http://10.0.0.5:8080">
+                        <p class="text-muted small">mc-router's <code>-api-binding</code>. The API has no authentication: never expose it to the internet. Run mc-router with <code>-routes-config</code> so routes survive a restart; the panel also puts back missing routes every 10 minutes.</p>
+                    </div>
+                    <button type="submit" name="action" value="save" class="btn btn-primary">Save edge settings</button>
+                    <button type="submit" name="action" value="test" class="btn btn-default">Test the router</button>
+                </form>
             </div>
         </div>
     </div>
@@ -385,6 +425,7 @@
             <div class="box-body">
                 <p>Server owners claim <code>name.yourdomain</code> from their server's <strong>Subdomains</strong> tab, or use their own Cloudflare domain. Each claim creates an A record (the server's IP, not proxied). Minecraft servers also get a <code>_minecraft._tcp</code> SRV record carrying the port, so players connect with just the name; Rust, Valheim and other games don't look one up, so their players add the port.</p>
                 <p>Records are removed when a server is deleted and re-pointed when its primary allocation changes.</p>
+                <p>With edge mode on, Java Minecraft subdomains point at the edge instead, and the router forwards each name to its server. For players' real IPs, start mc-router with <code>-use-proxy-protocol</code> and turn on <code>proxies.proxy-protocol</code> in each server's Paper config (or Velocity's <code>haproxy-protocol</code>); a server without it then refuses edge connections. See INSTALL.md, "Edge mode".</p>
             </div>
         </div>
     </div>
