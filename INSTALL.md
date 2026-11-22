@@ -33,7 +33,7 @@ Panel root below is `/opt/pterodactyl-panel`; adjust to yours.
    ```
    sudo -u www-data composer remove pterodactyl-serversuite/serversuite --no-update
    sudo -u www-data rm -rf vendor/pterodactyl-serversuite
-   sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@dev" --no-cache
+   sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@rc" --no-cache
    ```
 
 3. **Watch for nested-folder extraction.** The zip must land as
@@ -84,9 +84,10 @@ sudo chown -R www-data:www-data packages/serversuite
 # "could not be found in any version". A panel upgrade removes it again,
 # see "After a Pterodactyl panel upgrade".
 sudo -u www-data composer config repositories.serversuite '{"type": "path", "url": "packages/serversuite"}'
-# @dev lets Composer accept pre-release versions (1.0.0-rc.1); the path
+# @rc lets Composer accept release candidates (1.0.0-rc.1) as well as stable
+# releases; the panel only allows stable packages otherwise. The path
 # repository only holds the version you unzipped.
-sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@dev"
+sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@rc"
 grep '"version"' vendor/pterodactyl-serversuite/serversuite/composer.json
 sudo -u www-data php artisan migrate --force
 sudo -u www-data php artisan optimize:clear
@@ -104,9 +105,9 @@ Then hard-refresh the browser (Ctrl+Shift+R — the JS bundle caches hard).
 ```bash
 cd /opt/pterodactyl-panel
 # replace packages/serversuite/ contents with the new backend
-# (require, not update: it also fixes installs made with the old "*" constraint,
-#  which rejects pre-release versions such as 1.0.0-rc.1)
-sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@dev"
+# (require, not update: it also moves installs made with the older "*" or
+#  "*@dev" constraints to "*@rc"; plain "*" rejects 1.0.0-rc.1)
+sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@rc"
 grep '"version"' vendor/pterodactyl-serversuite/serversuite/composer.json  # VERIFY
 sudo -u www-data php artisan migrate            # if the release notes a migration
 sudo -u www-data php artisan optimize:clear
@@ -117,6 +118,15 @@ sudo systemctl reload apache2        # Apache running PHP itself (mod_php: `apac
 
 blueprint -remove serversuite && blueprint -install serversuite   # if the UI changed
 ```
+
+**Knowing when to update:** Admin → Server Suite shows a notice when a newer
+release is out, red for a security release, with a link to its notes and
+"Dismiss until the next release". The panel asks GitHub's releases API once a
+day (`serversuite:check-release` in the scheduler, 06:40); nothing about the
+panel is sent, and admin default notification targets get one message per new
+release. Pre-releases are offered only to panels already on a pre-release.
+Turn it off under "New Server Suite releases" if the panel can't reach the
+internet. It never updates anything itself.
 
 `sudo -u www-data php artisan cache:clear` additionally flushes the 5-minute
 search caches and the 10-minute per-server version-sourcing cache — use it when
@@ -137,7 +147,7 @@ cd /opt/pterodactyl-panel
 #    version (table below), following Blueprint's own install guide
 # 2. Re-add the backend (use the directory your backend actually lives in)
 sudo -u www-data composer config repositories.serversuite '{"type": "path", "url": "packages/serversuite"}'
-sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@dev"
+sudo -u www-data composer require "pterodactyl-serversuite/serversuite:*@rc"
 grep '"version"' vendor/pterodactyl-serversuite/serversuite/composer.json   # VERIFY
 sudo -u www-data php artisan migrate --force
 sudo -u www-data php artisan optimize:clear
