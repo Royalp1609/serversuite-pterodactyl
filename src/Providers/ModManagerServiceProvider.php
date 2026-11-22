@@ -287,6 +287,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 \ServerSuite\Console\Commands\WatchCrashesCommand::class,
                 \ServerSuite\Console\Commands\AutoUpgradesCommand::class,
                 \ServerSuite\Console\Commands\CheckDnsTokensCommand::class,
+                \ServerSuite\Console\Commands\CheckReleaseCommand::class,
             ]);
         }
     }
@@ -372,6 +373,12 @@ class ModManagerServiceProvider extends ServiceProvider
             // after they stop working (#139). Two requests per domain.
             $schedule->command(\ServerSuite\Console\Commands\CheckDnsTokensCommand::class)
                 ->dailyAt('06:10')
+                ->withoutOverlapping();
+
+            // Newer Server Suite release (#12): one request a day, nothing
+            // about the panel is sent. The command skips it when turned off.
+            $schedule->command(\ServerSuite\Console\Commands\CheckReleaseCommand::class)
+                ->dailyAt('06:40')
                 ->withoutOverlapping();
 
             // Crash after a mod change, for servers with notifications (#26).

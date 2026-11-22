@@ -132,11 +132,12 @@ class ModManagerController extends Controller
             'backup_timezone'           => ['nullable', 'timezone'],
             'auto_upgrades_enabled'     => ['nullable'],
             'auto_upgrades_min_age_days' => ['nullable', 'integer', 'min:0', 'max:365'],
+            'release_check_enabled'     => ['nullable'],
         ]);
 
         // Checkboxes: each sends 0 (a hidden field) or 1, so a field that isn't
         // in the request at all is left as it was (item 92). Stored as '1'/'0'.
-        foreach (['repo_modrinth_enabled', 'repo_curseforge_enabled', 'repo_hangar_enabled', 'auto_update_on_conflict', 'backup_rotation_enabled', 'auto_upgrades_enabled'] as $box) {
+        foreach (['repo_modrinth_enabled', 'repo_curseforge_enabled', 'repo_hangar_enabled', 'auto_update_on_conflict', 'backup_rotation_enabled', 'auto_upgrades_enabled', 'release_check_enabled'] as $box) {
             if ($request->has($box)) {
                 ModManagerGlobalSetting::setValue($box, $request->boolean($box) ? '1' : '0');
             }
@@ -173,6 +174,28 @@ class ModManagerController extends Controller
         }
 
         return $this->adminFlash(['saved' => '1']);
+    }
+
+    /**
+     * POST /admin/release { action: dismiss|check } (#12): hide the new
+     * release notice until the next one, or ask GitHub now.
+     */
+    public function adminRelease(Request $request)
+    {
+        abort_unless($request->user()?->root_admin, 403);
+        $releases = app(\ServerSuite\Services\ReleaseCheckService::class);
+        $action = (string) $request->input('action');
+        if ($action === 'dismiss') {
+            $releases->dismiss();
+            $q = ['release_ok' => 'Hidden until the next release.'];
+        } elseif ($action === 'check' && $releases->enabled()) {
+            $releases->check();
+            $q = ['release_ok' => $releases->notice() === null ? 'No newer release found.' : 'A newer release is out.'];
+        } else {
+            $q = ['release_error' => 'The release check is turned off.'];
+        }
+
+        return $this->adminFlash($q);
     }
 
     /**

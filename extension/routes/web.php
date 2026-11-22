@@ -17,6 +17,8 @@ use Pterodactyl\BlueprintFramework\Extensions\serversuite\ModManagerController;
 // Read endpoints
 Route::post('/admin/settings', [ModManagerController::class, 'adminSaveSettings'])
     ->name('extension.serversuite.admin-settings');
+Route::post('/admin/release', [ModManagerController::class, 'adminRelease'])
+    ->name('extension.serversuite.admin-release');
 Route::post('/admin/import-egg', [ModManagerController::class, 'adminImportEgg'])
     ->name('extension.serversuite.admin-import-egg');
 Route::get('/admin/egg-catalog', [ModManagerController::class, 'adminEggCatalog'])

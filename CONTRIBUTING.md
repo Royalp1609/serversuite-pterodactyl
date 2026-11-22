@@ -21,7 +21,8 @@ welcome.
 - **Permissions on the server side.** Every endpoint checks the panel's
   subuser permissions; hiding a button is not enough.
 - **No telemetry.** Don't send panel or server data anywhere the admin
-  didn't configure.
+  didn't configure. (The daily release check only fetches GitHub's release
+  list and can be turned off.)
 
 ## Development setup
 
@@ -58,7 +59,10 @@ and commit the rebuilt `serversuite.blueprint`.
 - CI must pass: PHP lint, Pest on Laravel 11 and 12, install + PHPStan in
   real Pterodactyl 1.14 and 1.15 checkouts, and the extension typecheck.
 - Say in the description what you tested on a real panel, if anything.
-- Don't bump the version; releases are cut separately.
+- Don't bump the version; releases are cut separately. A security release is
+  tagged annotated with a message starting "Security release"
+  (`git tag -a v1.2.3 -m "Security release: ..."`): its notes then say so and
+  panels show the update notice as a security one.
 
 By contributing you agree that your contribution is licensed under the
 project's licence, [AGPL-3.0-only](LICENSE).

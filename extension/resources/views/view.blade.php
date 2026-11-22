@@ -18,7 +18,48 @@
     $intervalLabels = [6 => 'Every 6 hours', 12 => 'Every 12 hours', 24 => 'Daily', 48 => 'Every 2 days', 168 => 'Weekly'];
     $backupTz       = (string) config('serversuite.backups.timezone', '');
     $appTz          = config('app.timezone', 'UTC');
+    // Newer Server Suite release (#12). Reads stored state only: the request
+    // to GitHub runs from the daily schedule or the "Check now" button.
+    $ssReleases = null;
+    $ssRelease = null;
+    $ssReleaseOn = false;
+    $ssReleaseLast = null;
+    try {
+        $ssReleases = app(\ServerSuite\Services\ReleaseCheckService::class);
+        $ssReleaseOn = $ssReleases->enabled();
+        $ssRelease = $ssReleases->notice();
+        $ssReleaseLast = $ssReleases->stored()['checked_at'] ?? null;
+    } catch (\Throwable $e) {
+        $ssReleases = null;
+    }
 @endphp
+
+@if ($ssRelease)
+    <div class="alert {{ $ssRelease['security'] ? 'alert-danger' : 'alert-info' }}" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:240px;">
+            <strong>{{ $ssRelease['security'] ? 'Security release: ' : '' }}Server Suite {{ $ssRelease['version'] }} is out.</strong>
+            This panel runs {{ $ssRelease['installed'] }}.
+            @if ($ssRelease['security'])
+                It fixes a security problem: upgrade soon.
+            @endif
+            Upgrade steps are in INSTALL.md; nothing is installed automatically.
+        </div>
+        @if ($ssRelease['url'] !== '')
+            <a class="btn btn-sm btn-default" href="{{ $ssRelease['url'] }}" target="_blank" rel="noopener noreferrer">Release notes</a>
+        @endif
+        <form method="POST" action="/extensions/serversuite/admin/release" style="margin:0;">
+            @csrf
+            <input type="hidden" name="action" value="dismiss">
+            <button type="submit" class="btn btn-sm btn-default">Dismiss until the next release</button>
+        </form>
+    </div>
+@endif
+@if (($ssFlash['release_ok'] ?? null))
+    <div class="alert alert-success">{{ $ssFlash['release_ok'] }}</div>
+@endif
+@if (($ssFlash['release_error'] ?? null))
+    <div class="alert alert-warning">{{ $ssFlash['release_error'] }}</div>
+@endif
 
 <div class="row">
     <div class="col-xs-12 col-md-8">
@@ -70,6 +111,19 @@
                         <label style="display:block; margin-top:8px;">Days a release must be out first</label>
                         <input type="number" min="0" max="365" class="form-control" style="max-width:120px;" name="auto_upgrades_min_age_days" value="{{ config('serversuite.auto_upgrades.min_age_days', 7) }}">
                         <p class="text-muted small">Turning this off stops new upgrades on every server. One already past its backup finishes.</p>
+                    </div>
+
+                    <h4>New Server Suite releases</h4>
+                    <div class="form-group">
+                        <label style="font-weight:normal;">
+                            <input type="hidden" name="release_check_enabled" value="0"><input type="checkbox" name="release_check_enabled" value="1" {{ $ssReleaseOn ? 'checked' : '' }}>
+                            Check GitHub once a day for a newer Server Suite release and show a notice here
+                        </label>
+                        <p class="text-muted small">Only the release list is fetched (api.github.com); nothing about this panel is sent. Admin default notification targets also get one message per new release. Turn it off if the panel can't reach the internet.
+                            @if ($ssReleaseLast)
+                                Last checked {{ \Illuminate\Support\Carbon::parse($ssReleaseLast)->diffForHumans() }}.
+                            @endif
+                        </p>
                     </div>
 
                     <h4>Install behaviour</h4>
@@ -125,6 +179,16 @@
             <div class="box-body">
                 <p>Server owners and permitted sub-users browse, install, update, reconcile and remove mods from the <strong>Mod Manager</strong> tab inside each server.</p>
                 <p style="color:#888;">This extension is a UI layer over the <code>pterodactyl-serversuite/serversuite</code> Composer package, which performs all search, dependency resolution, delivery and tracking.</p>
+                @if ($ssReleases)
+                    <p>Installed version: <strong>{{ $ssReleases->installedVersion() }}</strong></p>
+                    @if ($ssReleaseOn)
+                        <form method="POST" action="/extensions/serversuite/admin/release" style="margin:0;">
+                            @csrf
+                            <input type="hidden" name="action" value="check">
+                            <button type="submit" class="btn btn-sm btn-default">Check for a new release now</button>
+                        </form>
+                    @endif
+                @endif
             </div>
         </div>
     </div>
