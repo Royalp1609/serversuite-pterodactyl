@@ -20,6 +20,19 @@ It ships as two parts that are always deployed together:
 
 ---
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Browse mods from Modrinth, CurseForge and Hangar](https://royalp1609.github.io/serversuite-site/assets/screenshots/pterodactyl/mods-browse.png) | ![Installed mods with update badges](https://royalp1609.github.io/serversuite-site/assets/screenshots/pterodactyl/mods-manage.png) |
+| **Mods**: browse, filtered to the server's loader and version | **Manage**: update, remove, reconcile |
+| ![Version and loader switching](https://royalp1609.github.io/serversuite-site/assets/screenshots/pterodactyl/versions.png) | ![Scheduled backups with rotation](https://royalp1609.github.io/serversuite-site/assets/screenshots/pterodactyl/backups.png) |
+| **Versions**: switch version or loader, behind a backup | **Backups**: schedules and rotation |
+
+More on the [website](https://royalp1609.github.io/serversuite-site/).
+
+---
+
 ## Features
 
 ### Mods (server tab)
