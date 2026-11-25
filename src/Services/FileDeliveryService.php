@@ -405,14 +405,16 @@ class FileDeliveryService
      * folders intact. Used by the version switcher: plugins built for one
      * Minecraft version routinely halt boot on another, so the default on a
      * switch is to clear the jars (keeping configs, so re-adding a compatible
-     * build keeps its settings). Best-effort; returns the jars removed.
+     * build keeps its settings). On a mod loader the same goes for mods/
+     * ($dir 'mods'). Best-effort; returns the jars removed.
      *
      * @return array<int,string>
      */
-    public function deletePluginJars(string $serverUuid): array
+    public function deletePluginJars(string $serverUuid, string $dir = 'plugins'): array
     {
+        $dir = $dir === 'mods' ? 'mods' : 'plugins';
         try {
-            $entries = $this->daemon->listDirectory($serverUuid, 'plugins');
+            $entries = $this->daemon->listDirectory($serverUuid, $dir);
         } catch (\Throwable $e) {
             return [];
         }
@@ -427,7 +429,7 @@ class FileDeliveryService
 
         if ($jars) {
             try {
-                $this->daemon->deleteFiles($serverUuid, 'plugins', $jars);
+                $this->daemon->deleteFiles($serverUuid, $dir, $jars);
             } catch (\Throwable $e) {
                 return [];
             }

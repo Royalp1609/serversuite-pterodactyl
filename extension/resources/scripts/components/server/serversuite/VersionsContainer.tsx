@@ -123,7 +123,7 @@ interface Available { supported: boolean; loader: string | null; versions: strin
 interface Preflight {
     can_proceed: boolean;
     direction: string;
-    target: { version: string; build: number | null };
+    target: { version: string; build: number | null; loader?: string | null; loader_version?: string | null };
     image: { change: boolean; current?: string | null; resolved?: string | null };
     warnings?: string[];
     blockers?: string[];
@@ -132,6 +132,8 @@ type Phase = 'idle' | 'loading_preflight' | 'preview' | 'backing_up' | 'applying
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const cap = (s: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown');
+/** Loaders whose version is changed here with their mods in mods/ (the rest are Paper, with plugins). */
+const MODDED = ['forge', 'neoforge', 'fabric', 'quilt'];
 
 export default () => {
     const uuid = ServerContext.useStoreState((s) => s.server.data!.uuid);
@@ -203,6 +205,19 @@ export default () => {
 
     const loaderLabel = cap(current?.loader ?? null);
     const currentVer = current?.game_version || null;
+    const modded = MODDED.includes((current?.loader ?? '').toLowerCase());
+    const jars = modded ? 'mods' : 'plugins';
+
+    // The loader switch's version picker: the target loader's releases, or a
+    // text box for a loader without a list.
+    const [loaderVersions, setLoaderVersions] = useState<string[] | null>(null);
+    useEffect(() => {
+        setLoaderVersions(null);
+        if (!loaderTarget) return;
+        http.get(`${base}/loader-versions`, { params: { loader: loaderTarget.loader } })
+            .then(({ data }) => setLoaderVersions(data.data.supported ? data.data.versions : []))
+            .catch(() => setLoaderVersions([]));
+    }, [base, loaderTarget?.loader]);
     const busy = phase === 'backing_up' || phase === 'applying' || phase === 'installing' || phase === 'loading_preflight';
 
     const reset = () => { setSelected(null); setPreflight(null); setPhase('idle'); setPhaseMsg(''); setDeletePlugins(true); setWipeMode('none'); };
@@ -436,7 +451,11 @@ export default () => {
                                     <FontAwesomeIcon icon={isDown ? faArrowDown : isUp ? faArrowUp : faCircle} />
                                     {cap(preflight.direction)}
                                 </Stat>
-                                <Stat>Build {preflight.target?.build ?? 'latest'}</Stat>
+                                <Stat>
+                                    {preflight.target?.loader && MODDED.includes(preflight.target.loader)
+                                        ? `${cap(preflight.target.loader)} ${preflight.target.loader_version ?? '(newest)'}`
+                                        : `Build ${preflight.target?.build ?? 'latest'}`}
+                                </Stat>
                                 <Stat tone={preflight.image?.change ? 'down' : 'neutral'}>
                                     {preflight.image?.change
                                         ? `Runtime image changes`
@@ -484,14 +503,14 @@ export default () => {
                                 <input type="radio" name="wipemode" checked={wipeMode === 'reset_world'} onChange={() => setWipeMode('reset_world')} style={{ marginTop: 3 }} />
                                 <span>
                                     <strong tw="text-neutral-100">Reset world{isDown ? ' (recommended)' : ''}</strong>
-                                    <Note style={{ marginTop: 2 }}>Wipe the world (a fresh one generates) but keep plugins &amp; config. Avoids format-mismatch corruption when downgrading.</Note>
+                                    <Note style={{ marginTop: 2 }}>Wipe the world (a fresh one generates) but keep {jars} &amp; config. Avoids format-mismatch corruption when downgrading.</Note>
                                 </span>
                             </RadioRow>
                             <RadioRow>
                                 <input type="radio" name="wipemode" checked={wipeMode === 'clean_slate'} onChange={() => setWipeMode('clean_slate')} style={{ marginTop: 3 }} />
                                 <span>
                                     <strong tw="text-neutral-100">Clean slate</strong>
-                                    <Note style={{ marginTop: 2 }}>Wipe everything (world, plugins, config) and reinstall fresh at {selected}. Only the EULA acceptance is kept.</Note>
+                                    <Note style={{ marginTop: 2 }}>Wipe everything (world, {jars}, config) and reinstall fresh at {selected}. Only the EULA acceptance is kept.</Note>
                                 </span>
                             </RadioRow>
 
@@ -499,9 +518,9 @@ export default () => {
                                 <ToggleRow>
                                     <input type="checkbox" checked={deletePlugins} onChange={(e) => setDeletePlugins(e.target.checked)} style={{ marginTop: 3 }} />
                                     <span>
-                                        <strong tw="text-neutral-100">Remove plugin jars (recommended)</strong>
+                                        <strong tw="text-neutral-100">Remove {modded ? 'mod' : 'plugin'} jars (recommended)</strong>
                                         <Note style={{ marginTop: 2 }}>
-                                            Plugins built for {currentVer} often stop {selected} from booting. Jars are removed;
+                                            {modded ? 'Mods' : 'Plugins'} built for {currentVer} often stop {selected} from booting. Jars are removed;
                                             their config folders are kept, so re-adding a compatible build keeps its settings.
                                             {!deletePlugins && ' Keeping them may prevent the server from starting.'}
                                         </Note>
@@ -594,7 +613,21 @@ export default () => {
                                     </Banner>
 
                                     <Note style={{ marginTop: 12, marginBottom: 2 }}>Minecraft version for the new loader:</Note>
-                                    <NameInput value={loaderVersion} onChange={(e) => setLoaderVersion(e.target.value)} placeholder="e.g. 1.21.1" />
+                                    {loaderVersions === null ? (
+                                        <Muted><FontAwesomeIcon icon={faSpinner} spin /> Loading versions…</Muted>
+                                    ) : loaderVersions.length > 0 ? (
+                                        <Select value={loaderVersion} disabled={busy} onChange={(e) => setLoaderVersion(e.target.value)}>
+                                            <option value="">Select a version…</option>
+                                            {loaderVersions.map((v) => (
+                                                <option key={v} value={v}>{v}{v === currentVer ? ' (current)' : ''}</option>
+                                            ))}
+                                        </Select>
+                                    ) : (
+                                        <NameInput value={loaderVersion} onChange={(e) => setLoaderVersion(e.target.value)} placeholder="e.g. 1.21.1" />
+                                    )}
+                                    {loaderVersions !== null && loaderVersions.length > 0 && loaderVersion !== '' && !loaderVersions.includes(loaderVersion) && (
+                                        <Note style={{ marginTop: 4 }}>{cap(loaderTarget.loader)} has no release for {loaderVersion}; pick one from the list.</Note>
+                                    )}
 
                                     <Note style={{ marginTop: 12 }}>
                                         {backupsOff ? 'No backup is taken before the wipe.' : `A full backup named “Pre-loader ${loaderTarget.loader}” is taken and confirmed complete before anything is wiped.`}
@@ -604,7 +637,7 @@ export default () => {
                                     <NameInput value={loaderConfirm} onChange={(e) => setLoaderConfirm(e.target.value)} placeholder={serverName} />
 
                                     <Actions>
-                                        <Can action={['startup.update', 'startup.docker-image', 'settings.reinstall', 'backup.create']}><Btn onClick={confirmLoaderSwitch} disabled={loaderConfirm.trim() !== serverName}>
+                                        <Can action={['startup.update', 'startup.docker-image', 'settings.reinstall', 'backup.create']}><Btn onClick={confirmLoaderSwitch} disabled={loaderConfirm.trim() !== serverName || (!!loaderVersions && loaderVersions.length > 0 && !loaderVersions.includes(loaderVersion))}>
                                             <FontAwesomeIcon icon={faSyncAlt} /> Wipe &amp; switch
                                         </Btn></Can>
                                         <Btn variant="ghost" onClick={clearLoaderSelection}>Cancel</Btn>
@@ -668,7 +701,7 @@ export default () => {
                             <Subtitle>
                                 {available?.supported
                                     ? `Published ${loaderLabel} versions, newest first. Select one to change to it.`
-                                    : 'Version browsing for this loader is coming in a later update.'}
+                                    : 'Version changes here are for Paper, Forge, NeoForge, Fabric and Quilt.'}
                             </Subtitle>
                         </div>
                     </Header>
@@ -692,8 +725,8 @@ export default () => {
                         <Muted>No versions returned upstream. Try again shortly.</Muted>
                     ) : (
                         <Note>
-                            Detected loader: <strong>{loaderLabel}</strong>. Live version listing is currently
-                            available for Paper; other loaders will follow. Your current version is still shown above.
+                            Detected loader: <strong>{loaderLabel}</strong>. Version changes here are for Paper, Forge, NeoForge,
+                            Fabric and Quilt. Use the loader switch below to pick a version for this loader.
                         </Note>
                     )}
                 </Panel>
