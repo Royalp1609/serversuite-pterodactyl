@@ -36,19 +36,21 @@ beforeEach(function () {
         'downloads' => ['server:default' => ['url' => 'https://fill.test/paper-100.jar', 'name' => 'paper-100.jar']]]]])]);
 });
 
-it('blocks the switch on a Fabric server and on an unknown loader', function () {
+it('blocks the switch on a loader it has no versions for, and on an unknown loader', function () {
+    $this->loader = 'purpur';
     $pf = app(ServerVersionService::class)->preflight(vslServer(), '1.21.4');
     expect($pf['can_proceed'])->toBeFalse()
-        ->and(implode(' ', $pf['blockers']))->toContain('this server runs Fabric');
+        ->and(implode(' ', $pf['blockers']))->toContain('this server runs Purpur');
 
     $this->loader = null;
     $pf = app(ServerVersionService::class)->preflight(vslServer(), '1.21.4');
     expect(implode(' ', $pf['blockers']))->toContain("Can't tell which loader");
 });
 
-it('writes nothing and reinstalls nothing when called directly on a Fabric server', function () {
+it('writes nothing and reinstalls nothing when called directly on a Purpur server', function () {
+    $this->loader = 'purpur';
     expect(fn () => app(VersionSwitchService::class)->apply(vslServer(), '1.21.4', null, false))
-        ->toThrow(RuntimeException::class, 'this server runs Fabric');
+        ->toThrow(RuntimeException::class, 'this server runs Purpur');
 
     expect(array_filter($this->ops->log, fn ($e) => in_array($e[0], ['set_vars', 'set_image', 'reinstall', 'power'], true)))->toBe([]);
 });

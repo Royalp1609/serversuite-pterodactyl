@@ -61,10 +61,52 @@ class ServerVersionService
     {
         $loader = $loader ? strtolower($loader) : null;
 
-        return match ($loader) {
-            'paper'  => ['supported' => true,  'loader' => 'paper', 'versions' => $this->paperVersions()],
-            default  => ['supported' => false, 'loader' => $loader, 'versions' => []],
-        };
+        if ($loader === 'paper') {
+            return ['supported' => true, 'loader' => 'paper', 'versions' => $this->paperVersions()];
+        }
+        if (in_array($loader, self::MODDED, true)) {
+            return ['supported' => true, 'loader' => $loader, 'versions' => app(McJarsService::class)->releases($loader)];
+        }
+
+        return ['supported' => false, 'loader' => $loader, 'versions' => []];
+    }
+
+    /**
+     * Mod loaders the Versions tab can change version on. Their eggs install
+     * from MC_VERSION plus a loader build variable; Server Suite pins the
+     * build itself, because the stock Forge and NeoForge eggs pick it by
+     * prefix (1.21.1 also matches 1.21.10/1.21.11) and NeoForge's can't
+     * read 26.x versions.
+     */
+    public const MODDED = ['forge', 'neoforge', 'fabric', 'quilt'];
+
+    /**
+     * The egg variable and value that pin a mod loader's build for a
+     * Minecraft version, or null when the egg picks it itself (Fabric's
+     * loader runs on every version, Quilt's egg always installs the newest)
+     * or none was found.
+     *
+     * @return array{var: string, value: string, version: string, experimental: bool}|null
+     */
+    public function loaderPin(?string $loader, string $mcVersion): ?array
+    {
+        $loader = strtolower((string) $loader);
+        $var = ['forge' => 'FORGE_VERSION', 'neoforge' => 'NEOFORGE_VERSION'][$loader] ?? null;
+        if ($var === null) {
+            return null;
+        }
+        $build = app(McJarsService::class)->newestLoaderBuild($loader, $mcVersion);
+        if ($build === null) {
+            return null;
+        }
+
+        return [
+            'var' => $var,
+            // The Forge egg wants the Maven coordinate, "<minecraft>-<forge>".
+            'value' => $loader === 'forge' ? "{$mcVersion}-{$build['version']}" : $build['version'],
+            'version' => $build['version'],
+            'experimental' => $build['experimental'],
+        ];
     }
 
     /**
@@ -298,11 +340,17 @@ class ServerVersionService
         $current = $this->current($server);
         $direction = $this->direction($current['game_version'] ?? null, $targetVersion);
 
-        $builds = $this->paperBuilds($targetVersion);
-        $versionValid = $builds !== [];
+        $loader = strtolower((string) ($current['loader'] ?? ''));
+        $modded = in_array($loader, self::MODDED, true);
+
+        // Paper: a Fill build. Mod loaders: a release MCJars lists, plus the
+        // loader build to pin (Forge, NeoForge).
+        $builds = $modded ? [] : $this->paperBuilds($targetVersion);
+        $versionValid = $modded ? in_array($targetVersion, $this->available($loader)['versions'], true) : $builds !== [];
+        $pin = $modded && $versionValid ? $this->loaderPin($loader, $targetVersion) : null;
 
         $build = null;
-        if ($versionValid) {
+        if ($versionValid && ! $modded) {
             $build = $targetBuild !== null
                 ? (collect($builds)->firstWhere('build', $targetBuild) ?? null)
                 : ($this->preferredBuild($builds) ?? $builds[0]);
@@ -326,17 +374,26 @@ class ServerVersionService
             $blockers[] = $reinstallBlocker;
         }
 
-        // The switch pins Paper's MINECRAFT_VERSION + BUILD_NUMBER, so only a
-        // Paper server can use it, as the Versions tab shows (#123). Other
-        // loaders change version with the loader switch.
-        $loader = strtolower((string) ($current['loader'] ?? ''));
-        if ($loader !== 'paper') {
+        // The switch pins Paper's MINECRAFT_VERSION + BUILD_NUMBER, or a mod
+        // loader's MC_VERSION + build, so other loaders are refused (#123).
+        if ($loader !== 'paper' && ! $modded) {
             $blockers[] = $loader === ''
                 ? "Can't tell which loader this server runs, so its version can't be changed here."
-                : 'Version changes here are for Paper servers; this server runs ' . ucfirst($loader) . '. Use the loader switch to pick a version.';
+                : 'Version changes here are for Paper, Forge, NeoForge, Fabric and Quilt servers; this server runs ' . ucfirst($loader) . '. Use the loader switch to pick a version.';
         }
         if (! $versionValid) {
-            $blockers[] = "Paper has no published builds for {$targetVersion}.";
+            $blockers[] = $modded
+                ? ucfirst($loader) . " has no release for Minecraft {$targetVersion}."
+                : "Paper has no published builds for {$targetVersion}.";
+        }
+        if ($versionValid && in_array($loader, ['forge', 'neoforge'], true) && $pin === null) {
+            $blockers[] = 'Could not find a ' . ucfirst($loader) . " build for Minecraft {$targetVersion}. Try again shortly.";
+        }
+        if ($pin !== null && $pin['experimental']) {
+            $warnings[] = ucfirst($loader) . " {$pin['version']} is a beta build: there is no stable one for Minecraft {$targetVersion} yet.";
+        }
+        if ($modded && ($current['game_version'] ?? null) !== $targetVersion) {
+            $warnings[] = 'Mods are built for one Minecraft version. Mods for ' . ($current['game_version'] ?? 'the current version') . ' usually stop the server from starting on ' . $targetVersion . ': remove them or install versions for ' . $targetVersion . '.';
         }
         if ($versionValid && $targetBuild !== null && $build === null) {
             $blockers[] = "Build {$targetBuild} doesn't exist for {$targetVersion}.";
@@ -354,7 +411,10 @@ class ServerVersionService
         return [
             'current'       => $current,
             'target'        => ['version' => $targetVersion, 'build' => $build['build'] ?? null,
-                                'channel' => $build['channel'] ?? null, 'download_url' => $build['download_url'] ?? null],
+                                'channel' => $build['channel'] ?? null, 'download_url' => $build['download_url'] ?? null,
+                                'loader' => $loader !== '' ? $loader : null,
+                                // Mod loaders: the loader build that gets pinned (null = the egg picks).
+                                'loader_version' => $pin['version'] ?? null],
             'direction'     => $direction,
             'version_valid' => $versionValid,
             'image'         => $image,

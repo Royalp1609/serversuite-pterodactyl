@@ -73,7 +73,7 @@ final class PanelPermissions
         'restoreSync' => ['mods.read'], 'restoreSyncDismiss' => ['mods.update'],   // dismissing writes state (#141 item 35)
         // Versions
         'autoUpgradeState' => ['startup.read'], 'autoUpgradeSave' => self::VERSION_CHANGE,
-        'serverVersions' => ['startup.read'], 'serverStatus' => ['startup.read'], 'loaders' => ['startup.read'],
+        'serverVersions' => ['startup.read'], 'serverStatus' => ['startup.read'], 'loaders' => ['startup.read'], 'loaderVersions' => ['startup.read'],
         'serverVersionPreflight' => ['startup.read'],
         'serverVersionApply' => self::VERSION_CHANGE, 'loaderSwitch' => self::VERSION_CHANGE,
         'serverVersionNuclear' => ['settings.reinstall', 'file.delete'],

@@ -30,7 +30,7 @@ class GameGuard
         'configs' => ['mods', 'configs'], 'configsOpen' => ['mods', 'configs'], 'configsRender' => ['mods', 'configs'], 'configsSave' => ['mods', 'configs'],
         'crossplay' => 'crossplay', 'crossplayInstall' => 'crossplay', 'crossplayConfigure' => 'crossplay',
         'autoUpgradeState' => 'versions', 'autoUpgradeSave' => 'versions',
-        'serverVersions' => 'versions', 'loaders' => 'versions', 'serverVersionPreflight' => 'versions',
+        'serverVersions' => 'versions', 'loaders' => 'versions', 'loaderVersions' => 'versions', 'serverVersionPreflight' => 'versions',
         'serverVersionApply' => 'versions', 'loaderSwitch' => 'versions', 'serverVersionNuclear' => 'reset',
         'network' => 'network', 'networkApply' => 'network',
         'properties' => 'properties', 'propertiesSave' => 'properties', 'propertiesResetWorld' => 'properties',

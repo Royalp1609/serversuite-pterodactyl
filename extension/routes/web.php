@@ -220,6 +220,8 @@ Route::post('/{server}/version-nuclear', [ModManagerController::class, 'serverVe
     ->name('extension.serversuite.version-nuclear');
 Route::get('/{server}/loaders', [ModManagerController::class, 'loaders'])
     ->name('extension.serversuite.loaders');
+Route::get('/{server}/loader-versions', [ModManagerController::class, 'loaderVersions'])
+    ->name('extension.serversuite.loader-versions');
 Route::post('/{server}/loader-switch', [ModManagerController::class, 'loaderSwitch'])
     ->name('extension.serversuite.loader-switch');
 
