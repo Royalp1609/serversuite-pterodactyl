@@ -44,7 +44,10 @@ beforeEach(function () {
     $this->ops = new FakePanelServerOps();
     $this->ops->states['srv-mvs'] = ['power' => 'offline', 'install' => null];
     app()->instance(PanelServerOps::class, $this->ops);
-    app()->instance(DaemonFileClient::class, Mockery::mock(DaemonFileClient::class)->shouldIgnoreMissing());
+    $this->modsDir = [['name' => 'jei.jar', 'is_file' => true]];
+    $daemon = Mockery::mock(DaemonFileClient::class)->shouldIgnoreMissing();
+    $daemon->shouldReceive('listDirectory')->with('srv-mvs', 'mods')->andReturnUsing(fn () => $this->modsDir);
+    app()->instance(DaemonFileClient::class, $daemon);
 
     $this->loader = 'forge';
     $this->mc = '1.20.1';
@@ -117,4 +120,14 @@ it('leaves the loader to the egg on Fabric', function () {
     app(VersionSwitchService::class)->apply(mvsServer(), '1.21.8', null, false, false);
 
     expect(collect($this->ops->log)->firstWhere(0, 'set_vars')[2])->toBe(['MC_VERSION' => '1.21.8', 'MINECRAFT_VERSION' => '1.21.8']);
+});
+
+it('only warns about mods when the server has mod jars', function () {
+    $this->modsDir = [['name' => 'config', 'is_file' => false], ['name' => 'notes.txt', 'is_file' => true]];
+    $pf = app(ServerVersionService::class)->preflight(mvsServer(), '1.21.1');
+    expect(implode(' ', $pf['warnings']))->not->toContain('Mods are built for one');
+
+    $this->modsDir = [['name' => 'jei.jar', 'is_file' => true]];
+    $pf = app(ServerVersionService::class)->preflight(mvsServer(), '1.21.1');
+    expect(implode(' ', $pf['warnings']))->toContain('Mods are built for one');
 });

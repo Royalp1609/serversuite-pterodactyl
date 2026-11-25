@@ -392,7 +392,7 @@ class ServerVersionService
         if ($pin !== null && $pin['experimental']) {
             $warnings[] = ucfirst($loader) . " {$pin['version']} is a beta build: there is no stable one for Minecraft {$targetVersion} yet.";
         }
-        if ($modded && ($current['game_version'] ?? null) !== $targetVersion) {
+        if ($modded && ($current['game_version'] ?? null) !== $targetVersion && $this->modJarCount($server) !== 0) {
             $warnings[] = 'Mods are built for one Minecraft version. Mods for ' . ($current['game_version'] ?? 'the current version') . ' usually stop the server from starting on ' . $targetVersion . ': remove them or install versions for ' . $targetVersion . '.';
         }
         if ($versionValid && $targetBuild !== null && $build === null) {
@@ -430,6 +430,21 @@ class ServerVersionService
     /** Normalise a version to a comparable [major, minor, patch] tuple. Only
      *  the leading numeric part is used, so suffixes (-pre7, -rc-2) can't leak
      *  their digits into the version (which was mis-sorting 1.13-pre7 as 1.137). */
+    /**
+     * Jars in mods/, or null when the folder can't be read (then the
+     * preflight warns anyway, to be safe).
+     */
+    private function modJarCount(object $server): ?int
+    {
+        try {
+            $entries = app(\ServerSuite\Contracts\DaemonFileClient::class)->listDirectory((string) $server->uuid, 'mods');
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return count(array_filter((array) $entries, fn ($e) => ($e['is_file'] ?? false) && preg_match('/\.jar$/i', (string) ($e['name'] ?? ''))));
+    }
+
     private function verTuple(string $v): array
     {
         preg_match('/^\d+(?:\.\d+)*/', trim($v), $m);
