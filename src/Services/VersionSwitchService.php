@@ -75,6 +75,7 @@ class VersionSwitchService
         if ($wipe) {
             $state = $this->ops->runtimeState($uuid);
             if (($state['power'] ?? null) !== 'offline') {
+                app(AutoStartService::class)->stoppedForSwitch($uuid);
                 try {
                     $this->ops->power($uuid, 'stop');
                 } catch (\Throwable $e) {
@@ -294,6 +295,7 @@ class VersionSwitchService
         // Never touch files on a running server — stop first, let the caller poll.
         $state = $this->ops->runtimeState($uuid);
         if (($state['power'] ?? null) !== 'offline') {
+            app(AutoStartService::class)->stoppedForSwitch($uuid);
             try {
                 $this->ops->power($uuid, 'stop');
             } catch (\Throwable $e) {
