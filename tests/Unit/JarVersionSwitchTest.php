@@ -114,3 +114,24 @@ it('reads the current version from the Vanilla, Spigot and Sponge egg variables'
     ['DL_VERSION', '1.21.8', '1.21.8'],
     ['SPONGE_VERSION', '1.21.1-12.0.4', '1.21.1'],
 ]);
+
+it('removes Sponge plugins from mods/, where SpongeVanilla keeps them', function () {
+    $this->loader = 'sponge';
+    $files = Mockery::mock(FileDeliveryService::class);
+    $files->shouldReceive('deletePluginJars')->once()->with('srv-jvs', 'mods')->andReturn([]);
+    app()->instance(FileDeliveryService::class, $files);
+
+    app(VersionSwitchService::class)->apply(jvsServer(), '1.21.4', null, false, true);
+});
+
+it('detects the stock Vanilla and Sponge eggs, and Vanilla Bedrock stays Bedrock', function (string $egg, string $want) {
+    $real = new ReflectionClass(\ServerSuite\Services\LoaderDetectionService::class);
+    $svc = $real->newInstanceWithoutConstructor();
+    $m = $real->getMethod('matchLoader');
+    expect($m->invoke($svc, $egg))->toBe($want);
+})->with([
+    ['Vanilla Minecraft', 'vanilla'],
+    ['Sponge (SpongeVanilla)', 'sponge'],
+    ['Vanilla Bedrock', 'bedrock'],
+    ['Paper', 'paper'],
+]);

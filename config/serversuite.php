@@ -291,6 +291,9 @@ return [
             'waterfall'  => ['waterfall'],
             'bungeecord' => ['bungeecord', 'bungee'],
             'bedrock'    => ['bedrock', 'geyser', 'nukkit', 'pocketmine'],
+            'sponge'     => ['sponge', 'spongevanilla'],
+            // Last: "Vanilla Bedrock" is Bedrock, "SpongeVanilla" is Sponge.
+            'vanilla'    => ['vanilla'],
         ],
 
         // Minimum confidence (0–100) required to auto-store a detected loader

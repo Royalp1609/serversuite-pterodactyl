@@ -138,7 +138,7 @@ class VersionSwitchService
         if ($wipe) {
             $wiped = $this->files->wipeForNuclear($uuid, $wipeMode === 'clean_slate' ? 'clean_slate' : 'keep_plugins');
             if ($wipeMode === 'reset_world' && $deletePlugins) {
-                $pluginsRemoved = $this->files->deletePluginJars($uuid, $modded ? 'mods' : 'plugins');
+                $pluginsRemoved = $this->files->deletePluginJars($uuid, $modded || $loader === 'sponge' ? 'mods' : 'plugins');
             }
             // Clean slate removes every mod file, so empty the manifest to match.
             if ($wipeMode === 'clean_slate') {
@@ -151,7 +151,7 @@ class VersionSwitchService
         } elseif ($deletePlugins) {
             // Plugins built for the old version very commonly halt boot on the
             // new one. Configs are kept. "Keep anyway" is the caller's choice.
-            $pluginsRemoved = $this->files->deletePluginJars($uuid, $modded ? 'mods' : 'plugins');
+            $pluginsRemoved = $this->files->deletePluginJars($uuid, $modded || $loader === 'sponge' ? 'mods' : 'plugins');
         }
 
         // 3. Trigger the reinstall (re-runs the egg install script, which reads

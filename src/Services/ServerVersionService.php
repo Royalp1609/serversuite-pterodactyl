@@ -83,7 +83,7 @@ class ServerVersionService
     /**
      * Single-jar loaders other than Paper. Their versions come from MCJars
      * and the change writes the egg's own version variable (see jarVariables).
-     * Plugins live in plugins/ (Sponge's too) and usually survive a version
+     * Plugins (in plugins/, Sponge's in mods/) usually survive a version
      * change, like Paper's.
      */
     public const JAR = ['purpur', 'folia', 'spigot', 'sponge', 'vanilla'];
