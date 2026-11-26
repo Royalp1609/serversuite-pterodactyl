@@ -53,6 +53,8 @@ Route::get('/{server}/errors', [ModManagerController::class, 'errors'])
     ->name('extension.serversuite.errors');
 Route::get('/{server}/errors/crash', [ModManagerController::class, 'errorsCrash'])
     ->name('extension.serversuite.errors-crash');
+Route::post('/{server}/errors/acknowledge', [ModManagerController::class, 'errorsAcknowledge'])
+    ->name('extension.serversuite.errors-acknowledge');
 
 // Crash help (#25)
 Route::get('/{server}/crash', [ModManagerController::class, 'crash'])

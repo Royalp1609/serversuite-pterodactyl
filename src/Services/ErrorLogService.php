@@ -4,6 +4,7 @@ namespace ServerSuite\Services;
 
 use Illuminate\Support\Facades\Cache;
 use ServerSuite\Contracts\DaemonFileClient;
+use ServerSuite\Models\ModManagerSetting;
 use ServerSuite\Models\ServerMod;
 use ServerSuite\Support\CrashParser;
 use ServerSuite\Support\LogErrors;
@@ -160,6 +161,65 @@ class ErrorLogService
             ->take(10)
             ->map(fn ($e) => ['name' => (string) $e['name'], 'at' => $e['modified_at'] ?? null])
             ->values()->all();
+    }
+
+    /**
+     * Acknowledge what the Errors tab shows now: the log's error and warning
+     * groups (by key, the time each was first seen and its count) and the
+     * crash reports up to now. Each is "acknowledged" until it happens again.
+     *
+     * @param list<array{path: string, format: string, newest?: string}>|null $sources
+     */
+    public function acknowledge(string $serverUuid, ?array $sources = null): void
+    {
+        $this->forget($serverUuid);
+        $report = $this->report($serverUuid, true, $sources);
+        $groups = [];
+        foreach ($report['groups'] as $g) {
+            $groups[(string) $g['key']] = ['first' => $g['first'] ?? null, 'count' => (int) $g['count']];
+        }
+        ModManagerSetting::forServer($serverUuid)->forceFill(['errors_ack' => [
+            'at' => now()->toIso8601String(),
+            'groups' => array_slice($groups, 0, 500, true),
+        ]])->save();
+    }
+
+    /** Forget the acknowledge: everything shows again. */
+    public function unacknowledge(string $serverUuid): void
+    {
+        ModManagerSetting::forServer($serverUuid)->forceFill(['errors_ack' => null])->save();
+    }
+
+    /**
+     * Mark a report's groups and crashes as acknowledged or not. A group is
+     * acknowledged while it is the same one (same key and first-seen time, so
+     * a restarted server's new log counts as new) and hasn't happened again
+     * since. A crash is acknowledged when it was written before the acknowledge.
+     *
+     * @param  array<string, mixed> $report from report()
+     * @return array<string, mixed> the report plus acknowledged flags, an `ack` block and `new_count`
+     */
+    public function withAck(string $serverUuid, array $report): array
+    {
+        $ack = ModManagerSetting::forServer($serverUuid)->errors_ack;
+        $ack = is_array($ack) && ! empty($ack['at']) ? $ack : null;
+        $at = $ack ? strtotime((string) $ack['at']) : null;
+        $new = 0;
+
+        foreach ($report['groups'] ?? [] as $i => $g) {
+            $seen = $ack['groups'][(string) $g['key']] ?? null;
+            $done = $seen !== null && ($seen['first'] ?? null) === ($g['first'] ?? null) && (int) $g['count'] <= (int) ($seen['count'] ?? 0);
+            $report['groups'][$i]['acknowledged'] = $done;
+            $new += $done ? 0 : 1;
+        }
+        foreach ($report['crashes'] ?? [] as $i => $c) {
+            $t = isset($c['at']) ? strtotime((string) $c['at']) : false;
+            $done = $at !== null && $t !== false && $t <= $at;
+            $report['crashes'][$i]['acknowledged'] = $done;
+            $new += $done ? 0 : 1;
+        }
+
+        return $report + ['ack' => $ack ? ['at' => $ack['at']] : null, 'new_count' => $new];
     }
 
     /** @return array<string, string> */

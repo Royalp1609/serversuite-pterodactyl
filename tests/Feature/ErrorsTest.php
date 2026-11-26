@@ -126,3 +126,42 @@ it('reads the log of the framework the Rust server runs, and Valheim\'s BepInEx 
 
     expect($this->svc->report('srv-carbon', true, $games->logSources($carbon))['files'])->toBe(['carbon/logs/Carbon.Core.log']);
 });
+
+it('acknowledges what is listed now and shows only what happens after', function () {
+    $err = fn (string $t, string $msg) => "[{$t} ERROR]: {$msg}\njava.lang.IllegalStateException: x\n";
+    $this->files->put('/logs/latest.log', $err('12:00:05', 'Boom A') . $err('12:00:06', 'Boom B'));
+    $this->files->put('/crash-reports/crash-old.txt', "---- Minecraft Crash Report ----\n");
+    $this->files->mtimes['/crash-reports/crash-old.txt'] = now()->subHour()->toIso8601String();
+
+    $r = $this->svc->withAck('mc', $this->svc->report('mc', false));
+    expect($r['new_count'])->toBe(3)->and($r['ack'])->toBeNull();
+
+    $this->svc->acknowledge('mc');
+    $r = $this->svc->withAck('mc', $this->svc->report('mc', false));
+    expect($r['new_count'])->toBe(0)
+        ->and(collect($r['groups'])->every(fn ($g) => $g['acknowledged']))->toBeTrue()
+        ->and($r['crashes'][0]['acknowledged'])->toBeTrue();
+
+    // B happens again, C is new, and a new crash report is written.
+    $this->files->put('/logs/latest.log', $err('12:00:05', 'Boom A') . $err('12:00:06', 'Boom B') . $err('12:05:00', 'Boom B') . $err('12:06:00', 'Boom C'));
+    $this->files->put('/crash-reports/crash-new.txt', "---- Minecraft Crash Report ----\n");
+    $this->files->mtimes['/crash-reports/crash-new.txt'] = now()->addMinute()->toIso8601String();
+    $this->svc->forget('mc');
+    $r = $this->svc->withAck('mc', $this->svc->report('mc', false));
+    $acked = collect($r['groups'])->mapWithKeys(fn ($g) => [$g['message'] => $g['acknowledged']])->all();
+    expect($acked)->toBe(['Boom C' => false, 'Boom B' => false, 'Boom A' => true] + $acked)
+        ->and(collect($r['crashes'])->mapWithKeys(fn ($c) => [$c['name'] => $c['acknowledged']])->all())->toBe(['crash-new.txt' => false, 'crash-old.txt' => true])
+        ->and($r['new_count'])->toBe(3);
+
+    $this->svc->unacknowledge('mc');
+    expect($this->svc->withAck('mc', $this->svc->report('mc', false))['ack'])->toBeNull();
+});
+
+it('treats the same error in a new log after a restart as new', function () {
+    $this->files->put('/logs/latest.log', "[12:00:05 ERROR]: Boom A\n");
+    $this->svc->acknowledge('mc');
+
+    $this->files->put('/logs/latest.log', "[18:30:00 ERROR]: Boom A\n");
+    $this->svc->forget('mc');
+    expect($this->svc->withAck('mc', $this->svc->report('mc', false))['groups'][0]['acknowledged'])->toBeFalse();
+});

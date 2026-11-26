@@ -84,7 +84,7 @@ final class PanelPermissions
         // Crash help (#25)
         'crash' => ['mods.read'], 'crashDismiss' => ['mods.update'],
         // Errors tab (#87): reading the log is reading server files.
-        'errors' => ['file.read-content'], 'errorsCrash' => ['file.read-content'],
+        'errors' => ['file.read-content'], 'errorsCrash' => ['file.read-content'], 'errorsAcknowledge' => ['file.read-content'],
         'crashDisable' => ['mods.remove'], 'crashEnable' => ['mods.install'],
         // Bedrock add-ons (#93): the Mods permissions.
         'addons' => ['mods.read'], 'addonsFolder' => ['mods.install'], 'addonsInstall' => ['mods.install'], 'addonsRemove' => ['mods.remove'],

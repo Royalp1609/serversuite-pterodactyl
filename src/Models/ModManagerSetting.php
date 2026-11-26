@@ -49,6 +49,7 @@ class ModManagerSetting extends Model
         'auto_upgrade_status',
         'auto_upgrade_checked_at',
         'auto_upgrade_paused_at',
+        'errors_ack',
     ];
 
     /** The own-domain Cloudflare token is write-only: never serialised. */
@@ -75,6 +76,7 @@ class ModManagerSetting extends Model
         'auto_upgrade_checked_at' => 'datetime',
         'auto_upgrade_paused_at'  => 'datetime',
         'own_dns_token'           => 'encrypted',
+        'errors_ack'              => 'array',
     ];
 
     // -------------------------------------------------------------------------
