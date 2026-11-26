@@ -298,6 +298,7 @@ class ServerVersionService
      * the band is used and the note says those mods won't load.
      *
      * @param  array<string,string> $allowed  label => image (egg docker_images)
+     * @param  array{0:int,1:int}   $band     [min, max] Java for the version
      * @return array{resolved:?string,current:?string,current_java:?int,required:array{0:int,1:int},change:bool,allowed:bool,note:string,mods_need:?int}
      */
     public function resolveImage(array $allowed, ?string $currentImage, array $band, ?int $modsNeed = null): array
@@ -318,7 +319,7 @@ class ServerVersionService
 
         if (! $candidates) {
             return ['resolved' => null, 'current' => $currentImage, 'current_java' => $currentJava,
-                    'required' => $band, 'change' => true, 'allowed' => false,
+                    'required' => $band, 'change' => true, 'allowed' => false, 'mods_need' => $modsNeed,
                     'note' => "This version needs Java {$min}" . ($max < 99 ? "–{$max}" : "+") . ", which isn't in the egg's allowed image list. Add a matching yolks image to the egg, or pick another version."];
         }
 
