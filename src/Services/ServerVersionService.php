@@ -291,10 +291,17 @@ class ServerVersionService
      * kept. The current image stays only when it is already that Java. Flags
      * when nothing allowed fits (a hard blocker: the egg needs that image).
      *
+     * $modsNeed raises the floor: installed plugins built for a newer Java
+     * (VeinMiner Enchantment needs 25) stop loading if the switch drops to
+     * Mojang's Java, so the lowest allowed Java at or above what they need is
+     * picked instead. When none in the band is high enough, the highest in
+     * the band is used and the note says those mods won't load.
+     *
      * @param  array<string,string> $allowed  label => image (egg docker_images)
-     * @return array{resolved:?string,current:?string,current_java:?int,required:array{0:int,1:int},change:bool,allowed:bool,note:string}
+     * @param  array{0:int,1:int}   $band     [min, max] Java for the version
+     * @return array{resolved:?string,current:?string,current_java:?int,required:array{0:int,1:int},change:bool,allowed:bool,note:string,mods_need:?int}
      */
-    public function resolveImage(array $allowed, ?string $currentImage, array $band): array
+    public function resolveImage(array $allowed, ?string $currentImage, array $band, ?int $modsNeed = null): array
     {
         [$min, $max] = $band;
         $javaOf = static fn (?string $img): ?int => $img && preg_match(ServerVersionService::JAVA_PATTERN, $img, $m) ? (int) $m[1] : null;
@@ -312,21 +319,34 @@ class ServerVersionService
 
         if (! $candidates) {
             return ['resolved' => null, 'current' => $currentImage, 'current_java' => $currentJava,
-                    'required' => $band, 'change' => true, 'allowed' => false,
+                    'required' => $band, 'change' => true, 'allowed' => false, 'mods_need' => $modsNeed,
                     'note' => "This version needs Java {$min}" . ($max < 99 ? "–{$max}" : "+") . ", which isn't in the egg's allowed image list. Add a matching yolks image to the egg, or pick another version."];
         }
 
         ksort($candidates);
         $java = array_key_first($candidates);
+        $short = null;   // the installed mods need more Java than this version's images offer
+        if ($modsNeed !== null && $modsNeed > $java) {
+            $fits = array_filter(array_keys($candidates), fn ($j) => $j >= $modsNeed);
+            if ($fits !== []) {
+                $java = min($fits);
+            } else {
+                $java = max(array_keys($candidates));
+                $short = $modsNeed;
+            }
+        }
+        $why = $modsNeed !== null && $modsNeed > array_key_first($candidates) && $short === null ? " (installed plugins need Java {$modsNeed})" : '';
+        $warn = $short !== null ? " Some installed plugins need Java {$short}, which this version's images don't offer: they won't load until they're updated or removed." : '';
+
         if ($currentJava === $java) {
             return ['resolved' => $currentImage, 'current' => $currentImage, 'current_java' => $currentJava,
-                    'required' => $band, 'change' => false, 'allowed' => true,
-                    'note' => "Current image (Java {$currentJava}) is the one for this version — no image change."];
+                    'required' => $band, 'change' => false, 'allowed' => true, 'mods_need' => $modsNeed,
+                    'note' => "Current image (Java {$currentJava}) is the one for this version{$why} — no image change.{$warn}"];
         }
 
         return ['resolved' => $candidates[$java], 'current' => $currentImage, 'current_java' => $currentJava,
-                'required' => $band, 'change' => true, 'allowed' => true,
-                'note' => "Switches the Docker image to Java {$java} for this version."];
+                'required' => $band, 'change' => true, 'allowed' => true, 'mods_need' => $modsNeed,
+                'note' => "Switches the Docker image to Java {$java} for this version{$why}.{$warn}"];
     }
 
     /**
@@ -365,7 +385,8 @@ class ServerVersionService
             // egg not loadable — image check degrades to "unknown" rather than failing
         }
 
-        $image = $this->resolveImage($allowed, $server->image ?? null, $this->requiredJavaBand($targetVersion));
+        $needs = app(JavaCompatService::class)->installedNeeds($server);
+        $image = $this->resolveImage($allowed, $server->image ?? null, $this->requiredJavaBand($targetVersion), $needs[0]['java'] ?? null);
 
         $warnings = [];
         $blockers = [];
@@ -404,7 +425,7 @@ class ServerVersionService
         if ($direction === 'downgrade') {
             $warnings[] = 'This is a DOWNGRADE. Newer Minecraft worlds often cannot be opened by older versions — your world may fail to load or corrupt. A backup is mandatory and you may need to restore from it.';
         }
-        if ($image['change'] && $image['allowed']) {
+        if ($image['allowed'] && ($image['change'] || str_contains($image['note'], "won't load"))) {
             $warnings[] = $image['note'];
         }
 
@@ -421,8 +442,8 @@ class ServerVersionService
             'warnings'      => $warnings,
             'blockers'      => $blockers,
             'can_proceed'   => $blockers === [],
-            // Mod/plugin compatibility is folded into the switch execution build.
-            'mods'          => ['checked' => false],
+            // The Java installed plugins need (read from their jars), which raised the image's Java.
+            'mods'          => ['checked' => true, 'java' => array_slice($needs, 0, 10)],
         ];
     }
 
