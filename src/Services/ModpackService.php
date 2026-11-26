@@ -624,6 +624,7 @@ class ModpackService
             $loaders = array_values(array_map('strval', (array) ($k['loaders'] ?? [])));
             if ($loader !== null && $loaders !== [] && ! \ServerSuite\Support\LoaderCompat::runs($loader, $loaders)) {
                 $wrongLoader[] = ['name' => $name, 'path' => (string) $f['path'], 'loaders' => $loaders];
+                continue;   // its dependencies are the other loader's (Fabric API for a Fabric jar)
             }
             foreach ((array) ($k['dependencies'] ?? []) as $dep) {
                 $needs[(string) $dep][] = $name;
