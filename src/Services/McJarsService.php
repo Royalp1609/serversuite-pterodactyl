@@ -102,6 +102,111 @@ class McJarsService
     }
 
     /**
+     * Minecraft release versions a loader has builds for, newest first
+     * (snapshots and pre-releases left out). Empty when MCJars is off or
+     * unreachable; an empty answer is never cached, so the next load retries.
+     *
+     * @return list<string>
+     */
+    public function releases(?string $loaderKeyword): array
+    {
+        $type = $this->typeFor($loaderKeyword);
+        if (! config('serversuite.versions.mcjars', true) || $type === null) {
+            return [];
+        }
+
+        $key = "serversuite.mcjars.releases.{$type}";
+        $cached = Cache::get($key);
+        if (is_array($cached) && $cached !== []) {
+            return $cached;
+        }
+
+        try {
+            $res = $this->http()->get(self::API . "/builds/{$type}");
+            if (! $res->successful()) {
+                Log::warning('[Server Suite] MCJars version list failed', ['type' => $type, 'status' => $res->status()]);
+
+                return [];
+            }
+            $out = [];
+            foreach ((array) $res->json('builds', []) as $version => $info) {
+                $version = (string) $version;
+                if (strtoupper((string) (((array) $info)['type'] ?? '')) === 'RELEASE' && preg_match('/^\d+(?:\.\d+)+$/', $version)) {
+                    $out[] = $version;
+                }
+            }
+            usort($out, fn ($a, $b) => self::tuple($b) <=> self::tuple($a));
+            if ($out !== []) {
+                Cache::put($key, $out, 3600);
+            }
+
+            return $out;
+        } catch (\Throwable $e) {
+            Log::warning('[Server Suite] MCJars error', ['error' => $e->getMessage()]);
+
+            return [];
+        }
+    }
+
+    /**
+     * The loader build to install for a Minecraft version: the newest stable
+     * one, else the newest (NeoForge's first builds for a new Minecraft are
+     * betas). Null when MCJars has none.
+     *
+     * @return array{version: string, experimental: bool}|null
+     */
+    public function newestLoaderBuild(?string $loaderKeyword, string $mcVersion): ?array
+    {
+        $type = $this->typeFor($loaderKeyword);
+        if (! config('serversuite.versions.mcjars', true) || $type === null || ! preg_match('/^[A-Za-z0-9._-]+$/', $mcVersion)) {
+            return null;
+        }
+
+        $key = "serversuite.mcjars.loader.{$type}.{$mcVersion}";
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        try {
+            $res = $this->http()->get(self::API . "/builds/{$type}/{$mcVersion}");
+            if (! $res->successful()) {
+                return null;
+            }
+            $first = null;
+            $stable = null;
+            foreach ((array) $res->json('builds', []) as $b) {
+                $b = (array) $b;
+                $v = (string) ($b['projectVersionId'] ?? $b['name'] ?? '');
+                if ($v === '' || ! preg_match('/^[A-Za-z0-9._+-]+$/', $v)) {
+                    continue;
+                }
+                $first ??= ['version' => $v, 'experimental' => (bool) ($b['experimental'] ?? false)];
+                if (! ($b['experimental'] ?? false)) {
+                    $stable = ['version' => $v, 'experimental' => false];
+                    break;
+                }
+            }
+            $pick = $stable ?? $first;
+            if ($pick !== null) {
+                Cache::put($key, $pick, 1800);
+            }
+
+            return $pick;
+        } catch (\Throwable $e) {
+            Log::warning('[Server Suite] MCJars error', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /** @return list<int> */
+    private static function tuple(string $v): array
+    {
+        return array_map('intval', array_pad(explode('.', $v), 4, '0'));
+    }
+
+    /**
      * The direct jar to pin into the egg's DL_PATH for a switch (#22), or
      * null: unknown loader or version, an MCJars miss, or an installer-based
      * loader (Forge, NeoForge, Quilt), which doesn't run from one jar.

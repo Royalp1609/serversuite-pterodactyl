@@ -48,3 +48,23 @@ it('clears the old loader when the new egg is not recognised', function () {
     $s = ModManagerSetting::forServer('srv-lsl')->fresh();
     expect([$s->loader, $s->install_path])->toBe([null, null]);
 });
+
+it('starts the server again after the reinstall when the switch had to stop it', function () {
+    $ops = new ServerSuite\Tests\Fakes\FakePanelServerOps();
+    $ops->states['srv-lsl'] = ['power' => 'running', 'install' => null];
+    app()->instance(PanelServerOps::class, $ops);
+    app()->forgetInstance(LoaderSwitchService::class);
+    app()->forgetInstance(ServerSuite\Services\AutoStartService::class);
+    $egg = lslEgg('Fabric');
+
+    expect(app(LoaderSwitchService::class)->switchLoader($this->server, $egg->id, '1.21.4', false))->toBe(['status' => 'stopping']);
+
+    // The tab calls again once it is offline; the reinstall then begins.
+    $ops->states['srv-lsl'] = ['power' => 'offline', 'install' => null];
+    app(LoaderSwitchService::class)->switchLoader($this->server, $egg->id, '1.21.4', false);
+    $auto = app(ServerSuite\Services\AutoStartService::class);
+    $auto->remember('srv-lsl');
+
+    expect($auto->resume('srv-lsl', 'reinstall'))->toBeTrue()
+        ->and(in_array(['power', 'srv-lsl', 'start'], $ops->log, true))->toBeTrue();
+});

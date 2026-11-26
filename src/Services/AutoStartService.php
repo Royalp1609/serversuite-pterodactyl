@@ -18,6 +18,12 @@ use ServerSuite\Support\SuiteActivity;
  * server), so the power state read then is the one from before. resume()
  * runs when it finishes (SyncAfterInstallJob, SyncAfterRestoreJob).
  *
+ * A loader switch, a version change that wipes files and a server reset
+ * stop the server themselves before the reinstall (files can only be wiped
+ * while it's stopped), so by the time the status changes it reads offline.
+ * They call stoppedForSwitch() first, and remember() counts that as "it was
+ * on".
+ *
  * A modpack install is left alone: its own loader switch reinstalls the
  * server, which has to stay stopped until the pack is done; the installer
  * starts it at the end instead (ModpackInstaller).
@@ -30,22 +36,40 @@ class AutoStartService
     /** A reinstall or restore that never finishes doesn't start the server days later. */
     private const TTL_HOURS = 6;
 
+    /** How long a switch's own stop counts: it takes a backup and waits for the stop first. */
+    private const SWITCH_TTL_MINUTES = 30;
+
     public function __construct(protected PanelServerOps $ops) {}
 
     /** The status just became installing or restoring_backup. Never throws. */
     public function remember(string $uuid): void
     {
         Cache::forget($this->key($uuid));
+        $stoppedForSwitch = Cache::pull($this->switchKey($uuid)) !== null;
         try {
             if (Modpack::forServer($uuid)?->isRunning()) {
                 return;
             }
-            $power = $this->ops->runtimeState($uuid)['power'] ?? null;
-            if (in_array($power, self::ON, true)) {
-                Cache::put($this->key($uuid), now()->getTimestamp(), now()->addHours(self::TTL_HOURS));
-            }
+            $wasOn = $stoppedForSwitch || in_array($this->ops->runtimeState($uuid)['power'] ?? null, self::ON, true);
         } catch (\Throwable) {
-            // Wings unreachable: leave it stopped, as before
+            $wasOn = $stoppedForSwitch;   // Wings unreachable: only what the switch saw
+        }
+        if ($wasOn) {
+            Cache::put($this->key($uuid), now()->getTimestamp(), now()->addHours(self::TTL_HOURS));
+        }
+    }
+
+    /**
+     * A switch is about to stop this server to wipe files before its
+     * reinstall: the server is on now, so start it again afterwards.
+     * Never throws.
+     */
+    public function stoppedForSwitch(string $uuid): void
+    {
+        try {
+            Cache::put($this->switchKey($uuid), now()->getTimestamp(), now()->addMinutes(self::SWITCH_TTL_MINUTES));
+        } catch (\Throwable) {
+            // no cache: the server stays stopped, as before
         }
     }
 
@@ -53,6 +77,7 @@ class AutoStartService
     public function forget(string $uuid): void
     {
         Cache::forget($this->key($uuid));
+        Cache::forget($this->switchKey($uuid));
     }
 
     /**
@@ -80,6 +105,11 @@ class AutoStartService
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    private function switchKey(string $uuid): string
+    {
+        return "serversuite.autostart.switch.{$uuid}";
     }
 
     private function key(string $uuid): string

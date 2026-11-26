@@ -130,6 +130,7 @@ class LoaderSwitchService
         // Must be offline before we wipe files. Stop and let the caller poll.
         $state = $this->ops->runtimeState($uuid);
         if (($state['power'] ?? null) !== 'offline') {
+            app(AutoStartService::class)->stoppedForSwitch($uuid);
             try {
                 $this->ops->power($uuid, 'stop');
             } catch (\Throwable $e) {

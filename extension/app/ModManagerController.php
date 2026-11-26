@@ -555,6 +555,22 @@ class ModManagerController extends Controller
      * Current loader/version plus the loaders installable on this panel (one per
      * Minecraft server-loader egg).
      */
+    /**
+     * GET /{server}/loader-versions?loader=forge
+     * Minecraft versions a loader can switch to, newest first, for the loader
+     * switch's version picker. Empty with supported=false for loaders that
+     * have no list (the picker falls back to typing a version).
+     */
+    public function loaderVersions(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        $data = $request->validate(['loader' => ['required', 'string', 'max:32', 'regex:/^[a-z]+$/']]);
+
+        return response()->json(['data' => app(ServerVersionService::class)->available($data['loader'])]);
+    }
+
     public function loaders(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
@@ -608,8 +624,9 @@ class ModManagerController extends Controller
 
         // Only the loader eggs the Versions tab offers (#36): changing a
         // server's egg is otherwise an admin-only action in Pterodactyl.
-        $offered = array_column(app(\ServerSuite\Services\EggManagerService::class)->minecraftLoaders(), 'egg_id');
-        if (! in_array((int) $data['egg_id'], $offered, true)) {
+        $loaders = app(\ServerSuite\Services\EggManagerService::class)->minecraftLoaders();
+        $target = collect($loaders)->firstWhere('egg_id', (int) $data['egg_id']);
+        if ($target === null) {
             return response()->json(['error' => 'That egg is not one of the loaders this panel offers.'], 422);
         }
 
@@ -618,11 +635,17 @@ class ModManagerController extends Controller
         }
 
         try {
+            // Forge/NeoForge: pin the loader build for the chosen version, as
+            // the Versions tab does (the stock eggs pick it by prefix).
+            $mc = $data['version'] ?? (app(ServerVersionService::class)->current($srv)['game_version'] ?? null);
+            $pin = $mc ? app(ServerVersionService::class)->loaderPin($target['loader'] ?? null, $mc) : null;
+
             $result = app(\ServerSuite\Services\LoaderSwitchService::class)->switchLoader(
                 $srv,
                 (int) $data['egg_id'],
                 $data['version'] ?? null,
                 ! $this->backupsOff($srv),   // backup-gated, unless the server has no backup allocation
+                $pin ? [$pin['var'] => $pin['value']] : [],
             );
         } catch (\Throwable $e) {
             app(\ServerSuite\Services\Notifier::class)->notify($srv->uuid, 'switch', 'Loader switch failed', $e->getMessage(), 'error');

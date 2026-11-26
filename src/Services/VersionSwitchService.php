@@ -75,6 +75,7 @@ class VersionSwitchService
         if ($wipe) {
             $state = $this->ops->runtimeState($uuid);
             if (($state['power'] ?? null) !== 'offline') {
+                app(AutoStartService::class)->stoppedForSwitch($uuid);
                 try {
                     $this->ops->power($uuid, 'stop');
                 } catch (\Throwable $e) {
@@ -85,20 +86,33 @@ class VersionSwitchService
             }
         }
 
+        $loader = strtolower((string) ($pf['current']['loader'] ?? ''));
+        $modded = in_array($loader, ServerVersionService::MODDED, true);
         $build = $pf['target']['build'] ?? null;
-        if ($build === null) {
+        if ($build === null && ! $modded) {
             throw new \RuntimeException("No build resolved for {$targetVersion}.");
         }
 
-        // 1. Pin the exact version + build the egg's install script will fetch.
-        //    With a direct jar from MCJars (#22), DL_PATH points straight at it,
-        //    which gets around broken install scripts; eggs without DL_PATH
-        //    ignore it (only the egg's own variables are written).
-        $pin = $downloadUrl === null ? app(McJarsService::class)->pinFor(\ServerSuite\Models\ModManagerSetting::forServer($uuid)->loader, $targetVersion) : null;
-        $this->ops->setServerVariables($uuid, [
-            'MINECRAFT_VERSION' => $targetVersion,
-            'BUILD_NUMBER'      => (string) $build,
-        ] + ($downloadUrl !== null ? ['DL_PATH' => $downloadUrl] : []) + ($pin ? ['DL_PATH' => $pin['url'], 'SERVER_JARFILE' => $pin['file']] : []));
+        if ($modded) {
+            // 1. Mod loader: the egg's Minecraft version plus the loader build
+            //    Server Suite picked (Forge/NeoForge; see ServerVersionService::
+            //    loaderPin). Fabric's and Quilt's eggs choose the loader.
+            $loaderPin = $this->versions->loaderPin($loader, $targetVersion);
+            $this->ops->setServerVariables($uuid, [
+                'MC_VERSION'        => $targetVersion,
+                'MINECRAFT_VERSION' => $targetVersion,
+            ] + ($loaderPin ? [$loaderPin['var'] => $loaderPin['value']] : []));
+        } else {
+            // 1. Pin the exact version + build the egg's install script will fetch.
+            //    With a direct jar from MCJars (#22), DL_PATH points straight at it,
+            //    which gets around broken install scripts; eggs without DL_PATH
+            //    ignore it (only the egg's own variables are written).
+            $pin = $downloadUrl === null ? app(McJarsService::class)->pinFor(\ServerSuite\Models\ModManagerSetting::forServer($uuid)->loader, $targetVersion) : null;
+            $this->ops->setServerVariables($uuid, [
+                'MINECRAFT_VERSION' => $targetVersion,
+                'BUILD_NUMBER'      => (string) $build,
+            ] + ($downloadUrl !== null ? ['DL_PATH' => $downloadUrl] : []) + ($pin ? ['DL_PATH' => $pin['url'], 'SERVER_JARFILE' => $pin['file']] : []));
+        }
 
         // 2. Move the Docker image only when the Java requirement actually changes.
         $imageChanged = false;
@@ -115,7 +129,7 @@ class VersionSwitchService
         if ($wipe) {
             $wiped = $this->files->wipeForNuclear($uuid, $wipeMode === 'clean_slate' ? 'clean_slate' : 'keep_plugins');
             if ($wipeMode === 'reset_world' && $deletePlugins) {
-                $pluginsRemoved = $this->files->deletePluginJars($uuid);
+                $pluginsRemoved = $this->files->deletePluginJars($uuid, $modded ? 'mods' : 'plugins');
             }
             // Clean slate removes every mod file, so empty the manifest to match.
             if ($wipeMode === 'clean_slate') {
@@ -128,7 +142,7 @@ class VersionSwitchService
         } elseif ($deletePlugins) {
             // Plugins built for the old version very commonly halt boot on the
             // new one. Configs are kept. "Keep anyway" is the caller's choice.
-            $pluginsRemoved = $this->files->deletePluginJars($uuid);
+            $pluginsRemoved = $this->files->deletePluginJars($uuid, $modded ? 'mods' : 'plugins');
         }
 
         // 3. Trigger the reinstall (re-runs the egg install script, which reads
@@ -281,6 +295,7 @@ class VersionSwitchService
         // Never touch files on a running server — stop first, let the caller poll.
         $state = $this->ops->runtimeState($uuid);
         if (($state['power'] ?? null) !== 'offline') {
+            app(AutoStartService::class)->stoppedForSwitch($uuid);
             try {
                 $this->ops->power($uuid, 'stop');
             } catch (\Throwable $e) {
