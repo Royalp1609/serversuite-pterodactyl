@@ -88,12 +88,21 @@ class VersionSwitchService
 
         $loader = strtolower((string) ($pf['current']['loader'] ?? ''));
         $modded = in_array($loader, ServerVersionService::MODDED, true);
+        $jar = in_array($loader, ServerVersionService::JAR, true);
         $build = $pf['target']['build'] ?? null;
-        if ($build === null && ! $modded) {
+        if ($build === null && ! $modded && ! $jar) {
             throw new \RuntimeException("No build resolved for {$targetVersion}.");
         }
 
-        if ($modded) {
+        if ($jar) {
+            // 1. Purpur, Folia, Spigot, Sponge, Vanilla: the egg's own version
+            //    variable (plus Sponge's build, a DL_PATH jar where the egg has one).
+            $jarPin = $this->versions->jarVariables($loader, $targetVersion);
+            if ($jarPin === null) {
+                throw new \RuntimeException('No ' . ucfirst($loader) . " build found for {$targetVersion}.");
+            }
+            $this->ops->setServerVariables($uuid, $jarPin['vars']);
+        } elseif ($modded) {
             // 1. Mod loader: the egg's Minecraft version plus the loader build
             //    Server Suite picked (Forge/NeoForge; see ServerVersionService::
             //    loaderPin). Fabric's and Quilt's eggs choose the loader.
@@ -241,6 +250,8 @@ class VersionSwitchService
             $this->ops->setServerVariables($uuid, [
                 'MINECRAFT_VERSION' => $version,
                 'MC_VERSION'        => $version,
+                'VANILLA_VERSION'   => $version,
+                'DL_VERSION'        => $version,
                 'BUILD_NUMBER'      => 'latest',
             ]);
         } catch (\Throwable $e) {

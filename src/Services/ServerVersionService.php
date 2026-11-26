@@ -64,7 +64,7 @@ class ServerVersionService
         if ($loader === 'paper') {
             return ['supported' => true, 'loader' => 'paper', 'versions' => $this->paperVersions()];
         }
-        if (in_array($loader, self::MODDED, true)) {
+        if (in_array($loader, self::MODDED, true) || in_array($loader, self::JAR, true)) {
             return ['supported' => true, 'loader' => $loader, 'versions' => app(McJarsService::class)->releases($loader)];
         }
 
@@ -79,6 +79,52 @@ class ServerVersionService
      * read 26.x versions.
      */
     public const MODDED = ['forge', 'neoforge', 'fabric', 'quilt'];
+
+    /**
+     * Single-jar loaders other than Paper. Their versions come from MCJars
+     * and the change writes the egg's own version variable (see jarVariables).
+     * Plugins live in plugins/ (Sponge's too) and usually survive a version
+     * change, like Paper's.
+     */
+    public const JAR = ['purpur', 'folia', 'spigot', 'sponge', 'vanilla'];
+
+    /**
+     * Egg variables that move a single-jar loader to $mcVersion. Every
+     * version-variable name the stock eggs use is sent; the panel only writes
+     * the ones the server's egg has. Null when Sponge has no build for it.
+     *
+     * @return array{vars: array<string,string>, build: ?string, experimental: bool}|null
+     */
+    public function jarVariables(string $loader, string $mcVersion): ?array
+    {
+        $loader = strtolower($loader);
+        $vars = [
+            'MINECRAFT_VERSION' => $mcVersion,   // Purpur, Folia
+            'MC_VERSION'        => $mcVersion,
+            'VANILLA_VERSION'   => $mcVersion,   // Vanilla
+            'DL_VERSION'        => $mcVersion,   // Spigot (BuildTools)
+        ];
+        $build = null;
+        $experimental = false;
+        if (in_array($loader, ['purpur', 'folia'], true)) {
+            $vars['BUILD_NUMBER'] = 'latest';
+        }
+        if ($loader === 'sponge') {
+            $b = app(McJarsService::class)->newestLoaderBuild('sponge', $mcVersion);
+            if ($b === null) {
+                return null;
+            }
+            $vars['SPONGE_VERSION'] = $build = $b['version'];
+            $experimental = $b['experimental'];
+        }
+        // A direct jar for eggs with DL_PATH (Folia, Spigot): skips a
+        // BuildTools compile or a broken download step.
+        if (in_array($loader, ['folia', 'spigot'], true) && ($pin = app(McJarsService::class)->pinFor($loader, $mcVersion)) !== null) {
+            $vars['DL_PATH'] = $pin['url'];
+        }
+
+        return ['vars' => $vars, 'build' => $build, 'experimental' => $experimental];
+    }
 
     /**
      * The egg variable and value that pin a mod loader's build for a
@@ -362,15 +408,18 @@ class ServerVersionService
 
         $loader = strtolower((string) ($current['loader'] ?? ''));
         $modded = in_array($loader, self::MODDED, true);
+        $jar = in_array($loader, self::JAR, true);
+        $mcjars = $modded || $jar;
 
-        // Paper: a Fill build. Mod loaders: a release MCJars lists, plus the
-        // loader build to pin (Forge, NeoForge).
-        $builds = $modded ? [] : $this->paperBuilds($targetVersion);
-        $versionValid = $modded ? in_array($targetVersion, $this->available($loader)['versions'], true) : $builds !== [];
+        // Paper: a Fill build. Other loaders: a release MCJars lists, plus the
+        // loader build to pin (Forge, NeoForge, Sponge).
+        $builds = $mcjars ? [] : $this->paperBuilds($targetVersion);
+        $versionValid = $mcjars ? in_array($targetVersion, $this->available($loader)['versions'], true) : $builds !== [];
         $pin = $modded && $versionValid ? $this->loaderPin($loader, $targetVersion) : null;
+        $jarPin = $jar && $versionValid ? $this->jarVariables($loader, $targetVersion) : null;
 
         $build = null;
-        if ($versionValid && ! $modded) {
+        if ($versionValid && ! $mcjars) {
             $build = $targetBuild !== null
                 ? (collect($builds)->firstWhere('build', $targetBuild) ?? null)
                 : ($this->preferredBuild($builds) ?? $builds[0]);
@@ -397,15 +446,21 @@ class ServerVersionService
 
         // The switch pins Paper's MINECRAFT_VERSION + BUILD_NUMBER, or a mod
         // loader's MC_VERSION + build, so other loaders are refused (#123).
-        if ($loader !== 'paper' && ! $modded) {
+        if ($loader !== 'paper' && ! $mcjars) {
             $blockers[] = $loader === ''
                 ? "Can't tell which loader this server runs, so its version can't be changed here."
-                : 'Version changes here are for Paper, Forge, NeoForge, Fabric and Quilt servers; this server runs ' . ucfirst($loader) . '. Use the loader switch to pick a version.';
+                : 'Version changes here are for Paper, Purpur, Folia, Spigot, Sponge, Vanilla, Forge, NeoForge, Fabric and Quilt servers; this server runs ' . ucfirst($loader) . '. Use the loader switch to pick a version.';
         }
         if (! $versionValid) {
-            $blockers[] = $modded
+            $blockers[] = $mcjars
                 ? ucfirst($loader) . " has no release for Minecraft {$targetVersion}."
                 : "Paper has no published builds for {$targetVersion}.";
+        }
+        if ($versionValid && $jar && $jarPin === null) {
+            $blockers[] = 'Could not find a ' . ucfirst($loader) . " build for Minecraft {$targetVersion}. Try again shortly.";
+        }
+        if ($jarPin !== null && $jarPin['experimental']) {
+            $warnings[] = ucfirst($loader) . " {$jarPin['build']} is a test build: there is no stable one for Minecraft {$targetVersion} yet.";
         }
         if ($versionValid && in_array($loader, ['forge', 'neoforge'], true) && $pin === null) {
             $blockers[] = 'Could not find a ' . ucfirst($loader) . " build for Minecraft {$targetVersion}. Try again shortly.";
@@ -435,7 +490,7 @@ class ServerVersionService
                                 'channel' => $build['channel'] ?? null, 'download_url' => $build['download_url'] ?? null,
                                 'loader' => $loader !== '' ? $loader : null,
                                 // Mod loaders: the loader build that gets pinned (null = the egg picks).
-                                'loader_version' => $pin['version'] ?? null],
+                                'loader_version' => $pin['version'] ?? $jarPin['build'] ?? null],
             'direction'     => $direction,
             'version_valid' => $versionValid,
             'image'         => $image,
