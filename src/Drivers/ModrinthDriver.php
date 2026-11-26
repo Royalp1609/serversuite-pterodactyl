@@ -254,6 +254,31 @@ class ModrinthDriver extends AbstractDriver
         return $out;
     }
 
+    /**
+     * Project names by id (one request per 100), for naming a dependency a
+     * modpack lacks. Unknown ids are left out.
+     *
+     * @param string[] $ids
+     * @return array<string, string> id => name
+     */
+    public function projectNames(array $ids): array
+    {
+        $out = [];
+        foreach (array_chunk(array_values(array_unique(array_filter($ids))), 100) as $chunk) {
+            $res = $this->http()->get('/projects', ['ids' => json_encode($chunk)]);
+            if (! $res->successful()) {
+                throw RepositoryException::httpError($this->key(), $res->status(), $res->body());
+            }
+            foreach ((array) $res->json() as $p) {
+                if (self::wellFormed($p, 'id')) {
+                    $out[(string) $p['id']] = (string) ($p['title'] ?? $p['slug'] ?? $p['id']);
+                }
+            }
+        }
+
+        return $out;
+    }
+
     /** @param array<string, mixed> $v */
     private function packVersion(array $v): array
     {

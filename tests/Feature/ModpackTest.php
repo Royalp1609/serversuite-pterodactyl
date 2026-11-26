@@ -98,7 +98,9 @@ function mpModrinth(object $t, Request $r)
         foreach ((array) $r['hashes'] as $h) {
             if (isset($t->knownMods[$h])) {
                 $k = $t->knownMods[$h];
-                $out[$h] = ['id' => $k['version'], 'project_id' => $k['project'], 'version_number' => $k['version'], 'files' => [], 'dependencies' => []];
+                $out[$h] = ['id' => $k['version'], 'project_id' => $k['project'], 'version_number' => $k['version'], 'files' => [],
+                    'game_versions' => $k['games'] ?? [], 'loaders' => $k['loaders'] ?? [],
+                    'dependencies' => array_map(fn ($d) => ['project_id' => $d, 'dependency_type' => 'required'], $k['deps'] ?? [])];
             }
         }
 
@@ -152,7 +154,8 @@ function mpPublish(object $t, string $versionId, array $files, array $zipExtra =
             $t->wings->remote[$url] = $bytes;
         }
         if (isset($spec['mod'])) {
-            $t->knownMods = $t->knownMods + [sha1($bytes) => ['project' => $spec['mod'], 'version' => "{$spec['mod']}-{$versionId}", 'name' => "Mod {$spec['mod']}"]];
+            $t->knownMods = $t->knownMods + [sha1($bytes) => ['project' => $spec['mod'], 'version' => "{$spec['mod']}-{$versionId}", 'name' => "Mod {$spec['mod']}"]
+                + array_intersect_key($spec, ['games' => 1, 'loaders' => 1, 'deps' => 1])];
         }
     }
     $index = json_encode(['formatVersion' => 1, 'game' => 'minecraft', 'versionId' => $versionId, 'name' => 'Test Pack', 'files' => $entries, 'dependencies' => $deps]);
@@ -871,4 +874,23 @@ it("won't remove a pack that isn't there or is still installing", function () {
     mpRun();
     Modpack::forServer('srv-mp')->forceFill(['status' => Modpack::STATUS_INSTALLING])->save();
     expect(fn () => mpSvc()->remove($this->server, 1))->toThrow(ModpackException::class, 'running');
+});
+
+it('checks each jar against the pack: Minecraft version, loader and required mods', function () {
+    mpPublish($this, 'v1', [
+        'mods/a.jar'   => ['mod' => 'MODA', 'games' => ['1.20.1'], 'loaders' => ['fabric'], 'deps' => ['FAPI']],
+        'mods/api.jar' => ['mod' => 'FAPI', 'games' => ['1.20', '1.20.1'], 'loaders' => ['fabric', 'quilt']],
+        'mods/new.jar' => ['mod' => 'NEWER', 'games' => ['1.21.10', '1.21.11'], 'loaders' => ['fabric'], 'deps' => ['CLOTH']],
+        'mods/forge.jar' => ['mod' => 'FORGEY', 'games' => ['1.20.1'], 'loaders' => ['forge']],
+        'mods/unknown.jar' => [],
+    ], ['overrides/mods/bundled.jar' => 'x']);
+
+    $c = mpSvc()->preview($this->server, 'PACK', 'v1')['compat'];
+
+    expect($c['checked'])->toBe(4)
+        ->and($c['unchecked'])->toBe(1)
+        ->and($c['override_jars'])->toBe(1)
+        ->and($c['wrong_version'])->toBe([['name' => 'Mod NEWER', 'path' => 'mods/new.jar', 'versions' => ['1.21.10', '1.21.11']]])
+        ->and(array_column($c['wrong_loader'], 'name'))->toBe(['Mod FORGEY'])
+        ->and($c['missing'])->toBe([['project_id' => 'CLOTH', 'name' => 'CLOTH', 'needed_by' => ['Mod NEWER']]]);
 });
