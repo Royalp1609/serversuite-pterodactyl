@@ -52,8 +52,8 @@ class EdgeMode
     /**
      * Per-node backend host (#2): node id or FQDN => the address the routers
      * reach that node on, for nodes whose allocations use public or
-     * otherwise unroutable IPs. From the admin setting ("node = host" lines)
-     * or a config array.
+     * otherwise unroutable IPs. From the admin setting ("node = host", one
+     * per line or comma separated) or a config array.
      *
      * @return array<string, string>
      */
@@ -64,7 +64,7 @@ class EdgeMode
             return array_change_key_case(array_map('strval', $raw), CASE_LOWER);
         }
         $out = [];
-        foreach (preg_split('/\R/', (string) $raw) ?: [] as $line) {
+        foreach (preg_split('/[\r\n,]+/', (string) $raw) ?: [] as $line) {
             if (preg_match('/^\s*([^=\s]+)\s*=\s*(\S+)\s*$/', $line, $m)) {
                 $out[strtolower($m[1])] = $m[2];
             }
@@ -147,7 +147,7 @@ class EdgeMode
         if (trim($defaultBackend) !== '' && ! preg_match($hostPort, trim($defaultBackend))) {
             return 'The default backend must be host:port, such as 10.0.0.20:25565.';
         }
-        foreach (preg_split('/\R/', $nodeLines) ?: [] as $i => $line) {
+        foreach (preg_split('/[\r\n,]+/', $nodeLines) ?: [] as $i => $line) {
             if (trim($line) !== '' && ! preg_match('/^\s*[^=\s]+\s*=\s*(\[[0-9a-f:]+\]|[0-9a-f:]+|[a-z0-9.-]+)\s*$/i', $line)) {
                 return 'Node addresses: line ' . ($i + 1) . ' must be "node id or FQDN = internal address", such as 3 = 10.0.0.12.';
             }
