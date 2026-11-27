@@ -89,6 +89,12 @@ const Bad = styled.div`
     background: rgba(239, 68, 68, 0.12);
     color: rgb(248, 113, 113);
 `;
+const Warn = styled.div`
+    ${tw`text-sm rounded-lg p-3 mb-3`};
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    color: rgb(253, 230, 138);
+`;
 const Note = styled.div`
     ${tw`text-sm rounded-lg p-3 mb-3`};
     background: rgba(99, 102, 241, 0.12);
@@ -118,6 +124,35 @@ interface Status {
 }
 interface Hit { id: string; name: string; author: string; description: string; downloads: number; icon_url: string | null; page_url: string | null }
 interface Version { id: string; version_number: string; channel: string; loaders: string[]; game_versions: string[]; compatible: boolean; reason: string | null }
+interface Compat {
+    checked: number; unchecked: number; override_jars: number;
+    wrong_version: Array<{ name: string; path: string; versions: string[] }>;
+    wrong_loader: Array<{ name: string; path: string; loaders: string[] }>;
+    missing: Array<{ project_id: string; name: string; needed_by: string[] }>;
+}
+
+/** What the jar check found, or null when it found nothing (or the pack isn't from Modrinth). */
+const CompatWarning = ({ c, mc, loader }: { c: Compat | null; mc: string; loader: string | null }) => {
+    if (!c || (c.wrong_version.length + c.wrong_loader.length + c.missing.length) === 0) return null;
+    return (
+        <Warn>
+            <p className="font-semibold text-white">This pack may not start as it is</p>
+            <p className="text-xs mt-1">Server Suite checked {c.checked} of the pack&apos;s mods against Modrinth. The pack is published like this; it&apos;s the pack author&apos;s to fix, and you can still install it.</p>
+            <ul className="text-xs mt-2 flex flex-col gap-1" style={{ listStyle: 'disc', paddingLeft: '1.2rem' }}>
+                {c.wrong_version.length > 0 && <li><strong>Built for another Minecraft version than {mc}:</strong> {c.wrong_version.map((w) => `${w.name} (${w.versions.join(', ')})`).join('; ')}</li>}
+                {c.wrong_loader.length > 0 && <li><strong>Not for {ucfirst(loader)}:</strong> {c.wrong_loader.map((w) => `${w.name} (${w.loaders.map(ucfirst).join(', ')})`).join('; ')}</li>}
+                {c.missing.length > 0 && (
+                    <li>
+                        <strong>Needs mods the pack doesn&apos;t download:</strong> {c.missing.map((m) => `${m.name} (for ${m.needed_by.join(', ')})`).join('; ')}
+                        {c.override_jars > 0 && ` (the pack also bundles ${c.override_jars} jar${c.override_jars === 1 ? '' : 's'} of its own, which may cover some of these)`}
+                    </li>
+                )}
+            </ul>
+            {c.unchecked > 0 && <p className="text-xs mt-2">{c.unchecked} jar{c.unchecked === 1 ? ' isn\'t' : 's aren\'t'} on Modrinth, so {c.unchecked === 1 ? 'it' : 'they'} couldn&apos;t be checked.</p>}
+        </Warn>
+    );
+};
+
 interface Preview {
     pack: { project_id: string; name: string; icon_url: string | null; page_url: string | null };
     version: { id: string; version_number: string };
@@ -128,6 +163,7 @@ interface Preview {
     counts: { install: number; unchanged: number; remove: number; replace: number; overrides: number; skipped: number };
     download_bytes: number;
     skipped: Array<{ path: string; reason: string }>;
+    compat: Compat | null;
     replace: Array<{ name: string }>;
     backups: 'yes' | 'disabled';
 }
@@ -526,6 +562,7 @@ const ReviewPanel = ({ preview: p, confirmed, setConfirmed, wipeConfirmed, setWi
             </div>
 
             {p.blockers.map((b) => <Bad key={b}>{b}</Bad>)}
+            <CompatWarning c={p.compat} mc={p.requires.minecraft} loader={p.requires.loader} />
 
             {p.switch && (
                 <Bad>

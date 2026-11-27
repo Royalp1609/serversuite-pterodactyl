@@ -254,7 +254,7 @@ class ModpackService
 
         // Name the mods (one lookup for the whole pack) so the manifest can
         // track them and installed copies outside the pack get replaced.
-        $known = $source === 'curseforge' ? $this->identifyCurseForge($driver, $install) : $this->identify($driver, $install);
+        $known = $source === 'curseforge' ? $this->identifyCurseForge($driver, $install) : $this->identify($driver, array_merge($install, $unchanged));
         $replace = [];
         foreach ($install as &$item) {
             if (isset($known[$item['sha1']])) {
@@ -270,6 +270,8 @@ class ModpackService
                 ->filter(fn ($r) => $r['file'] !== '' && ! in_array(ltrim($r['dir'] . '/' . $r['file'], '/'), array_column($install, 'path'), true))
                 ->values()->all();
         }
+
+        $compat = $source === 'modrinth' ? $this->checkJars($driver, $install, $unchanged, $known, $index->loader, $index->minecraft, $overrides) : null;
 
         $newPaths = array_merge(array_column($index->installable(), 'path'), $overrides);
         $remove = $old->filter(fn ($f) => ! in_array($f['path'], $newPaths, true)
@@ -299,6 +301,8 @@ class ModpackService
             'requires'  => ['loader' => $index->loader, 'loader_version' => $index->loaderVersion, 'minecraft' => $index->minecraft],
             'server'    => $context,
             'blockers'  => $blockers,
+            // Each jar's own Minecraft version, loader and required mods, from Modrinth (null for CurseForge packs).
+            'compat'    => $compat,
             'switch'    => $switch === null ? null : ['egg_name' => $switch['egg_name'], 'from' => $switch['from']],
             'current'   => $current?->hasInstalledPack() ? [
                 'name' => $current->name, 'version_number' => $current->version_number,
@@ -580,7 +584,71 @@ class ModpackService
             'version_id'     => $hit['version']->versionId,
             'version_number' => $hit['version']->versionNumber,
             'dependencies'   => $hit['version']->dependencies,
+            'loaders'        => $hit['version']->loaders,
+            'game_versions'  => $hit['version']->gameVersions,
         ], $found);
+    }
+
+    /**
+     * Check the pack's mod jars against what the pack says it runs on, from
+     * each jar's own Modrinth version: built for another Minecraft version,
+     * for another loader, or needing a mod the pack doesn't have. Packs ship
+     * like that (Vanilla Plus Overhaul 0.0.7 for Forge had jars for 1.21.11
+     * and 1.21.1 and lacked cloth-config), and the server then fails to
+     * start. Warnings only: the owner decides. Jars Modrinth doesn't know
+     * (and override jars, which aren't looked up) can't be checked.
+     *
+     * @param array<int, array<string, mixed>> $install
+     * @param array<int, array<string, mixed>> $unchanged
+     * @param array<string, array<string, mixed>> $known sha1 => identify() entry
+     * @param string[] $overrides
+     * @return array{checked: int, unchecked: int, wrong_version: list<array{name: string, path: string, versions: list<string>}>, wrong_loader: list<array{name: string, path: string, loaders: list<string>}>, missing: list<array{project_id: string, name: string, needed_by: list<string>}>, override_jars: int}
+     */
+    private function checkJars(ModrinthDriver $driver, array $install, array $unchanged, array $known, ?string $loader, ?string $minecraft, array $overrides): array
+    {
+        $jars = array_values(array_filter(array_merge($install, $unchanged), fn ($f) => str_starts_with(strtolower((string) $f['path']), 'mods/') && str_ends_with(strtolower((string) $f['path']), '.jar')));
+        $wrongVersion = $wrongLoader = $needs = [];
+        $have = [];
+        $checked = 0;
+        foreach ($jars as $f) {
+            $k = $known[$f['sha1']] ?? null;
+            if ($k === null) {
+                continue;
+            }
+            $checked++;
+            $have[$k['project_id']] = true;
+            $name = (string) $k['name'];
+            $versions = array_values(array_map('strval', (array) ($k['game_versions'] ?? [])));
+            if ($minecraft !== null && $versions !== [] && ! in_array($minecraft, $versions, true)) {
+                $wrongVersion[] = ['name' => $name, 'path' => (string) $f['path'], 'versions' => array_slice($versions, -3)];
+            }
+            $loaders = array_values(array_map('strval', (array) ($k['loaders'] ?? [])));
+            if ($loader !== null && $loaders !== [] && ! \ServerSuite\Support\LoaderCompat::runs($loader, $loaders)) {
+                $wrongLoader[] = ['name' => $name, 'path' => (string) $f['path'], 'loaders' => $loaders];
+                continue;   // its dependencies are the other loader's (Fabric API for a Fabric jar)
+            }
+            foreach ((array) ($k['dependencies'] ?? []) as $dep) {
+                $needs[(string) $dep][] = $name;
+            }
+        }
+        $missingIds = array_values(array_filter(array_keys($needs), fn ($id) => $id !== '' && ! isset($have[$id])));
+        $names = [];
+        if ($missingIds !== []) {
+            try {
+                $names = $driver->projectNames($missingIds);
+            } catch (\Throwable) {
+                // named by id instead
+            }
+        }
+
+        return [
+            'checked'       => $checked,
+            'unchecked'     => count($jars) - $checked,
+            'wrong_version' => $wrongVersion,
+            'wrong_loader'  => $wrongLoader,
+            'missing'       => array_map(fn ($id) => ['project_id' => $id, 'name' => $names[$id] ?? $id, 'needed_by' => array_values(array_unique($needs[$id]))], $missingIds),
+            'override_jars' => count(array_filter($overrides, fn ($p) => str_starts_with(strtolower((string) $p), 'mods/') && str_ends_with(strtolower((string) $p), '.jar'))),
+        ];
     }
 
     /**
