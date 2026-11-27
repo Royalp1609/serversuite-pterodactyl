@@ -134,6 +134,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const cap = (s: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown');
 /** Loaders whose version is changed here with their mods in mods/ (the rest are Paper, with plugins). */
 const MODDED = ['forge', 'neoforge', 'fabric', 'quilt'];
+/** Single-jar loaders besides Paper: versions from MCJars, plugins kept like Paper's. */
+const JAR = ['purpur', 'folia', 'spigot', 'sponge', 'vanilla'];
+const SUPPORTED_TEXT = 'Paper, Purpur, Folia, Spigot, Sponge, Vanilla, Forge, NeoForge, Fabric and Quilt';
 
 export default () => {
     const uuid = ServerContext.useStoreState((s) => s.server.data!.uuid);
@@ -454,7 +457,9 @@ export default () => {
                                 <Stat>
                                     {preflight.target?.loader && MODDED.includes(preflight.target.loader)
                                         ? `${cap(preflight.target.loader)} ${preflight.target.loader_version ?? '(newest)'}`
-                                        : `Build ${preflight.target?.build ?? 'latest'}`}
+                                        : preflight.target?.loader && JAR.includes(preflight.target.loader)
+                                            ? `${cap(preflight.target.loader)} ${preflight.target.loader_version ?? `${selected} (newest build)`}`
+                                            : `Build ${preflight.target?.build ?? 'latest'}`}
                                 </Stat>
                                 <Stat tone={preflight.image?.change ? 'down' : 'neutral'}>
                                     {preflight.image?.change
@@ -701,7 +706,7 @@ export default () => {
                             <Subtitle>
                                 {available?.supported
                                     ? `Published ${loaderLabel} versions, newest first. Select one to change to it.`
-                                    : 'Version changes here are for Paper, Forge, NeoForge, Fabric and Quilt.'}
+                                    : `Version changes here are for ${SUPPORTED_TEXT}.`}
                             </Subtitle>
                         </div>
                     </Header>
@@ -725,8 +730,8 @@ export default () => {
                         <Muted>No versions returned upstream. Try again shortly.</Muted>
                     ) : (
                         <Note>
-                            Detected loader: <strong>{loaderLabel}</strong>. Version changes here are for Paper, Forge, NeoForge,
-                            Fabric and Quilt. Use the loader switch below to pick a version for this loader.
+                            Detected loader: <strong>{loaderLabel}</strong>. Version changes here are for {SUPPORTED_TEXT}.
+                            Use the loader switch below to pick a version for this loader.
                         </Note>
                     )}
                 </Panel>

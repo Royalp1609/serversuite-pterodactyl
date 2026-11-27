@@ -21,6 +21,7 @@ class McJarsService
         'velocity' => 'VELOCITY', 'waterfall' => 'WATERFALL',
         'fabric' => 'FABRIC', 'forge' => 'FORGE', 'neoforge' => 'NEOFORGE',
         'quilt' => 'QUILT', 'spigot' => 'SPIGOT', 'sponge' => 'SPONGE',
+        'vanilla' => 'VANILLA',
     ];
 
     protected function http()

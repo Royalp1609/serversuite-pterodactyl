@@ -37,20 +37,20 @@ beforeEach(function () {
 });
 
 it('blocks the switch on a loader it has no versions for, and on an unknown loader', function () {
-    $this->loader = 'purpur';
+    $this->loader = 'bungeecord';
     $pf = app(ServerVersionService::class)->preflight(vslServer(), '1.21.4');
     expect($pf['can_proceed'])->toBeFalse()
-        ->and(implode(' ', $pf['blockers']))->toContain('this server runs Purpur');
+        ->and(implode(' ', $pf['blockers']))->toContain('this server runs Bungeecord');
 
     $this->loader = null;
     $pf = app(ServerVersionService::class)->preflight(vslServer(), '1.21.4');
     expect(implode(' ', $pf['blockers']))->toContain("Can't tell which loader");
 });
 
-it('writes nothing and reinstalls nothing when called directly on a Purpur server', function () {
-    $this->loader = 'purpur';
+it('writes nothing and reinstalls nothing when called directly on a BungeeCord server', function () {
+    $this->loader = 'bungeecord';
     expect(fn () => app(VersionSwitchService::class)->apply(vslServer(), '1.21.4', null, false))
-        ->toThrow(RuntimeException::class, 'this server runs Purpur');
+        ->toThrow(RuntimeException::class, 'this server runs Bungeecord');
 
     expect(array_filter($this->ops->log, fn ($e) => in_array($e[0], ['set_vars', 'set_image', 'reinstall', 'power'], true)))->toBe([]);
 });

@@ -39,6 +39,10 @@ class PostSwitchService
             $entries = $this->daemon->listDirectory($uuid, '/');
             $files = collect($entries)->where('is_file', true)->pluck('name')->map(fn ($n) => (string) $n)->all();
 
+            if ($this->repairSpongeJar($uuid, $entries, $notes)) {
+                return $notes;
+            }
+
             if (in_array('unix_args.txt', $files, true) && $this->repairArgsFile($uuid, $notes)) {
                 return $notes;   // the egg starts @unix_args.txt; SERVER_JARFILE isn't used
             }
@@ -83,6 +87,56 @@ class PostSwitchService
     }
 
     /** The server's SERVER_JARFILE value (or the egg default), or null when the egg has none. */
+    /**
+     * The stock Sponge egg downloads spongevanilla-<version>.jar, which for
+     * current SpongeVanilla is a ~50 KB stub with no Main-Class ("no main
+     * manifest attribute, in server.jar"); the server runs from the
+     * -universal jar (~8 MB). When the egg's jar is that stub, put the
+     * universal jar for the same SPONGE_VERSION in its place. Returns whether
+     * it did.
+     *
+     * @param array<int, array<string, mixed>> $entries the server root
+     */
+    private function repairSpongeJar(string $uuid, array $entries, array &$notes): bool
+    {
+        $version = $this->variable($uuid, 'SPONGE_VERSION');
+        $jar = $this->currentJar($uuid);
+        if ($version === null || $jar === null || ! preg_match('/^\d+\.\d+(?:\.\d+)?-[A-Za-z0-9.+-]+$/', $version) || ! preg_match('/^[\w.+-]+\.jar$/', $jar)) {
+            return false;
+        }
+        $entry = collect($entries)->first(fn ($e) => ($e['is_file'] ?? false) && (string) $e['name'] === $jar);
+        if ($entry !== null && (int) ($entry['size'] ?? 0) >= self::SPONGE_STUB_MAX) {
+            return false;   // a real jar (or someone's own): leave it
+        }
+        $url = "https://repo.spongepowered.org/repository/maven-releases/org/spongepowered/spongevanilla/{$version}/spongevanilla-{$version}-universal.jar";
+        if ($entry !== null) {
+            $this->daemon->deleteFiles($uuid, '/', [$jar]);
+        }
+        $this->daemon->pull($uuid, $url, '/', $jar, true);
+        SuiteActivity::logFor($uuid, 'server:serversuite.jar-aligned', ['jar' => $jar, 'was' => "spongevanilla-{$version}.jar (stub)"]);
+        $notes[] = ['title' => 'Sponge jar replaced', 'body' => "The Sponge egg downloaded a jar that can't start; installed spongevanilla-{$version}-universal.jar as {$jar}."];
+
+        return true;
+    }
+
+    /** Below this, a SpongeVanilla jar is the no-Main-Class stub (54 KB) rather than the universal jar (8 MB). */
+    private const SPONGE_STUB_MAX = 1048576;
+
+    private function variable(string $uuid, string $env): ?string
+    {
+        $row = DB::table('servers as s')
+            ->join('egg_variables as v', 'v.egg_id', '=', 's.egg_id')
+            ->leftJoin('server_variables as sv', fn ($j) => $j->on('sv.variable_id', '=', 'v.id')->on('sv.server_id', '=', 's.id'))
+            ->where('s.uuid', $uuid)->where('v.env_variable', $env)
+            ->first(['sv.variable_value', 'v.default_value']);
+        if ($row === null) {
+            return null;
+        }
+        $value = trim((string) ($row->variable_value ?? ''));
+
+        return $value !== '' ? $value : (trim((string) $row->default_value) ?: null);
+    }
+
     private function currentJar(string $uuid): ?string
     {
         $row = DB::table('servers as s')

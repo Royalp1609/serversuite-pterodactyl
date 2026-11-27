@@ -120,7 +120,7 @@ interface Status {
     failures: Array<{ path: string; reason: string }>;
     error: string | null;
     target: { name: string | null; version_number: string | null; action?: 'install' | 'remove' };
-    installed: { project_id: string; source: Source; name: string; version_number: string; icon_url: string | null; minecraft: string | null; loader: string | null; at: string | null } | null;
+    installed: { project_id: string; source: Source; name: string; version_number: string; version_id?: string | null; icon_url: string | null; minecraft: string | null; loader: string | null; at: string | null } | null;
 }
 interface Hit { id: string; name: string; author: string; description: string; downloads: number; icon_url: string | null; page_url: string | null }
 interface Version { id: string; version_number: string; channel: string; loaders: string[]; game_versions: string[]; compatible: boolean; reason: string | null }
@@ -285,6 +285,11 @@ export default () => {
 
     /** Versions for another loader or Minecraft version can be reviewed by someone who can switch the server. */
     const reviewable = (v: Version) => v.compatible || canSwitch;
+    // Packs reuse version numbers across loaders, so match on the id when the panel has it.
+    const isInstalled = (v: Version) => !!pack && s?.installed?.project_id === pack.id
+        && (s.installed.version_id ? s.installed.version_id === v.id : s.installed.version_number === v.version_number);
+    // Versions come newest first: the first compatible release (else any compatible one).
+    const newestId = (versions.find((v) => v.compatible && v.channel === 'release') ?? versions.find((v) => v.compatible))?.id ?? null;
 
     const review = (v: Version) => {
         if (!pack || !reviewable(v)) return;
@@ -448,7 +453,8 @@ export default () => {
                                         <span className="text-white font-semibold">{v.version_number}</span>
                                         {v.channel !== 'release' && <Chip>{v.channel}</Chip>}
                                         <span className="text-xs text-neutral-400">{v.loaders.map(ucfirst).join(', ')} · {v.game_versions.slice(0, 3).join(', ')}</span>
-                                        {s?.installed?.project_id === pack.id && s.installed.version_number === v.version_number && <Chip green>installed</Chip>}
+                                        {isInstalled(v) && <Chip green>installed</Chip>}
+                                        {v.id === newestId && !isInstalled(v) && <Chip green title="The newest release of this pack for this server's loader and Minecraft version">newest for this server</Chip>}
                                         {!v.compatible && <span className="text-xs text-neutral-400" style={{ marginLeft: 'auto' }}>{v.reason}</span>}
                                         {reviewable(v) && (
                                             <GhostButton style={v.compatible ? { marginLeft: 'auto' } : undefined} disabled={busy !== null} onClick={() => review(v)}>

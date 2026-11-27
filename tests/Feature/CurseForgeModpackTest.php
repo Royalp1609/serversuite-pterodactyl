@@ -154,6 +154,7 @@ it('installs a CurseForge pack end to end', function () {
     expect($pack->status)->toBe(Modpack::STATUS_INSTALLED, (string) $pack->error)
         ->and($pack->source)->toBe('curseforge')
         ->and(app(ModpackService::class)->status($this->server)['installed']['source'])->toBe('curseforge')
+        ->and(app(ModpackService::class)->status($this->server)['installed']['version_id'])->toBe('5001')
         ->and($this->wings->files['/mods/create-1.20.1-0.5.1.jar'])->toBe('create jar')
         ->and($this->wings->files['/config/create-common.toml'])->toBe('x = 1')
         ->and($this->wings->files)->not->toHaveKey('/mods/optifine.jar')

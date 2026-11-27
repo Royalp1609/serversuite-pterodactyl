@@ -71,3 +71,23 @@ it('runs after every install or reinstall, however it was started', function () 
     $this->server->forceFill(['status' => 'install_failed'])->save();
     Queue::assertNothingPushed();
 });
+
+it('replaces the stub jar the stock Sponge egg downloads with the universal jar', function () {
+    $sv = Pterodactyl\Models\EggVariable::query()->create(['egg_id' => $this->server->egg_id, 'env_variable' => 'SPONGE_VERSION', 'default_value' => '1.21.8-16.0.0']);
+    $this->wings->put('/server.jar', str_repeat('x', 54273));   // spongevanilla-1.21.8-16.0.0.jar: no Main-Class
+    $url = 'https://repo.spongepowered.org/repository/maven-releases/org/spongepowered/spongevanilla/1.21.8-16.0.0/spongevanilla-1.21.8-16.0.0-universal.jar';
+    $this->wings->remote[$url] = 'universal jar';
+    $this->ops->shouldNotReceive('setServerVariables');
+
+    $notes = app(PostSwitchService::class)->finish('srv-p');
+
+    expect($this->wings->files['/server.jar'])->toBe('universal jar')
+        ->and($notes[0]['title'])->toBe('Sponge jar replaced');
+
+    // A real jar (or the owner's own) is left alone, and other eggs are untouched.
+    $this->wings->put('/server.jar', str_repeat('x', 2 * 1048576));
+    expect(app(PostSwitchService::class)->finish('srv-p'))->toBe([]);
+    $sv->delete();
+    $this->wings->put('/server.jar', 'small paper jar');
+    expect(app(PostSwitchService::class)->finish('srv-p'))->toBe([]);
+});
