@@ -221,21 +221,34 @@ so it must be able to reach the game port.
 For hosts that don't want a public port per server. Players of **Java
 Minecraft** servers join on one public port (25565) of an edge, where
 [mc-router](https://github.com/itzg/mc-router) reads the name they typed and
-forwards them to that server's internal `IP:port`. Tested with mc-router 1.56.5.
+forwards them to that server's internal `IP:port`. Tested with mc-router 1.56.5
+and 1.57.0.
 
 With edge mode on, a new Java subdomain gets an address record to the edge (no
 SRV record) and a route on the router. Releasing or deleting the server removes
 the route; an allocation change moves the route (on the same "after the next
 start" rule as DNS moves). Bedrock, PocketMine/Nukkit and other games keep
 direct records: their clients don't send a host name. Subdomains made before
-edge mode was turned on stay direct until released and claimed again.
+edge mode was turned on stay direct until you move them:
+
+```bash
+php artisan serversuite:edge-convert edge --dry-run   # what would change
+php artisan serversuite:edge-convert edge             # all Java subdomains
+php artisan serversuite:edge-convert edge --server=<uuid>
+php artisan serversuite:edge-convert direct           # back off the edge
+```
+
+Onto the edge: the route is added, the address record points at the edge and
+the SRV record is removed. Back to direct: the address record is replaced by
+fresh A and SRV records to the server's own address (the name has no record
+for a moment), then the route is removed.
 
 Run mc-router on the edge (pin the version):
 
 ```yaml
 services:
   mc-router:
-    image: itzg/mc-router:1.56.5
+    image: itzg/mc-router:1.57.0
     restart: unless-stopped
     ports:
       - "25565:25565"            # public
@@ -244,13 +257,15 @@ services:
       - ./routes.json:/data/routes.json
     command: >
       -api-binding :8080
+      -api-key ${MC_ROUTER_API_KEY}
       -routes-config /data/routes.json
       -connection-rate-limit 50
 ```
 
-- **The API has no authentication.** Bind it to an internal address and
-  firewall it so only the panel can reach it. Anyone who can reach it can
-  send any name anywhere.
+- **Protect the API.** Anyone who can reach it can send any name anywhere.
+  Bind it to an internal address, firewall it so only the panel can reach
+  it, and (1.57 and later) set `-api-key` and enter the same key in the
+  panel. Without a key the API has no authentication at all.
 - **`-routes-config`** saves API changes to the file, so routes survive a
   restart. Without it the panel puts back missing routes within 10 minutes
   (`serversuite:edge-sync`), but players can't join until then.
@@ -265,15 +280,24 @@ services:
 - The route backend is the allocation's IP (not its alias). For an allocation
   on `0.0.0.0` the node's FQDN is used, so the edge must be able to reach the
   nodes on their game ports.
-- mc-router is now the single way in: run it with restarts and monitoring.
-  The panel manages one router; several instances for high availability
-  aren't supported yet.
+- **Default backend:** names without a route are dropped unless you set a
+  default backend (a holding or lobby server) in the panel. The panel sets it
+  on every router when saved and again with each sync.
+- **Node addresses:** when a node's allocations use IPs the routers can't
+  reach (public IPs, say), add `node id = internal address` lines; routes for
+  that node's servers use that address with the allocation's port.
+- **High availability:** list several router API URLs (one per line) and put
+  the routers behind the edge address (DNS round robin, a load balancer or a
+  floating IP). Every route goes to all of them; mc-router instances don't
+  share routes, so the sync checks each one and fills in what it missed.
 
 Then, under Admin → Server Suite → Subdomains → **Edge mode**: tick "Use the
 edge", enter the edge address the DNS records should point at (an IP or a host
-name) and the router API URL (`http://10.0.0.5:8080`), and use **Test the
-router**. The same settings can be set in `.env` (`SERVERSUITE_EDGE`,
-`SERVERSUITE_EDGE_ADDRESS`, `SERVERSUITE_EDGE_ROUTER_URL`); the admin page wins.
+name), the router API URL(s) (`http://10.0.0.5:8080`) and key, and use
+**Test the router**. The same settings can be set in `.env` (`SERVERSUITE_EDGE`,
+`SERVERSUITE_EDGE_ADDRESS`, `SERVERSUITE_EDGE_ROUTER_URL`,
+`SERVERSUITE_EDGE_API_KEY`, `SERVERSUITE_EDGE_DEFAULT_BACKEND`,
+`SERVERSUITE_EDGE_NODE_BACKENDS`); the admin page wins.
 
 ## Configuration
 

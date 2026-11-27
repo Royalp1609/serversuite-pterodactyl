@@ -14,31 +14,63 @@ class EdgeMode
     /** The port players join on through the edge. */
     public const PORT = 25565;
 
-    public function __construct(public readonly string $address, public readonly McRouterClient $router) {}
+    public function __construct(public readonly string $address, public readonly EdgeRouters $router) {}
 
     /** The configured edge, or null when edge mode is off or incomplete. */
     public static function fromConfig(): ?self
     {
         $c = (array) config('serversuite.subdomains.edge', []);
         $address = trim((string) ($c['address'] ?? ''));
-        $url = trim((string) ($c['router_url'] ?? ''));
-        if (! ($c['enabled'] ?? false) || $address === '' || $url === '') {
+        $routers = self::router();
+        if (! ($c['enabled'] ?? false) || $address === '' || $routers === null) {
             return null;
         }
 
-        return new self($address, new McRouterClient($url, (int) ($c['timeout'] ?? 5)));
+        return new self($address, $routers);
     }
 
     /**
-     * The router alone, for routes made earlier: set whenever its URL is,
+     * The routers alone, for routes made earlier: set whenever a URL is,
      * even with edge mode switched off for new claims.
      */
-    public static function router(): ?McRouterClient
+    public static function router(): ?EdgeRouters
     {
         $c = (array) config('serversuite.subdomains.edge', []);
-        $url = trim((string) ($c['router_url'] ?? ''));
+        $key = trim((string) ($c['api_key'] ?? ''));
 
-        return $url === '' ? null : new McRouterClient($url, (int) ($c['timeout'] ?? 5));
+        return EdgeRouters::fromList((string) ($c['router_url'] ?? ''), (int) ($c['timeout'] ?? 5), $key !== '' ? $key : null);
+    }
+
+    /** Where names without a route go (a holding server), or null: they're dropped. */
+    public static function defaultBackend(): ?string
+    {
+        $b = trim((string) config('serversuite.subdomains.edge.default_backend', ''));
+
+        return $b === '' ? null : $b;
+    }
+
+    /**
+     * Per-node backend host (#2): node id or FQDN => the address the routers
+     * reach that node on, for nodes whose allocations use public or
+     * otherwise unroutable IPs. From the admin setting ("node = host" lines)
+     * or a config array.
+     *
+     * @return array<string, string>
+     */
+    public static function nodeHosts(): array
+    {
+        $raw = config('serversuite.subdomains.edge.node_backends', []);
+        if (is_array($raw)) {
+            return array_change_key_case(array_map('strval', $raw), CASE_LOWER);
+        }
+        $out = [];
+        foreach (preg_split('/\R/', (string) $raw) ?: [] as $line) {
+            if (preg_match('/^\s*([^=\s]+)\s*=\s*(\S+)\s*$/', $line, $m)) {
+                $out[strtolower($m[1])] = $m[2];
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -68,6 +100,15 @@ class EdgeMode
             return null;
         }
         $host = trim((string) ($alloc->ip ?? ''));
+        $overrides = self::nodeHosts();
+        $nodeId = (string) ($alloc->node_id ?? $server->node_id ?? '');
+        $nodeFqdn = strtolower(trim((string) ($server->node->fqdn ?? '')));
+        if ($nodeId !== '' && isset($overrides[$nodeId])) {
+            $host = $overrides[$nodeId];
+        } elseif ($nodeFqdn !== '' && isset($overrides[$nodeFqdn])) {
+            $host = $overrides[$nodeFqdn];
+        }
+        $host = trim($host, '[]');
         if ($host === '' || $host === '0.0.0.0' || $host === '::') {
             $host = trim((string) ($server->node->fqdn ?? ''));
         }
@@ -89,11 +130,26 @@ class EdgeMode
             && ! preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/i', $address)) {
             return 'The edge address must be an IP address or a host name, without a port.';
         }
-        $routerUrl = trim($routerUrl);
-        if ($routerUrl !== '') {
-            $p = parse_url($routerUrl);
+        foreach (EdgeRouters::urls($routerUrl) as $url) {
+            $p = parse_url($url);
             if (! is_array($p) || ! in_array($p['scheme'] ?? '', ['http', 'https'], true) || ! isset($p['host']) || isset($p['user']) || isset($p['query'])) {
-                return 'The router API URL must look like http://10.0.0.5:8080.';
+                return "Each router API URL must look like http://10.0.0.5:8080 ({$url} doesn't).";
+            }
+        }
+
+        return null;
+    }
+
+    /** A default backend or node host setting check. Null when fine. */
+    public static function invalidExtras(string $defaultBackend, string $nodeLines): ?string
+    {
+        $hostPort = '/^(\[[0-9a-f:]+\]|[a-z0-9.-]+):\d{1,5}$/i';
+        if (trim($defaultBackend) !== '' && ! preg_match($hostPort, trim($defaultBackend))) {
+            return 'The default backend must be host:port, such as 10.0.0.20:25565.';
+        }
+        foreach (preg_split('/\R/', $nodeLines) ?: [] as $i => $line) {
+            if (trim($line) !== '' && ! preg_match('/^\s*[^=\s]+\s*=\s*(\[[0-9a-f:]+\]|[0-9a-f:]+|[a-z0-9.-]+)\s*$/i', $line)) {
+                return 'Node addresses: line ' . ($i + 1) . ' must be "node id or FQDN = internal address", such as 3 = 10.0.0.12.';
             }
         }
 

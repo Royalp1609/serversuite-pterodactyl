@@ -429,14 +429,24 @@ return [
         | server's internal IP:port. Other games keep their direct records.
         | The admin page's values win over these.
         |
-        | router_url: mc-router's API (-api-binding). It has no
-        | authentication, so it must only be reachable from the panel.
+        | router_url: mc-router's API (-api-binding). Several routers
+        | (high availability) go comma or newline separated; every route is
+        | put on all of them. Keep the API reachable only from the panel, and
+        | set api_key when mc-router runs with -api-key (1.57+).
+        | default_backend: host:port for names without a route (a holding
+        | server); empty drops them.
+        | node_backends: per node, the address the routers reach it on when
+        | its allocations' IPs aren't routable from them ("3 = 10.0.0.12"
+        | lines, node id or FQDN).
         */
         'edge' => [
-            'enabled'    => env('SERVERSUITE_EDGE', false),
-            'address'    => env('SERVERSUITE_EDGE_ADDRESS', ''),
-            'router_url' => env('SERVERSUITE_EDGE_ROUTER_URL', ''),
-            'timeout'    => 5,
+            'enabled'         => env('SERVERSUITE_EDGE', false),
+            'address'         => env('SERVERSUITE_EDGE_ADDRESS', ''),
+            'router_url'      => env('SERVERSUITE_EDGE_ROUTER_URL', ''),
+            'api_key'         => env('SERVERSUITE_EDGE_API_KEY', ''),
+            'default_backend' => env('SERVERSUITE_EDGE_DEFAULT_BACKEND', ''),
+            'node_backends'   => env('SERVERSUITE_EDGE_NODE_BACKENDS', ''),
+            'timeout'         => 5,
         ],
     ],
 
