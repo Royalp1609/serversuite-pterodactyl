@@ -11,12 +11,38 @@ use Illuminate\Support\Facades\Http;
  * them as {name: {backend: "host:port", ...}}. Names are lowercased by
  * mc-router.
  *
- * The API has no authentication: its URL must be reachable only from the
- * panel (a private address or a firewalled port), never from the internet.
+ * POST /defaultRoute {"backend": "host:port"} sets where unknown names go;
+ * an empty backend clears it (checked against 1.57.0). mc-router 1.57 can
+ * require an API key (-api-key), sent as X-API-KEY. Without one the API has
+ * no authentication: its URL must be reachable only from the panel (a
+ * private address or a firewalled port), never from the internet.
  */
 class McRouterClient
 {
-    public function __construct(private string $baseUrl, private int $timeout = 5) {}
+    public function __construct(private string $baseUrl, private int $timeout = 5, private ?string $apiKey = null) {}
+
+    /** The router's host, for messages. */
+    public function label(): string
+    {
+        return $this->host();
+    }
+
+    /**
+     * Where names without a route go: a holding server, or null to drop them.
+     *
+     * @throws \RuntimeException with a message safe to show the admin
+     */
+    public function setDefault(?string $backend): void
+    {
+        try {
+            $res = $this->http()->post($this->url('/defaultRoute'), ['backend' => (string) $backend]);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException("The edge router can't be reached ({$this->host()}).", previous: $e);
+        }
+        if (! $res->successful()) {
+            throw new \RuntimeException("The edge router refused the default route (HTTP {$res->status()}).");
+        }
+    }
 
     /**
      * Point a name at a backend (create or replace).
@@ -75,7 +101,9 @@ class McRouterClient
 
     private function http(): \Illuminate\Http\Client\PendingRequest
     {
-        return Http::timeout($this->timeout)->connectTimeout(min(3, $this->timeout))->acceptJson()->asJson();
+        $http = Http::timeout($this->timeout)->connectTimeout(min(3, $this->timeout))->acceptJson()->asJson();
+
+        return $this->apiKey !== null && $this->apiKey !== '' ? $http->withHeaders(['X-API-KEY' => $this->apiKey]) : $http;
     }
 
     private function url(string $path): string

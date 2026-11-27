@@ -703,24 +703,154 @@ class SubdomainService
      */
     public function syncEdgeRoutes(): ?int
     {
-        $router = EdgeMode::router();
-        if ($router === null || ($routes = $router->routes()) === null) {
+        $set = EdgeMode::router();
+        if ($set === null) {
             return null;
         }
+        $subs = Subdomain::query()->whereNotNull('edge_backend')->get();
+        $default = EdgeMode::defaultBackend();
         $fixed = 0;
-        foreach (Subdomain::query()->whereNotNull('edge_backend')->get() as $sub) {
-            if (($routes[strtolower($sub->fqdn)] ?? null) === $sub->edge_backend) {
+        $reached = 0;
+        // mc-router instances don't share routes: check each on its own.
+        foreach ($set->routers as $router) {
+            $routes = $router->routes();
+            if ($routes === null) {
+                logger()->warning('[Server Suite] edge router not answering', ['router' => $router->label()]);
                 continue;
             }
+            $reached++;
+            foreach ($subs as $sub) {
+                if (($routes[strtolower($sub->fqdn)] ?? null) === $sub->edge_backend) {
+                    continue;
+                }
+                try {
+                    $router->put($sub->fqdn, $sub->edge_backend);
+                    $fixed++;
+                } catch (\RuntimeException $e) {
+                    logger()->warning('[Server Suite] edge route resync failed', ['fqdn' => $sub->fqdn, 'router' => $router->label(), 'error' => $e->getMessage()]);
+                }
+            }
+            // The router API can't read the default back, and a restart
+            // forgets it, so set it every time (one small request).
             try {
-                $router->put($sub->fqdn, $sub->edge_backend);
-                $fixed++;
+                $router->setDefault($default);
             } catch (\RuntimeException $e) {
-                logger()->warning('[Server Suite] edge route resync failed', ['fqdn' => $sub->fqdn, 'error' => $e->getMessage()]);
+                logger()->warning('[Server Suite] edge default route failed', ['router' => $router->label(), 'error' => $e->getMessage()]);
             }
         }
 
-        return $fixed;
+        return $reached === 0 ? null : $fixed;
+    }
+
+    /**
+     * Move a direct subdomain onto the edge (#2): the route first, then its
+     * address record to the edge and its SRV record removed (players join on
+     * 25565). Only Java Minecraft servers. Returns what changed, or why not.
+     *
+     * @throws SubdomainException
+     */
+    public function convertToEdge(Subdomain $sub, bool $dryRun = false): string
+    {
+        $edge = EdgeMode::fromConfig();
+        if ($edge === null) {
+            throw new SubdomainException('Edge mode is off or not set up (edge address and router URL).');
+        }
+        if ($sub->edge_backend !== null) {
+            return 'already on the edge';
+        }
+        $server = $this->serverFor($sub);
+        if ($server === null || ! EdgeMode::appliesTo($server, $this->game($server))) {
+            return 'skipped: not a Java Minecraft server';
+        }
+        $backend = EdgeMode::backend($server);
+        if ($backend === null) {
+            throw new SubdomainException("{$sub->fqdn}: the server has no internal address for the router.");
+        }
+        $dns = $this->providerFor($sub);
+        if ($dns === null) {
+            throw new SubdomainException("{$sub->fqdn}: its domain is no longer configured.");
+        }
+        if ($dryRun) {
+            return "would route to {$backend} and point at {$edge->address}" . ($sub->srv_record_id ? ', removing its SRV record' : '');
+        }
+
+        try {
+            $edge->router->put($sub->fqdn, $backend);
+        } catch (\RuntimeException $e) {
+            throw new SubdomainException("{$sub->fqdn}: {$e->getMessage()}", previous: $e);
+        }
+        try {
+            $ids = $dns->updateRecords($sub->fqdn, $sub->a_record_id, null, $edge->address, EdgeMode::PORT);
+        } catch (\Throwable $e) {
+            $edge->router->remove($sub->fqdn);
+            throw new SubdomainException("{$sub->fqdn}: the DNS record could not be changed ({$e->getMessage()}). Nothing was moved.", previous: $e);
+        }
+        $srvGone = $sub->srv_record_id === null || $dns->deleteRecords(null, $sub->srv_record_id);
+        $sub->forceFill([
+            'a_record_id'   => $ids['a_record_id'] ?? $sub->a_record_id,
+            'srv_record_id' => $srvGone ? null : $sub->srv_record_id,
+            'edge_backend'  => $backend,
+        ])->save();
+
+        return "on the edge (route to {$backend})" . ($srvGone ? '' : '; its old SRV record could not be removed, so remove it in the zone');
+    }
+
+    /**
+     * Take a subdomain off the edge: fresh A + SRV records to the server's
+     * own address and port, then the route removed. The address record is
+     * replaced (a provider can't hold two), so the name is briefly without
+     * one; if the new records fail, the edge record is put back.
+     *
+     * @throws SubdomainException
+     */
+    public function convertToDirect(Subdomain $sub, bool $dryRun = false): string
+    {
+        if ($sub->edge_backend === null) {
+            return 'already direct';
+        }
+        $server = $this->serverFor($sub);
+        if ($server === null) {
+            return 'skipped: its server is gone';
+        }
+        [$ip, $port] = $this->target($server);
+        if ($ip === null || $port === null) {
+            throw new SubdomainException("{$sub->fqdn}: the server has no primary allocation.");
+        }
+        $dns = $this->providerFor($sub);
+        if ($dns === null) {
+            throw new SubdomainException("{$sub->fqdn}: its domain is no longer configured.");
+        }
+        $service = $this->game($server)->srvService;
+        if ($dryRun) {
+            return "would point at {$ip}:{$port}" . ($service ? " with a {$service} SRV record" : '') . ' and remove the route';
+        }
+        $edgeAddress = trim((string) config('serversuite.subdomains.edge.address', ''));
+
+        if (! $dns->deleteRecords($sub->a_record_id, null)) {
+            throw new SubdomainException("{$sub->fqdn}: its edge record could not be removed. Nothing was changed.");
+        }
+        try {
+            $res = $dns->createRecords($sub->label, $ip, $port, $service);
+        } catch (\Throwable $e) {
+            $restored = null;
+            if ($edgeAddress !== '') {
+                try {
+                    $restored = $dns->createRecords($sub->label, $edgeAddress, EdgeMode::PORT, null);
+                } catch (\Throwable) {
+                }
+            }
+            if ($restored !== null) {
+                $sub->forceFill(['a_record_id' => $restored['a_record_id']])->save();
+            }
+            throw new SubdomainException("{$sub->fqdn}: the direct records could not be made ({$e->getMessage()})" . ($restored ? '; the edge record was put back.' : '; the name has no record now, so claim it again or fix it in the zone.'), previous: $e);
+        }
+        $router = EdgeMode::router();
+        if ($router === null || ! $router->remove($sub->fqdn)) {
+            logger()->warning('[Server Suite] edge route could not be removed', ['fqdn' => $sub->fqdn]);
+        }
+        $sub->forceFill(['a_record_id' => $res['a_record_id'], 'srv_record_id' => $res['srv_record_id'], 'ip' => $ip, 'port' => $port, 'edge_backend' => null])->save();
+
+        return "direct ({$ip}:{$port})";
     }
 
     /** Best effort: a route left behind only reaches a name whose DNS is gone. */
@@ -752,6 +882,12 @@ class SubdomainService
     }
 
     /** Credentials for the zone a subdomain lives in, or null if they're gone. */
+    /** The panel server a subdomain belongs to, with its allocation and node. Protected so tests can stand it in. */
+    protected function serverFor(Subdomain $sub): ?object
+    {
+        return \Pterodactyl\Models\Server::query()->with(['allocation', 'node', 'egg'])->where('uuid', $sub->server_uuid)->first();
+    }
+
     private function providerFor(Subdomain $sub): ?DnsProvider
     {
         if ($sub->domain_id !== null) {

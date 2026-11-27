@@ -457,7 +457,7 @@
                     Java Minecraft subdomains join through one public port (25565) on a hostname router instead of each server's own port.
                     A new claim gets an address record to the edge (no SRV record) and a route on
                     <a href="https://github.com/itzg/mc-router" target="_blank" rel="noopener noreferrer">mc-router</a> to the server's internal IP:port.
-                    Bedrock and other games keep direct records. Subdomains made before edge mode was turned on stay direct.
+                    Bedrock and other games keep direct records. Subdomains made before edge mode was turned on stay direct until you move them with <code>php artisan serversuite:edge-convert edge</code> (add <code>--dry-run</code> to see what would change; <code>direct</code> moves them back).
                     In use: {{ $ssEdgeCount }}.
                 </p>
                 <form method="POST" action="/extensions/serversuite/admin/edge" autocomplete="off">
@@ -473,9 +473,25 @@
                         <input type="text" class="form-control" name="edge_address" value="{{ $ssEdge['address'] ?? '' }}" placeholder="203.0.113.5 or edge.example.com">
                     </div>
                     <div class="form-group">
-                        <label>Router API URL (internal only)</label>
-                        <input type="text" class="form-control" name="edge_router_url" value="{{ $ssEdge['router_url'] ?? '' }}" placeholder="http://10.0.0.5:8080">
-                        <p class="text-muted small">mc-router's <code>-api-binding</code>. The API has no authentication: never expose it to the internet. Run mc-router with <code>-routes-config</code> so routes survive a restart; the panel also puts back missing routes every 10 minutes.</p>
+                        <label>Router API URL(s) (internal only)</label>
+                        <textarea class="form-control" name="edge_router_url" rows="2" placeholder="http://10.0.0.5:8080">{{ $ssEdge['router_url'] ?? '' }}</textarea>
+                        <p class="text-muted small">mc-router's <code>-api-binding</code>. For more than one router behind the edge address (high availability), one per line: every route goes to all of them. Never expose the API to the internet. Run mc-router with <code>-routes-config</code> so routes survive a restart; the panel also puts back missing routes and the default route on every router every 10 minutes.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Router API key</label>
+                        <input type="password" class="form-control" name="edge_api_key" value="" autocomplete="new-password" placeholder="{{ ($ssEdge['api_key'] ?? '') !== '' ? 'Saved (leave blank to keep it)' : 'Optional' }}">
+                        <p class="text-muted small">When mc-router runs with <code>-api-key</code> (1.57 and later), the same key; recommended. Stored encrypted and never shown again.
+                            @if (($ssEdge['api_key'] ?? '') !== '')<label style="font-weight:normal;"><input type="checkbox" name="edge_api_key_clear" value="1"> Remove the saved key</label>@endif</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Default backend</label>
+                        <input type="text" class="form-control" name="edge_default_backend" value="{{ $ssEdge['default_backend'] ?? '' }}" placeholder="10.0.0.20:25565 (optional)">
+                        <p class="text-muted small">Where players go when they join a name without a route, such as a holding or lobby server. Leave empty to drop them.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Node addresses for the router</label>
+                        <textarea class="form-control" name="edge_node_backends" rows="2" placeholder="3 = 10.0.0.12">{{ is_array($ssEdge['node_backends'] ?? null) ? '' : ($ssEdge['node_backends'] ?? '') }}</textarea>
+                        <p class="text-muted small">Optional, one per line: node id or FQDN = the address the routers reach that node on. Only needed when a node's allocations use IPs the routers can't reach (public IPs, for example). By default the route goes to the allocation's IP.</p>
                     </div>
                     <button type="submit" name="action" value="save" class="btn btn-primary">Save edge settings</button>
                     <button type="submit" name="action" value="test" class="btn btn-default">Test the router</button>

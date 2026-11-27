@@ -17,28 +17,42 @@ use ServerSuite\Services\SubdomainService;
 
 const CF = 'https://api.cloudflare.com/client/v4';
 const ROUTER = 'http://10.9.0.2:8080';
+const ROUTER2 = 'http://10.9.0.3:8080';
 
-/** mc-router 1.56.5's routes API, as probed against the real binary. */
-function fakeRouter(Request $r): \GuzzleHttp\Promise\PromiseInterface
+/**
+ * mc-router's routes API, as probed against the real binary (1.56.5, and
+ * 1.57.0 for /defaultRoute and -api-key). $n '' is ROUTER, '2' is ROUTER2:
+ * routes$n, routerDown$n, default$n; routerKey makes both demand X-API-KEY.
+ */
+function fakeRouter(Request $r, string $n = ''): \GuzzleHttp\Promise\PromiseInterface
 {
-    if ($GLOBALS['routerDown']) {
+    if ($GLOBALS['routerDown' . $n] ?? false) {
         throw new Illuminate\Http\Client\ConnectionException('Connection refused');
     }
+    if (($GLOBALS['routerKey'] ?? null) !== null && ! $r->hasHeader('X-API-KEY', $GLOBALS['routerKey'])) {
+        return Http::response(null, 401);
+    }
+    $routes = &$GLOBALS['routes' . $n];
     $path = (string) parse_url($r->url(), PHP_URL_PATH);
     if ($r->method() === 'GET' && $path === '/routes') {
-        return Http::response(array_map(fn ($b) => ['backend' => $b, 'scalingTarget' => ''], $GLOBALS['routes']));
+        return Http::response(array_map(fn ($b) => ['backend' => $b, 'scalingTarget' => ''], $routes));
     }
     if ($r->method() === 'POST' && $path === '/routes') {
-        $GLOBALS['routes'][strtolower($r['serverAddress'])] = $r['backend'];
+        $routes[strtolower($r['serverAddress'])] = $r['backend'];
 
         return Http::response(null, 201);
     }
+    if ($r->method() === 'POST' && $path === '/defaultRoute') {
+        $GLOBALS['default' . $n] = $r['backend'] === '' ? null : $r['backend'];
+
+        return Http::response(null, 200);
+    }
     if ($r->method() === 'DELETE' && str_starts_with($path, '/routes/')) {
         $name = rawurldecode(substr($path, 8));
-        if (! isset($GLOBALS['routes'][$name])) {
+        if (! isset($routes[$name])) {
             return Http::response(null, 404);
         }
-        unset($GLOBALS['routes'][$name]);
+        unset($routes[$name]);
 
         return Http::response(null, 200);
     }
@@ -68,11 +82,16 @@ function fakeCloudflare(): void
     $GLOBALS['cfRecords'] = [];
     $GLOBALS['cfDeleteFails'] = false;
     // A fake mc-router (#2) at ROUTER: name => backend, and a switch for it being down.
-    $GLOBALS['routes'] = [];
-    $GLOBALS['routerDown'] = false;
+    $GLOBALS['routes'] = $GLOBALS['routes2'] = [];
+    $GLOBALS['routerDown'] = $GLOBALS['routerDown2'] = false;
+    $GLOBALS['default'] = $GLOBALS['default2'] = 'unset';
+    $GLOBALS['routerKey'] = null;
     Http::fake(function (Request $r) use (&$n) {
         $srvFails = $GLOBALS['cfSrvFails'];
         $url = $r->url();
+        if (str_starts_with($url, ROUTER2)) {
+            return fakeRouter($r, '2');
+        }
         if (str_starts_with($url, ROUTER)) {
             return fakeRouter($r);
         }
@@ -866,4 +885,110 @@ it('checks the edge admin settings', function () {
         ->and($bad('', 'ftp://10.0.0.1'))->not->toBeNull()
         ->and($bad('', 'http://user:pw@10.0.0.1'))->not->toBeNull()
         ->and($bad('', 'not a url'))->not->toBeNull();
+});
+
+// Edge mode, part 2 (#2): several routers, API key, default route, node
+// addresses, and moving existing subdomains on and off the edge.
+
+/** A SubdomainService whose servers are the given test objects (no panel models here). */
+function edgeService(array $servers): SubdomainService
+{
+    return new class ($servers) extends SubdomainService {
+        public function __construct(private array $servers) {}
+
+        protected function serverFor(\ServerSuite\Models\Subdomain $sub): ?object
+        {
+            return $this->servers[$sub->server_uuid] ?? null;
+        }
+    };
+}
+
+it('puts every route on every router, and a router that missed one gets it at the next sync', function () {
+    edgeOn();
+    config(['serversuite.subdomains.edge.router_url' => ROUTER . "\n" . ROUTER2]);
+    $d = panelDomain();
+    allow('srv-1', 3);
+
+    cfService()->claim(lanServer(), 'one', $d->id);
+    expect($GLOBALS['routes'])->toBe(['one.play.example.com' => '10.9.0.20:25570'])->and($GLOBALS['routes2'])->toBe($GLOBALS['routes']);
+
+    $GLOBALS['routerDown2'] = true;   // one router down: the claim still works
+    cfService()->claim(lanServer(), 'two', $d->id);
+    expect($GLOBALS['routes'])->toHaveKey('two.play.example.com')->and($GLOBALS['routes2'])->not->toHaveKey('two.play.example.com');
+
+    $GLOBALS['routerDown2'] = false;
+    expect(cfService()->syncEdgeRoutes())->toBe(1)->and($GLOBALS['routes2'])->toHaveKey('two.play.example.com');
+
+    $GLOBALS['routerDown'] = $GLOBALS['routerDown2'] = true;   // all down: the claim fails
+    expect(fn () => cfService()->claim(lanServer(), 'three', $d->id))->toThrow(SubdomainException::class, 'edge router');
+});
+
+it('sends the API key, and sets or clears the default route on every router at each sync', function () {
+    edgeOn();
+    $GLOBALS['routerKey'] = 's3cret';
+    config(['serversuite.subdomains.edge.router_url' => ROUTER . ',' . ROUTER2, 'serversuite.subdomains.edge.api_key' => 's3cret',
+        'serversuite.subdomains.edge.default_backend' => '10.9.0.40:25565']);
+
+    expect(cfService()->syncEdgeRoutes())->toBe(0)
+        ->and([$GLOBALS['default'], $GLOBALS['default2']])->toBe(['10.9.0.40:25565', '10.9.0.40:25565']);
+
+    config(['serversuite.subdomains.edge.default_backend' => '']);
+    cfService()->syncEdgeRoutes();
+    expect([$GLOBALS['default'], $GLOBALS['default2']])->toBe([null, null]);
+
+    config(['serversuite.subdomains.edge.api_key' => 'wrong']);
+    expect(cfService()->syncEdgeRoutes())->toBeNull();   // 401 everywhere: not reached
+});
+
+it('routes a node through its override address, by node id or FQDN', function () {
+    config(['serversuite.subdomains.edge.node_backends' => "3 = 10.0.0.12\nnode2.example.com = [fd00::9]"]);
+    $on = fn ($node, $fqdn) => (object) ['node_id' => $node, 'node' => (object) ['fqdn' => $fqdn], 'allocation' => (object) ['ip' => '203.0.113.10', 'port' => 25570, 'node_id' => $node]];
+
+    expect(\ServerSuite\Edge\EdgeMode::backend($on(3, 'node3.example.com')))->toBe('10.0.0.12:25570')
+        ->and(\ServerSuite\Edge\EdgeMode::backend($on(2, 'node2.example.com')))->toBe('[fd00::9]:25570')
+        ->and(\ServerSuite\Edge\EdgeMode::backend($on(5, 'node5.example.com')))->toBe('203.0.113.10:25570')
+        ->and(\ServerSuite\Edge\EdgeMode::invalidExtras('10.0.0.40:25565', "3 = 10.0.0.12"))->toBeNull()
+        ->and(\ServerSuite\Edge\EdgeMode::invalidExtras('10.0.0.40', ''))->not->toBeNull()
+        ->and(\ServerSuite\Edge\EdgeMode::invalidExtras('', 'just text'))->toContain('line 1');
+});
+
+it('moves an existing direct subdomain onto the edge and back', function () {
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(lanServer(), 'old', $d->id);   // edge mode off: A + SRV to the public alias
+    expect($sub->edge_backend)->toBeNull()->and($sub->srv_record_id)->not->toBeNull();
+    $svc = edgeService(['srv-1' => lanServer()]);
+
+    expect(fn () => $svc->convertToEdge($sub))->toThrow(SubdomainException::class, 'Edge mode is off');
+    edgeOn();
+
+    expect($svc->convertToEdge($sub, true))->toContain('would route to 10.9.0.20:25570')
+        ->and($GLOBALS['routes'])->toBe([]);
+
+    expect($svc->convertToEdge($sub->fresh()))->toBe('on the edge (route to 10.9.0.20:25570)');
+    $sub = $sub->fresh();
+    expect($sub->edge_backend)->toBe('10.9.0.20:25570')->and($sub->srv_record_id)->toBeNull()
+        ->and($GLOBALS['routes'])->toBe(['old.play.example.com' => '10.9.0.20:25570'])
+        ->and(collect($GLOBALS['cfRecords'])->pluck(0)->all())->toBe(['A']);
+    Http::assertSent(fn (Request $r) => $r->method() === 'PATCH' && ($r['content'] ?? null) === '198.51.100.7');
+    expect($svc->convertToEdge($sub))->toBe('already on the edge');
+
+    expect($svc->convertToDirect($sub))->toBe('direct (203.0.113.10:25570)');
+    $sub = $sub->fresh();
+    expect($sub->edge_backend)->toBeNull()->and($sub->srv_record_id)->not->toBeNull()
+        ->and($GLOBALS['routes'])->toBe([])
+        ->and(collect($GLOBALS['cfRecords'])->pluck(0)->sort()->values()->all())->toBe(['A', 'SRV']);
+});
+
+it('puts the edge record back when the direct records fail', function () {
+    edgeOn();
+    $d = panelDomain();
+    allow('srv-1', 1);
+    $sub = cfService()->claim(lanServer(), 'edgy', $d->id);
+    $GLOBALS['cfSrvFails'] = true;
+
+    expect(fn () => edgeService(['srv-1' => lanServer()])->convertToDirect($sub))->toThrow(SubdomainException::class, 'edge record was put back');
+    expect($sub->fresh()->edge_backend)->toBe('10.9.0.20:25570')
+        ->and(collect($GLOBALS['cfRecords'])->pluck(0)->all())->toBe(['A'])
+        ->and($GLOBALS['routes'])->toHaveKey('edgy.play.example.com');
 });

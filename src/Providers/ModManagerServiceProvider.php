@@ -288,6 +288,7 @@ class ModManagerServiceProvider extends ServiceProvider
                 \ServerSuite\Console\Commands\AutoUpgradesCommand::class,
                 \ServerSuite\Console\Commands\CheckDnsTokensCommand::class,
                 \ServerSuite\Console\Commands\SyncEdgeRoutesCommand::class,
+                \ServerSuite\Console\Commands\ConvertEdgeSubdomainsCommand::class,
                 \ServerSuite\Console\Commands\CheckReleaseCommand::class,
             ]);
         }
@@ -330,6 +331,9 @@ class ModManagerServiceProvider extends ServiceProvider
                 'edge_enabled'             => ['serversuite.subdomains.edge.enabled',       'bool'],
                 'edge_address'             => ['serversuite.subdomains.edge.address',       'string'],
                 'edge_router_url'          => ['serversuite.subdomains.edge.router_url',    'string'],
+                'edge_api_key'             => ['serversuite.subdomains.edge.api_key',       'secret'],
+                'edge_default_backend'     => ['serversuite.subdomains.edge.default_backend', 'string'],
+                'edge_node_backends'       => ['serversuite.subdomains.edge.node_backends', 'string'],
             ];
 
             foreach (ModManagerGlobalSetting::allSettings() as $key => $value) {
@@ -337,6 +341,13 @@ class ModManagerServiceProvider extends ServiceProvider
                     continue;
                 }
                 [$configKey, $type] = $map[$key];
+                if ($type === 'secret') {
+                    try {
+                        $value = \Illuminate\Support\Facades\Crypt::decryptString((string) $value);
+                    } catch (\Throwable) {
+                        continue;   // unreadable (APP_KEY changed): leave the config value
+                    }
+                }
                 config([$configKey => $type === 'bool' ? (bool) (int) $value : $value]);
             }
         } catch (\Throwable $e) {

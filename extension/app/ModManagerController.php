@@ -2457,23 +2457,37 @@ class ModManagerController extends Controller
         $data = $request->validate([
             'edge_enabled'    => ['nullable'],
             'edge_address'    => ['nullable', 'string', 'max:253'],
-            'edge_router_url' => ['nullable', 'string', 'max:300'],
+            'edge_router_url' => ['nullable', 'string', 'max:1000'],
+            'edge_api_key'    => ['nullable', 'string', 'max:200'],
+            'edge_api_key_clear' => ['nullable'],
+            'edge_default_backend' => ['nullable', 'string', 'max:300'],
+            'edge_node_backends'   => ['nullable', 'string', 'max:4000'],
         ]);
         $address = trim((string) ($data['edge_address'] ?? ''));
         $url = trim((string) ($data['edge_router_url'] ?? ''));
-        if (($bad = \ServerSuite\Edge\EdgeMode::invalid($address, $url)) !== null) {
+        $default = trim((string) ($data['edge_default_backend'] ?? ''));
+        $nodes = trim((string) ($data['edge_node_backends'] ?? ''));
+        if (($bad = \ServerSuite\Edge\EdgeMode::invalid($address, $url) ?? \ServerSuite\Edge\EdgeMode::invalidExtras($default, $nodes)) !== null) {
             return $this->adminFlash(['edge_error' => $bad], '#edge');
         }
+        // The key is write-only: a blank field keeps the stored one.
+        $newKey = trim((string) ($data['edge_api_key'] ?? ''));
+        $key = $request->boolean('edge_api_key_clear') ? '' : ($newKey !== '' ? $newKey : trim((string) config('serversuite.subdomains.edge.api_key', '')));
 
         if ($request->input('action') === 'test') {
-            if ($url === '') {
+            $set = \ServerSuite\Edge\EdgeRouters::fromList($url, 5, $key !== '' ? $key : null);
+            if ($set === null) {
                 return $this->adminFlash(['edge_error' => 'Enter the router API URL first.'], '#edge');
             }
-            $routes = (new \ServerSuite\Edge\McRouterClient($url))->routes();
+            $lines = [];
+            $bad = false;
+            foreach ($set->routers as $i => $r) {
+                $routes = $r->routes();
+                $bad = $bad || $routes === null;
+                $lines[] = $r->label() . ': ' . ($routes === null ? 'no answer (GET /routes; check the URL and API key)' : count($routes) . ' route(s)');
+            }
 
-            return $this->adminFlash($routes === null
-                ? ['edge_error' => 'The router did not answer at that URL (GET /routes).']
-                : ['edge_ok' => 'The router answered: ' . count($routes) . ' route(s).'], '#edge');
+            return $this->adminFlash([$bad ? 'edge_error' : 'edge_ok' => implode('; ', $lines) . '.'], '#edge');
         }
 
         $on = $request->boolean('edge_enabled');
@@ -2483,6 +2497,26 @@ class ModManagerController extends Controller
         ModManagerGlobalSetting::setValue('edge_enabled', $on ? '1' : '0');
         ModManagerGlobalSetting::setValue('edge_address', $address !== '' ? $address : null);
         ModManagerGlobalSetting::setValue('edge_router_url', $url !== '' ? $url : null);
+        ModManagerGlobalSetting::setValue('edge_default_backend', $default !== '' ? $default : null);
+        ModManagerGlobalSetting::setValue('edge_node_backends', $nodes !== '' ? $nodes : null);
+        if ($request->boolean('edge_api_key_clear')) {
+            ModManagerGlobalSetting::setValue('edge_api_key', null);
+        } elseif ($newKey !== '') {
+            ModManagerGlobalSetting::setValue('edge_api_key', \Illuminate\Support\Facades\Crypt::encryptString($newKey));
+        }
+        // Apply the default route now rather than at the next sync.
+        config(['serversuite.subdomains.edge.router_url' => $url, 'serversuite.subdomains.edge.api_key' => $key, 'serversuite.subdomains.edge.default_backend' => $default]);
+        $failed = [];
+        foreach (\ServerSuite\Edge\EdgeMode::router()?->routers ?? [] as $r) {
+            try {
+                $r->setDefault($default !== '' ? $default : null);
+            } catch (\RuntimeException $e) {
+                $failed[] = $r->label();
+            }
+        }
+        if ($failed !== []) {
+            return $this->adminFlash(['edge_ok' => 'Edge settings saved.', 'edge_error' => 'The default route could not be set on ' . implode(', ', $failed) . ' yet; the next sync (every 10 minutes) tries again.'], '#edge');
+        }
 
         return $this->adminFlash(['edge_ok' => 'Edge settings saved.'], '#edge');
     }
