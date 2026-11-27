@@ -175,6 +175,7 @@ class ModpackService
             'target'    => ['name' => $pack->target['name'] ?? null, 'version_number' => $pack->target['version_number'] ?? null, 'action' => $pack->plan['action'] ?? 'install'],
             'installed' => $pack->hasInstalledPack() ? [
                 'project_id' => $pack->project_id, 'source' => $pack->source ?: 'modrinth', 'name' => $pack->name, 'version_number' => $pack->version_number,
+                'version_id' => $pack->version_id,
                 'icon_url' => $pack->icon_url, 'minecraft' => $pack->minecraft, 'loader' => $pack->loader,
                 'at' => $pack->installed_at?->toIso8601String(),
             ] : null,

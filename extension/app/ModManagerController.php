@@ -1391,7 +1391,26 @@ class ModManagerController extends Controller
         $report = $svc->report($srv->uuid, $request->boolean('warnings'), $minecraft ? null : $games->logSources($srv));
 
         // Crash reports are Minecraft's. array_replace, not +: + keeps the report's own key.
-        return response()->json(['data' => ['minecraft' => $minecraft] + ($minecraft ? $report : array_replace($report, ['crashes' => []]))]);
+        $report = $svc->withAck($srv->uuid, $minecraft ? $report : array_replace($report, ['crashes' => []]));
+
+        return response()->json(['data' => ['minecraft' => $minecraft] + $report]);
+    }
+
+    /** POST /{server}/errors/acknowledge {undo?: bool}: hide what the Errors tab shows now, until it happens again */
+    public function errorsAcknowledge(Request $request, string $server): JsonResponse
+    {
+        $srv = $this->resolveServer($server);
+        $this->authorizeEndpoint($request, $srv, __FUNCTION__);
+
+        $games = app(\ServerSuite\Services\GameDetectionService::class);
+        $svc = app(\ServerSuite\Services\ErrorLogService::class);
+        if ($request->boolean('undo')) {
+            $svc->unacknowledge($srv->uuid);
+        } else {
+            $svc->acknowledge($srv->uuid, $games->for($srv)->isMinecraft() ? null : $games->logSources($srv));
+        }
+
+        return response()->json(['data' => ['ok' => true]]);
     }
 
     /** GET /{server}/errors/crash?name=crash-....txt : one crash report (Minecraft) */

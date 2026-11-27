@@ -250,9 +250,21 @@ class LoaderDetectionService
     protected function detectGameVersion(object $server, object $egg): ?string
     {
         // Names commonly used by Minecraft eggs for the game version.
-        $versionVarNames = ['MC_VERSION', 'MINECRAFT_VERSION', 'GAME_VERSION', 'VERSION'];
+        // VANILLA_VERSION: stock Vanilla egg; DL_VERSION: Spigot egg.
+        $versionVarNames = ['MC_VERSION', 'MINECRAFT_VERSION', 'VANILLA_VERSION', 'DL_VERSION', 'GAME_VERSION', 'VERSION'];
 
         $value = $this->serverVariable($server, $versionVarNames);
+
+        // Sponge's egg holds its own build, "<minecraft>-<sponge>" (1.21.1-12.0.4).
+        if ($value === null) {
+            $sponge = $this->serverVariable($server, ['SPONGE_VERSION']);
+            if ($sponge !== null && preg_match('/^(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)-/', trim($sponge), $m)) {
+                return $m[1];
+            }
+            if ($sponge !== null) {
+                return $this->sourceGameVersionFromFiles($server);
+            }
+        }
 
         if ($value === null) {
             return null;

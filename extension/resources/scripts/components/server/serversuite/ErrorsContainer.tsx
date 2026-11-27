@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ServerContext } from '@/state/server';
 import http from '@/api/http';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faExclamationTriangle, faSpinner, faSync } from '@fortawesome/free-solid-svg-icons';
+import { faCheck, faExclamationTriangle, faSpinner, faSync } from '@fortawesome/free-solid-svg-icons';
 import tw from 'twin.macro';
 import styled from 'styled-components/macro';
 
@@ -14,6 +14,8 @@ import styled from 'styled-components/macro';
  * BepInEx's. When plugins fail because Rust changed under Oxide/Carbon, a
  * notice says so instead of blaming them. Read through Wings (the
  * ErrorLogService); refreshes every 15 s while the tab is open.
+ * Acknowledge hides what is listed now until it happens again (a group
+ * that repeats, a new log after a restart, a newer crash report).
  */
 
 const Wrapper = styled.div`${tw`p-6 max-w-7xl mx-auto`};`;  // same page margins as the Mods tab
@@ -60,11 +62,12 @@ const GhostButton = styled.button`
 interface Culprit { name: string | null; evidence: string; strength: string }
 interface Group {
     key: string; level: 'error' | 'warn'; count: number; first: string; last: string; message: string; exception: string | null;
-    culprit: Culprit | null; mod: { mod_name: string | null } | null; detail: string; framework?: boolean;
+    culprit: Culprit | null; mod: { mod_name: string | null } | null; detail: string; framework?: boolean; acknowledged?: boolean;
 }
 interface Report {
     minecraft: boolean; found: boolean; size: number; partial: boolean; files: string[]; groups: Group[];
-    crashes: { name: string; at: string | null }[]; notice: { plugins: string[]; wipe_day: boolean } | null;
+    crashes: { name: string; at: string | null; acknowledged?: boolean }[]; notice: { plugins: string[]; wipe_day: boolean } | null;
+    ack: { at: string } | null; new_count: number;
 }
 interface Crash { name: string; summary: string | null; suspects: (Culprit & { mod_name: string | null })[]; text: string }
 
@@ -79,6 +82,8 @@ export default () => {
     const [crash, setCrash] = useState<Crash | null>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [showAcked, setShowAcked] = useState(false);
+    const [acking, setAcking] = useState(false);
 
     const load = useCallback((refresh = false) => {
         if (!uuid) return;
@@ -100,7 +105,18 @@ export default () => {
         .then((res) => setCrash(res.data.data))
         .catch((e) => setError(e?.response?.data?.error || 'Could not open the crash report.'));
 
+    const acknowledge = (undo = false) => {
+        setAcking(true);
+        http.post(`${base}/acknowledge`, { undo })
+            .then(() => load(true))
+            .catch((e) => setError(e?.response?.data?.error || e?.response?.data?.message || 'Could not acknowledge.'))
+            .finally(() => setAcking(false));
+    };
+
     const r = report;
+    const groups = (r?.groups ?? []).filter((g) => showAcked || !g.acknowledged);
+    const crashes = (r?.crashes ?? []).filter((c) => showAcked || !c.acknowledged);
+    const ackedCount = (r?.groups ?? []).filter((g) => g.acknowledged).length + (r?.crashes ?? []).filter((c) => c.acknowledged).length;
     const files = r?.files?.length ? r.files : ['logs/latest.log'];
 
     return (
@@ -123,8 +139,24 @@ export default () => {
                         <GhostButton onClick={() => load(true)} disabled={busy}>
                             <FontAwesomeIcon icon={busy ? faSpinner : faSync} spin={busy} /> Refresh
                         </GhostButton>
+                        {!!r && r.new_count > 0 && (
+                            <GhostButton onClick={() => acknowledge()} disabled={acking} title="Hide these errors and crash reports until they happen again">
+                                <FontAwesomeIcon icon={acking ? faSpinner : faCheck} spin={acking} /> Acknowledge
+                            </GhostButton>
+                        )}
                     </span>
                 </div>
+                {r?.ack && (
+                    <p className="text-xs text-neutral-500 mb-3 flex items-center gap-3 flex-wrap">
+                        <span>Acknowledged {new Date(r.ack.at).toLocaleString()}: {ackedCount} hidden until {ackedCount === 1 ? 'it happens' : 'they happen'} again.</span>
+                        {ackedCount > 0 && (
+                            <label className="flex items-center gap-1 text-neutral-400">
+                                <input type="checkbox" checked={showAcked} onChange={(e) => setShowAcked(e.target.checked)} /> Show them
+                            </label>
+                        )}
+                        <button className="underline text-neutral-400" onClick={() => acknowledge(true)} disabled={acking}>Undo</button>
+                    </p>
+                )}
                 {error && r && <p className="text-sm text-red-400 mb-3">{error}</p>}
 
                 {r?.notice && (
@@ -140,8 +172,8 @@ export default () => {
                     </Notice>
                 )}
 
-                {r?.groups.map((g) => (
-                    <Row key={g.key}>
+                {groups.map((g) => (
+                    <Row key={g.key} style={g.acknowledged ? { opacity: 0.55 } : undefined}>
                         <Head onClick={() => toggle(g.key)}>
                             <Badge error={g.level === 'error'}>{g.level === 'error' ? 'Error' : 'Warn'}</Badge>
                             <span className="text-xs text-neutral-400 flex-shrink-0" title="times in this part of the log">×{g.count}</span>
@@ -152,24 +184,28 @@ export default () => {
                             <span className="flex flex-col items-end gap-1 flex-shrink-0">
                                 {g.mod?.mod_name && <Chip title={g.culprit?.evidence}>{g.culprit?.strength === 'weak' ? 'maybe ' : ''}{g.mod.mod_name}</Chip>}
                                 {g.framework && <span className="text-xs text-neutral-500" title="A method, field or type the plugin uses is missing: usually Rust updated before Oxide/Carbon.">probably not the plugin&apos;s fault</span>}
+                                {g.acknowledged && <span className="text-xs text-neutral-500">acknowledged</span>}
                                 {(g.first || g.last) && <span className="text-xs text-neutral-500 font-mono">{g.count > 1 ? `${g.first} – ${g.last}` : g.last}</span>}
                             </span>
                         </Head>
                         {open.includes(g.key) && <Pre>{g.detail}</Pre>}
                     </Row>
                 ))}
-                {r?.found && r.groups.length === 0 && (
-                    <p className="text-center text-sm text-neutral-500 py-6">No {warnings ? 'errors or warnings' : 'errors'} in the log.</p>
+                {r?.found && groups.length === 0 && (
+                    <p className="text-center text-sm text-neutral-500 py-6">
+                        {r.groups.length > 0 ? `No new ${warnings ? 'errors or warnings' : 'errors'} since you acknowledged.` : `No ${warnings ? 'errors or warnings' : 'errors'} in the log.`}
+                    </p>
                 )}
             </Panel>
 
             {r?.minecraft && (
                 <Panel>
                     <h2 className="text-lg font-semibold text-white mb-2">Crash reports</h2>
-                    {r.crashes.length === 0 && <p className="text-sm text-neutral-500">No crash reports.</p>}
-                    {r.crashes.map((c) => (
-                        <Row key={c.name} className="flex items-center gap-3 px-3 py-2">
+                    {crashes.length === 0 && <p className="text-sm text-neutral-500">{r.crashes.length > 0 ? 'No new crash reports since you acknowledged.' : 'No crash reports.'}</p>}
+                    {crashes.map((c) => (
+                        <Row key={c.name} className="flex items-center gap-3 px-3 py-2" style={c.acknowledged ? { opacity: 0.55 } : undefined}>
                             <span className="text-sm text-neutral-200 flex-1 font-mono break-all">{c.name}</span>
+                            {c.acknowledged && <span className="text-xs text-neutral-500">acknowledged</span>}
                             {c.at && <span className="text-xs text-neutral-500">{new Date(c.at).toLocaleString()}</span>}
                             <GhostButton onClick={() => showCrash(c.name)}>View</GhostButton>
                         </Row>
