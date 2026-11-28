@@ -1396,18 +1396,26 @@ class ModManagerController extends Controller
         return response()->json(['data' => ['minecraft' => $minecraft] + $report]);
     }
 
-    /** POST /{server}/errors/acknowledge {undo?: bool}: hide what the Errors tab shows now, until it happens again */
+    /** POST /{server}/errors/acknowledge {undo?: bool, key?: string, crash?: string}: hide what the Errors tab shows now (or one group / crash report), until it happens again */
     public function errorsAcknowledge(Request $request, string $server): JsonResponse
     {
         $srv = $this->resolveServer($server);
         $this->authorizeEndpoint($request, $srv, __FUNCTION__);
 
+        $data = $request->validate([
+            'undo' => 'sometimes|boolean',
+            'key' => ['sometimes', 'nullable', 'string', 'regex:/^[0-9a-f]{40}$/'],
+            'crash' => ['sometimes', 'nullable', 'string', 'max:200', 'regex:/^[\w.\-]+$/'],
+        ]);
         $games = app(\ServerSuite\Services\GameDetectionService::class);
         $svc = app(\ServerSuite\Services\ErrorLogService::class);
-        if ($request->boolean('undo')) {
-            $svc->unacknowledge($srv->uuid);
+        $sources = $games->for($srv)->isMinecraft() ? null : $games->logSources($srv);
+        $key = $data['key'] ?? null;
+        $crash = $data['crash'] ?? null;
+        if (! empty($data['undo'])) {
+            $svc->unacknowledge($srv->uuid, $key, $crash, $sources);
         } else {
-            $svc->acknowledge($srv->uuid, $games->for($srv)->isMinecraft() ? null : $games->logSources($srv));
+            $svc->acknowledge($srv->uuid, $sources, $key, $crash);
         }
 
         return response()->json(['data' => ['ok' => true]]);

@@ -157,6 +157,61 @@ it('acknowledges what is listed now and shows only what happens after', function
     expect($this->svc->withAck('mc', $this->svc->report('mc', false))['ack'])->toBeNull();
 });
 
+it('acknowledges and un-acknowledges one error or crash report on its own', function () {
+    $err = fn (string $t, string $msg) => "[{$t} ERROR]: {$msg}\njava.lang.IllegalStateException: x\n";
+    $this->files->put('/logs/latest.log', $err('12:00:05', 'Boom A') . $err('12:00:06', 'Boom B'));
+    $this->files->put('/crash-reports/crash-1.txt', "---- Minecraft Crash Report ----\n");
+    $this->files->put('/crash-reports/crash-2.txt', "---- Minecraft Crash Report ----\n");
+    $this->files->mtimes['/crash-reports/crash-1.txt'] = now()->subHours(2)->toIso8601String();
+    $this->files->mtimes['/crash-reports/crash-2.txt'] = now()->subHour()->toIso8601String();
+    $state = fn () => (function ($r) {
+        return [
+            collect($r['groups'])->mapWithKeys(fn ($g) => [$g['message'] => $g['acknowledged']])->sortKeys()->all(),
+            collect($r['crashes'])->mapWithKeys(fn ($c) => [$c['name'] => $c['acknowledged']])->sortKeys()->all(),
+            $r['new_count'],
+        ];
+    })($this->svc->withAck('mc', $this->svc->report('mc', false)));
+    $keyOf = fn (string $msg) => collect($this->svc->report('mc', false)['groups'])->firstWhere('message', $msg)['key'];
+
+    $this->svc->acknowledge('mc', null, $keyOf('Boom A'));
+    expect($state())->toBe([['Boom A' => true, 'Boom B' => false], ['crash-1.txt' => false, 'crash-2.txt' => false], 3]);
+
+    $this->svc->acknowledge('mc', null, null, 'crash-2.txt');
+    expect($state())->toBe([['Boom A' => true, 'Boom B' => false], ['crash-1.txt' => false, 'crash-2.txt' => true], 2]);
+
+    // Acknowledge all, then bring one of each back.
+    $this->svc->acknowledge('mc');
+    expect($state()[2])->toBe(0);
+    $this->svc->unacknowledge('mc', $keyOf('Boom B'));
+    $this->svc->unacknowledge('mc', null, 'crash-1.txt');
+    expect($state())->toBe([['Boom A' => true, 'Boom B' => false], ['crash-1.txt' => false, 'crash-2.txt' => true], 2]);
+
+    // Undo the last ones: nothing acknowledged is left, so no ack block.
+    $this->svc->unacknowledge('mc', $keyOf('Boom A'));
+    $this->svc->unacknowledge('mc', null, 'crash-2.txt');
+    $r = $this->svc->withAck('mc', $this->svc->report('mc', false));
+    expect($r['ack'])->toBeNull()->and($r['new_count'])->toBe(4);
+});
+
+it('reads the first acknowledge format (crash reports by time) and keeps it when one is undone', function () {
+    $this->files->put('/logs/latest.log', "[12:00:05 ERROR]: Boom A\n");
+    $this->files->put('/crash-reports/crash-1.txt', "---- Minecraft Crash Report ----\n");
+    $this->files->put('/crash-reports/crash-2.txt', "---- Minecraft Crash Report ----\n");
+    $this->files->mtimes['/crash-reports/crash-1.txt'] = now()->subHours(2)->toIso8601String();
+    $this->files->mtimes['/crash-reports/crash-2.txt'] = now()->subHour()->toIso8601String();
+    \ServerSuite\Models\ModManagerSetting::forServer('mc')->forceFill(['errors_ack' => [
+        'at' => now()->subMinutes(90)->toIso8601String(), 'groups' => [],
+    ]])->save();
+
+    $crashes = fn () => collect($this->svc->withAck('mc', $this->svc->report('mc', false))['crashes'])->mapWithKeys(fn ($c) => [$c['name'] => $c['acknowledged']])->sortKeys()->all();
+    expect($crashes())->toBe(['crash-1.txt' => true, 'crash-2.txt' => false]);
+
+    $this->svc->acknowledge('mc', null, null, 'crash-2.txt');
+    expect($crashes())->toBe(['crash-1.txt' => true, 'crash-2.txt' => true]);
+    $this->svc->unacknowledge('mc', null, 'crash-1.txt');
+    expect($crashes())->toBe(['crash-1.txt' => false, 'crash-2.txt' => true]);
+});
+
 it('treats the same error in a new log after a restart as new', function () {
     $this->files->put('/logs/latest.log', "[12:00:05 ERROR]: Boom A\n");
     $this->svc->acknowledge('mc');
