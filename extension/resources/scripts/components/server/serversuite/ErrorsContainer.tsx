@@ -14,7 +14,7 @@ import styled from 'styled-components/macro';
  * BepInEx's. When plugins fail because Rust changed under Oxide/Carbon, a
  * notice says so instead of blaming them. Read through Wings (the
  * ErrorLogService); refreshes every 15 s while the tab is open.
- * Acknowledge hides what is listed now until it happens again (a group
+ * Acknowledge (one row, or all) hides an error until it happens again (a group
  * that repeats, a new log after a restart, a newer crash report).
  */
 
@@ -67,7 +67,7 @@ interface Group {
 interface Report {
     minecraft: boolean; found: boolean; size: number; partial: boolean; files: string[]; groups: Group[];
     crashes: { name: string; at: string | null; acknowledged?: boolean }[]; notice: { plugins: string[]; wipe_day: boolean } | null;
-    ack: { at: string } | null; new_count: number;
+    ack: { at: string | null } | null; new_count: number;
 }
 interface Crash { name: string; summary: string | null; suspects: (Culprit & { mod_name: string | null })[]; text: string }
 
@@ -105,9 +105,10 @@ export default () => {
         .then((res) => setCrash(res.data.data))
         .catch((e) => setError(e?.response?.data?.error || 'Could not open the crash report.'));
 
-    const acknowledge = (undo = false) => {
+    // No key/crash: everything listed now. With one: just that group or crash report.
+    const acknowledge = (undo = false, item: { key?: string; crash?: string } = {}) => {
         setAcking(true);
-        http.post(`${base}/acknowledge`, { undo })
+        http.post(`${base}/acknowledge`, { undo, ...item })
             .then(() => load(true))
             .catch((e) => setError(e?.response?.data?.error || e?.response?.data?.message || 'Could not acknowledge.'))
             .finally(() => setAcking(false));
@@ -140,21 +141,21 @@ export default () => {
                             <FontAwesomeIcon icon={busy ? faSpinner : faSync} spin={busy} /> Refresh
                         </GhostButton>
                         {!!r && r.new_count > 0 && (
-                            <GhostButton onClick={() => acknowledge()} disabled={acking} title="Hide these errors and crash reports until they happen again">
-                                <FontAwesomeIcon icon={acking ? faSpinner : faCheck} spin={acking} /> Acknowledge
+                            <GhostButton onClick={() => acknowledge()} disabled={acking} title="Hide every error and crash report listed now until it happens again">
+                                <FontAwesomeIcon icon={acking ? faSpinner : faCheck} spin={acking} /> Acknowledge all
                             </GhostButton>
                         )}
                     </span>
                 </div>
                 {r?.ack && (
                     <p className="text-xs text-neutral-500 mb-3 flex items-center gap-3 flex-wrap">
-                        <span>Acknowledged {new Date(r.ack.at).toLocaleString()}: {ackedCount} hidden until {ackedCount === 1 ? 'it happens' : 'they happen'} again.</span>
+                        <span>{ackedCount} acknowledged{r.ack.at ? ` (last Acknowledge all ${new Date(r.ack.at).toLocaleString()})` : ''}: hidden until {ackedCount === 1 ? 'it happens' : 'they happen'} again.</span>
                         {ackedCount > 0 && (
                             <label className="flex items-center gap-1 text-neutral-400">
                                 <input type="checkbox" checked={showAcked} onChange={(e) => setShowAcked(e.target.checked)} /> Show them
                             </label>
                         )}
-                        <button className="underline text-neutral-400" onClick={() => acknowledge(true)} disabled={acking}>Undo</button>
+                        <button className="underline text-neutral-400" onClick={() => acknowledge(true)} disabled={acking} title="Show every acknowledged error and crash report as new again">Undo all</button>
                     </p>
                 )}
                 {error && r && <p className="text-sm text-red-400 mb-3">{error}</p>}
@@ -185,6 +186,14 @@ export default () => {
                                 {g.mod?.mod_name && <Chip title={g.culprit?.evidence}>{g.culprit?.strength === 'weak' ? 'maybe ' : ''}{g.mod.mod_name}</Chip>}
                                 {g.framework && <span className="text-xs text-neutral-500" title="A method, field or type the plugin uses is missing: usually Rust updated before Oxide/Carbon.">probably not the plugin&apos;s fault</span>}
                                 {g.acknowledged && <span className="text-xs text-neutral-500">acknowledged</span>}
+                                <button
+                                    className="text-xs underline text-neutral-400"
+                                    disabled={acking}
+                                    onClick={(e) => { e.stopPropagation(); acknowledge(!!g.acknowledged, { key: g.key }); }}
+                                    title={g.acknowledged ? 'Show this error as new again' : 'Hide this error until it happens again'}
+                                >
+                                    {g.acknowledged ? 'Undo' : 'Acknowledge'}
+                                </button>
                                 {(g.first || g.last) && <span className="text-xs text-neutral-500 font-mono">{g.count > 1 ? `${g.first} – ${g.last}` : g.last}</span>}
                             </span>
                         </Head>
@@ -207,6 +216,14 @@ export default () => {
                             <span className="text-sm text-neutral-200 flex-1 font-mono break-all">{c.name}</span>
                             {c.acknowledged && <span className="text-xs text-neutral-500">acknowledged</span>}
                             {c.at && <span className="text-xs text-neutral-500">{new Date(c.at).toLocaleString()}</span>}
+                            <button
+                                className="text-xs underline text-neutral-400"
+                                disabled={acking}
+                                onClick={() => acknowledge(!!c.acknowledged, { crash: c.name })}
+                                title={c.acknowledged ? 'Show this crash report as new again' : 'Hide this crash report'}
+                            >
+                                {c.acknowledged ? 'Undo' : 'Acknowledge'}
+                            </button>
                             <GhostButton onClick={() => showCrash(c.name)}>View</GhostButton>
                         </Row>
                     ))}
